@@ -9,9 +9,7 @@
 //! can hold a registrar without naming its concrete type.
 
 use waft_embedder::{Matrix4, Offset, Rect, Size, TextDirection, TextPosition, TextRange};
-use waft_foundation::{
-    App, ChangeNotifier, Handle, HandleId, Listener, ListenableHandle, Ref,
-};
+use waft_foundation::{App, ChangeNotifier, Handle, HandleId, ListenableHandle, Listener, Ref};
 
 use crate::layer::LayerLink;
 use crate::object::AnyRenderObject;
@@ -145,18 +143,15 @@ pub struct AnySelectable {
     vtable: &'static SelectableVTable,
 }
 
+/// The erased `pushHandleLayers`: the object, its two links, and the app whose paint it marks.
+type PushHandleLayers = fn(&mut App, HandleId, Option<Ref<LayerLink>>, Option<Ref<LayerLink>>);
+
 struct SelectableVTable {
     selection_geometry: fn(&App, HandleId) -> SelectionGeometry,
-    push_handle_layers: fn(
-        &mut App,
-        HandleId,
-        Option<Ref<LayerLink>>,
-        Option<Ref<LayerLink>>,
-    ),
+    push_handle_layers: PushHandleLayers,
     selected_content: fn(&App, HandleId) -> Option<SelectedContent>,
     selection: fn(&App, HandleId) -> Option<SelectedContentRange>,
-    dispatch_selection_event:
-        fn(&mut App, HandleId, &SelectionEvent) -> SelectionResult,
+    dispatch_selection_event: fn(&mut App, HandleId, &SelectionEvent) -> SelectionResult,
     content_length: fn(&App, HandleId) -> usize,
     get_transform_to: fn(&App, HandleId, Option<AnyRenderObject>) -> Matrix4,
     size: fn(&mut App, HandleId) -> Size,
@@ -177,9 +172,7 @@ impl SelectableVTable {
                 A::dispatch_selection_event(resolve(id), app, event)
             },
             content_length: |app, id| A::content_length(resolve(id), app),
-            get_transform_to: |app, id, ancestor| {
-                A::get_transform_to(resolve(id), app, ancestor)
-            },
+            get_transform_to: |app, id, ancestor| A::get_transform_to(resolve(id), app, ancestor),
             size: |app, id| A::size(resolve(id), app),
             bounding_boxes: |app, id| A::bounding_boxes(resolve(id), app),
             dispose_selectable: |app, id| A::dispose_selectable(resolve(id), app),
@@ -259,7 +252,9 @@ impl AnySelectable {
 
 impl std::fmt::Debug for AnySelectable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AnySelectable").field("id", &self.id).finish()
+        f.debug_struct("AnySelectable")
+            .field("id", &self.id)
+            .finish()
     }
 }
 
@@ -300,11 +295,7 @@ pub trait SelectionRegistrant: Selectable {
     }
 
     /// Dart `SelectionRegistrant.registrar =`.
-    fn set_registrar(
-        self: Handle<Self>,
-        app: &mut App,
-        value: Option<AnySelectionRegistrar>,
-    ) {
+    fn set_registrar(self: Handle<Self>, app: &mut App, value: Option<AnySelectionRegistrar>) {
         if value == self.registrar(app) {
             return;
         }
@@ -346,11 +337,11 @@ pub trait SelectionRegistrant: Selectable {
 
     /// Removes this selectable from its registrar without clearing the field.
     fn remove_selection_registrar_subscription(self: Handle<Self>, app: &mut App) {
-        if let Some(registrar) = self.registrar(app) {
-            if self.selection_registrant_data(app).subscribed {
-                registrar.remove(app, self.as_selectable());
-                self.selection_registrant_data_mut(app).subscribed = false;
-            }
+        if let Some(registrar) = self.registrar(app)
+            && self.selection_registrant_data(app).subscribed
+        {
+            registrar.remove(app, self.as_selectable());
+            self.selection_registrant_data_mut(app).subscribed = false;
         }
     }
 
@@ -488,8 +479,8 @@ impl SelectionGeometry {
         has_content: Option<bool>,
     ) -> SelectionGeometry {
         SelectionGeometry {
-            start_selection_point: start_selection_point.or(self.start_selection_point.clone()),
-            end_selection_point: end_selection_point.or(self.end_selection_point.clone()),
+            start_selection_point: start_selection_point.or(self.start_selection_point),
+            end_selection_point: end_selection_point.or(self.end_selection_point),
             selection_rects: selection_rects.unwrap_or_else(|| self.selection_rects.clone()),
             status: status.unwrap_or(self.status),
             has_content: has_content.unwrap_or(self.has_content),

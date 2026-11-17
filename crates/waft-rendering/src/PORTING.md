@@ -159,9 +159,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## paragraph.rs → paragraph.dart
 
-- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one, and has no selection registrar or `selectionColor`.
-  Reason: platform — the font collection is explicit (painting's `binding.rs`), and selection waits on `selection.dart`.
-  Affect: text in a `RichText` cannot be selected.
+- Change: `RenderParagraph` takes an optional `FontCollection` handle, falling back to `PaintingBinding`'s app-wide one.
+  Reason: platform — the font collection is explicit (painting's `binding.rs`).
+  Affect: `RichText` may name the collection it shapes against; otherwise it uses the app's.
 
 - Change: `TextOverflow::Fade` clips like `Clip`.
   Reason: platform — the fade is a gradient shader, and gradients are deferred.
@@ -261,6 +261,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a subclass instance survives one hop (parent's `layout` or `layout_child` → the child's stored constraints → a `LayoutBuilder`'s builder); a render object that hands its own `constraints()` on to its child passes the plain value, where Dart passes the subclass object along. Nothing in Flutter's scaffold relies on more than one hop.
 
 ## Deferred
+- `paragraph_test.dart`'s "paints selection highlights outside fade layer and handles after text": Waft's `TextOverflow::Fade` clips without a shader, so there is no fade layer or `debugHasOverflowShader` to test. Trigger: the fade overflow shader.
+- `paragraph_test.dart`'s "can handle select all when contains widget span": `WidgetSpan` does not yet register its child with the paragraph's selection registrar. Trigger: widget-span selection in `Text`.
 
 - box.rs: `AnyBoxConstraints`'s `Hash` (Dart's subclasses override `hashCode`). Trigger: the first map or set keyed by one.
 - `RenderImage`'s `color` / `colorBlendMode` and `invertColors`. Trigger: painting's colour filters.

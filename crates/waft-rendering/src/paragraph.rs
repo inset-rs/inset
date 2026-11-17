@@ -8,17 +8,18 @@ use std::fmt;
 use std::rc::Rc;
 
 use waft_embedder::{
-    BoxHeightStyle, BoxWidthStyle, ClipOp, FontCollection, Matrix4, Offset, PlaceholderAlignment,
-    Rect, Size, TextAlign, TextBaseline, TextBox, TextDirection, TextHeightBehavior, TextPosition,
-    TextRange, TextSelection,
+    BoxHeightStyle, BoxWidthStyle, ClipOp, Color, FontCollection, Matrix4, Offset, Paint,
+    PlaceholderAlignment, Rect, Size, TextAffinity, TextAlign, TextBaseline, TextBox,
+    TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection,
 };
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Ref};
 use waft_painting::{
     ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, PlaceholderSpan,
     RenderComparison, TextOverflow, TextPainter, TextScaler, TextWidthBasis,
 };
 
 use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
+use crate::layer::{ContainerLayer, LayerLink, LeaderLayer};
 use crate::layout_helper::{ChildBaselineGetter, ChildLayoutHelper, ChildLayouter};
 use crate::object::{
     AnyRenderObject, Constraints, ContainerParentData, ContainerParentDataMixin,
@@ -27,7 +28,15 @@ use crate::object::{
 };
 use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
+use crate::selection::{
+    AnySelectable, AnySelectionRegistrar, Selectable, SelectedContent, SelectedContentRange,
+    SelectionEvent, SelectionExtendDirection, SelectionGeometry, SelectionHandler, SelectionPoint,
+    SelectionRegistrant, SelectionRegistrantData, SelectionResult, SelectionStatus, SelectionUtils,
+    TextBoundaryRecord, TextGranularity, TextSelectionHandleType,
+};
+use crate::text_boundary::WordBoundary;
 use crate::{RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin};
+use waft_services::{CharacterBoundary, DocumentBoundary, ParagraphBoundary, TextBoundary};
 
 const K_ELLIPSIS: &str = "\u{2026}";
 
@@ -346,6 +355,11 @@ pub struct RenderParagraph {
     // restored to the original values before final layout and painting.
     placeholder_dimensions: Option<Vec<PlaceholderDimensions>>,
     system_fonts: RelayoutWhenSystemFontsChangeData,
+    selection_color: Option<Color>,
+    // Should be `None` if selection is not enabled, i.e. `registrar` is `None`. The paragraph
+    // splits on [`PLACEHOLDER_CODE_UNIT`] and keeps each fragment here.
+    last_selectable_fragments: Option<Vec<Ref<SelectableFragment>>>,
+    registrar: Option<AnySelectionRegistrar>,
 }
 
 impl RenderParagraph {
@@ -375,6 +389,9 @@ impl RenderParagraph {
                 needs_clipping: false,
                 placeholder_dimensions: None,
                 system_fonts: RelayoutWhenSystemFontsChangeData::new(),
+                selection_color: None,
+                last_selectable_fragments: None,
+                registrar: None,
             },
         )
     }
@@ -427,6 +444,9 @@ impl RenderParagraph {
             RenderComparison::Layout => {
                 self.painter_mut(app).set_text(Some(value));
                 self.mark_needs_layout(app);
+                self.remove_selection_registrar_subscription(app);
+                self.dispose_selectable_fragments(app);
+                self.update_selection_registrar_subscription(app);
             }
         }
     }
@@ -739,6 +759,214 @@ impl RenderParagraph {
         self.painter(app).get_word_boundary(position)
     }
 
+    /// The ongoing selections in this paragraph.
+    ///
+    /// Selections in placeholder spans are not included; those are handled by their own
+    /// subtrees.
+    pub fn selections(self: RenderHandle<Self>, app: &App) -> Vec<TextSelection> {
+        let Some(fragments) = &self.get(app).last_selectable_fragments else {
+            return Vec::new();
+        };
+        fragments
+            .iter()
+            .filter_map(|fragment| {
+                let this = app.get(fragment);
+                Some(TextSelection::new(
+                    this.text_selection_start?.offset,
+                    this.text_selection_end?.offset,
+                ))
+            })
+            .collect()
+    }
+
+    /// The [`SelectionRegistrar`](crate::SelectionRegistrar) this paragraph is, or will be,
+    /// registered to.
+    pub fn registrar(self: RenderHandle<Self>, app: &App) -> Option<AnySelectionRegistrar> {
+        self.get(app).registrar
+    }
+
+    /// Sets [`registrar`](Self::registrar).
+    pub fn set_registrar(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<AnySelectionRegistrar>,
+    ) {
+        if value == self.get(app).registrar {
+            return;
+        }
+        self.remove_selection_registrar_subscription(app);
+        self.dispose_selectable_fragments(app);
+        self.get_mut(app).registrar = value;
+        self.update_selection_registrar_subscription(app);
+    }
+
+    fn update_selection_registrar_subscription(self: RenderHandle<Self>, app: &mut App) {
+        let Some(registrar) = self.get(app).registrar else {
+            return;
+        };
+        if self.get(app).last_selectable_fragments.is_none() {
+            let fragments = self.get_selectable_fragments(app);
+            self.get_mut(app).last_selectable_fragments = Some(fragments);
+        }
+        let fragments = self
+            .get(app)
+            .last_selectable_fragments
+            .clone()
+            .expect("assigned just now");
+        for fragment in &fragments {
+            registrar.add(app, fragment.as_selectable());
+        }
+        if !fragments.is_empty() {
+            self.as_object().mark_needs_compositing_bits_update(app);
+        }
+    }
+
+    fn remove_selection_registrar_subscription(self: RenderHandle<Self>, app: &mut App) {
+        let (Some(registrar), Some(fragments)) = (
+            self.get(app).registrar,
+            self.get(app).last_selectable_fragments.clone(),
+        ) else {
+            return;
+        };
+        for fragment in &fragments {
+            registrar.remove(app, fragment.as_selectable());
+        }
+    }
+
+    fn get_selectable_fragments(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> Vec<Ref<SelectableFragment>> {
+        let plain_text = self.text(app).to_plain_text(false, true);
+        let code_units: Vec<u16> = plain_text.encode_utf16().collect();
+        let mut result = Vec::new();
+        let mut start = 0usize;
+        while start < code_units.len() {
+            let mut end = code_units[start..]
+                .iter()
+                .position(|unit| *unit == waft_painting::PLACEHOLDER_CODE_UNIT)
+                .map_or(-1, |offset| (start + offset) as i32);
+            if start as i32 != end {
+                if end == -1 {
+                    end = code_units.len() as i32;
+                }
+                result.push(app.create(SelectableFragment::new(
+                    self,
+                    TextRange::new(start as i32, end),
+                    plain_text.clone(),
+                )));
+                start = end as usize;
+            }
+            start += 1;
+        }
+        result
+    }
+
+    /// Whether `selectable` was created by this paragraph.
+    pub fn selectable_belongs_to_paragraph(
+        self: RenderHandle<Self>,
+        app: &App,
+        selectable: AnySelectable,
+    ) -> bool {
+        self.get(app)
+            .last_selectable_fragments
+            .as_ref()
+            .is_some_and(|fragments| {
+                fragments
+                    .iter()
+                    .any(|f| f.as_selectable().id() == selectable.id())
+            })
+    }
+
+    fn dispose_selectable_fragments(self: RenderHandle<Self>, app: &mut App) {
+        let Some(fragments) = self.get_mut(app).last_selectable_fragments.take() else {
+            return;
+        };
+        for fragment in fragments {
+            fragment.dispose_selectable(app);
+        }
+    }
+
+    /// The color to use when painting the selection.
+    ///
+    /// Ignored if the text is not selectable (for example if [`registrar`](Self::registrar) is
+    /// `None`).
+    pub fn selection_color(self: RenderHandle<Self>, app: &App) -> Option<Color> {
+        self.get(app).selection_color
+    }
+
+    /// Sets [`selection_color`](Self::selection_color).
+    pub fn set_selection_color(self: RenderHandle<Self>, app: &mut App, value: Option<Color>) {
+        if self.get(app).selection_color == value {
+            return;
+        }
+        self.get_mut(app).selection_color = value;
+        let has_selection = self
+            .get(app)
+            .last_selectable_fragments
+            .as_ref()
+            .is_some_and(|fragments| {
+                fragments
+                    .iter()
+                    .any(|fragment| app.get(fragment).selection_geometry.has_selection())
+            });
+        if has_selection {
+            self.mark_needs_paint(app);
+        }
+    }
+
+    fn get_offset_for_position(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> Offset {
+        self.get_offset_for_caret(app, position, Rect::ZERO)
+            + Offset::new(0.0, self.get_full_height_for_caret(app, position))
+    }
+
+    /// Returns a [`TextSelection`] containing the line of the given [`TextPosition`].
+    pub fn get_line_at_offset(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextSelection {
+        let constraints = self.constraints(app);
+        self.layout_text_with_constraints(app, constraints);
+        let line = self.painter(app).get_line_boundary(position);
+        TextSelection::new(line.start, line.end)
+    }
+
+    /// Returns the [`TextPosition`] above the given offset into the text.
+    pub fn get_text_position_above(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextPosition {
+        let line_height = self.preferred_line_height(app);
+        self.get_text_position_vertical(app, position, -0.5 * line_height)
+    }
+
+    /// Returns the [`TextPosition`] below the given offset into the text.
+    pub fn get_text_position_below(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextPosition {
+        let line_height = self.preferred_line_height(app);
+        self.get_text_position_vertical(app, position, 1.5 * line_height)
+    }
+
+    fn get_text_position_vertical(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        position: TextPosition,
+        vertical_offset: f64,
+    ) -> TextPosition {
+        let (painter, fonts) = self.painter_with_fonts(app);
+        let caret_offset = painter.get_offset_for_caret(fonts, position, Rect::ZERO);
+        painter.get_position_for_offset(caret_offset.translate(0.0, vertical_offset))
+    }
+
     /// Returns the size of the text as laid out.
     ///
     /// This can differ from [`size`](RenderBox::size) if the text overflowed or if the
@@ -833,7 +1061,31 @@ impl RenderObject for RenderParagraph {
         ContainerRenderObjectMixin::redepth_children(self, app)
     }
 
+    fn always_needs_compositing(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app)
+            .last_selectable_fragments
+            .as_ref()
+            .is_some_and(|fragments| !fragments.is_empty())
+    }
+
+    fn dispose(self: RenderHandle<Self>, app: &mut App) {
+        self.remove_selection_registrar_subscription(app);
+        self.dispose_selectable_fragments(app);
+        self.painter_mut(app).dispose();
+        if let Some(mut intrinsics) = self.get_mut(app).text_intrinsics.take() {
+            intrinsics.dispose();
+        }
+        crate::object::RenderObjectBase::dispose(self, app);
+    }
+
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        let fragments = self.get(app).last_selectable_fragments.clone();
+        if let Some(fragments) = fragments {
+            for fragment in fragments {
+                app.get_mut(&fragment).cached_rect = None;
+                app.get_mut(&fragment).cached_bounding_boxes = None;
+            }
+        }
         let constraints = self.constraints(app);
         let placeholder_dimensions = self.layout_inline_children(
             app,
@@ -894,6 +1146,29 @@ impl RenderObject for RenderParagraph {
             let bounds = offset & self.size(app);
             context.canvas().save();
             context.canvas().clip_rect(bounds, ClipOp::Intersect, true);
+        }
+        let has_fragments = self
+            .get(app)
+            .last_selectable_fragments
+            .as_ref()
+            .is_some_and(|fragments| !fragments.is_empty());
+        if has_fragments {
+            if needs_clipping {
+                context.canvas().save();
+                let bounds = offset & self.size(app);
+                context.canvas().clip_rect(bounds, ClipOp::Intersect, true);
+            }
+            let fragments = self
+                .get(app)
+                .last_selectable_fragments
+                .clone()
+                .unwrap_or_default();
+            for fragment in fragments {
+                fragment.paint_selection(app, context, offset);
+            }
+            if needs_clipping {
+                context.canvas().restore();
+            }
         }
         let (painter, fonts) = self.painter_with_fonts(app);
         painter.paint(fonts, context.canvas(), offset);
@@ -1051,6 +1326,2472 @@ impl RenderBox for RenderParagraph {
             }
             None => self.hit_test_inline_children(app, result, position),
         }
+    }
+}
+
+/// A continuous, selectable piece of paragraph.
+///
+/// Placeholder spans are selected by their own subtrees, so a selection in a paragraph cannot
+/// continue across one. The paragraph splits itself on placeholders and keeps one fragment per
+/// run of text, each selectable separately.
+struct SelectableFragment {
+    change_notifier: ChangeNotifierData,
+    selection_registrant: SelectionRegistrantData,
+    range: TextRange,
+    paragraph: RenderHandle<RenderParagraph>,
+    full_text: String,
+    text_selection_start: Option<TextPosition>,
+    text_selection_end: Option<TextPosition>,
+    selectable_contains_origin_text_boundary: bool,
+    start_handle_layer_link: Option<Ref<LayerLink>>,
+    end_handle_layer_link: Option<Ref<LayerLink>>,
+    selection_geometry: SelectionGeometry,
+    cached_bounding_boxes: Option<Vec<Rect>>,
+    cached_rect: Option<Rect>,
+}
+
+/// Which text boundary a selection-edge update looks up at a position.
+#[derive(Clone, Copy)]
+enum BoundaryAtPosition {
+    Word,
+    Paragraph,
+}
+
+/// Which text boundary a selection-edge update looks up in a whole paragraph's text.
+#[derive(Clone, Copy)]
+enum BoundaryInText {
+    Paragraph,
+}
+
+#[allow(
+    clippy::unnecessary_unwrap,
+    clippy::collapsible_if,
+    clippy::too_many_arguments
+)]
+impl SelectableFragment {
+    fn new(
+        paragraph: RenderHandle<RenderParagraph>,
+        range: TextRange,
+        full_text: String,
+    ) -> SelectableFragment {
+        debug_assert!(range.is_valid() && !range.is_collapsed() && range.is_normalized());
+        SelectableFragment {
+            change_notifier: ChangeNotifierData::new(),
+            selection_registrant: SelectionRegistrantData::new(),
+            range,
+            paragraph,
+            full_text,
+            text_selection_start: None,
+            text_selection_end: None,
+            selectable_contains_origin_text_boundary: false,
+            start_handle_layer_link: None,
+            end_handle_layer_link: None,
+            selection_geometry: SelectionGeometry::new(
+                None,
+                None,
+                Vec::new(),
+                SelectionStatus::None,
+                true,
+            ),
+            cached_bounding_boxes: None,
+            cached_rect: None,
+        }
+    }
+
+    fn update_selection_geometry(self: Handle<Self>, app: &mut App) {
+        let new_value = self.get_selection_geometry(app);
+        if app.get(self).selection_geometry == new_value {
+            return;
+        }
+        app.get_mut(self).selection_geometry = new_value;
+        self.notify_listeners(app);
+    }
+
+    fn get_selection_geometry(self: Handle<Self>, app: &mut App) -> SelectionGeometry {
+        let (Some(selection_start), Some(selection_end)) = (
+            app.get(self).text_selection_start,
+            app.get(self).text_selection_end,
+        ) else {
+            return SelectionGeometry::new(None, None, Vec::new(), SelectionStatus::None, true);
+        };
+        let paragraph = app.get(self).paragraph;
+        let is_reversed = selection_start.offset > selection_end.offset;
+        let start_offset_in_paragraph_coordinates =
+            paragraph.get_offset_for_position(app, selection_start);
+        let end_offset_in_paragraph_coordinates = if selection_start.offset == selection_end.offset
+        {
+            start_offset_in_paragraph_coordinates
+        } else {
+            paragraph.get_offset_for_position(app, selection_end)
+        };
+        let flip_handles = is_reversed != (paragraph.text_direction(app) == TextDirection::Rtl);
+        let selection = TextSelection::new(selection_start.offset, selection_end.offset);
+        let selection_rects: Vec<Rect> = paragraph
+            .get_boxes_for_selection(app, selection, BoxHeightStyle::Tight, BoxWidthStyle::Tight)
+            .into_iter()
+            .map(|text_box| text_box.to_rect())
+            .collect();
+        let selection_collapsed = selection_start.offset == selection_end.offset;
+        let (start_selection_handle_type, end_selection_handle_type) = if selection_collapsed {
+            (
+                TextSelectionHandleType::Collapsed,
+                TextSelectionHandleType::Collapsed,
+            )
+        } else if flip_handles {
+            (
+                TextSelectionHandleType::Right,
+                TextSelectionHandleType::Left,
+            )
+        } else {
+            (
+                TextSelectionHandleType::Left,
+                TextSelectionHandleType::Right,
+            )
+        };
+        let line_height = paragraph.preferred_line_height(app);
+        SelectionGeometry::new(
+            Some(SelectionPoint::new(
+                start_offset_in_paragraph_coordinates,
+                line_height,
+                start_selection_handle_type,
+            )),
+            Some(SelectionPoint::new(
+                end_offset_in_paragraph_coordinates,
+                line_height,
+                end_selection_handle_type,
+            )),
+            selection_rects,
+            if selection_collapsed {
+                SelectionStatus::Collapsed
+            } else {
+                SelectionStatus::Uncollapsed
+            },
+            true,
+        )
+    }
+
+    fn did_change_selection(self: Handle<Self>, app: &mut App) {
+        app.get(self).paragraph.mark_needs_paint(app);
+        self.update_selection_geometry(app);
+    }
+
+    fn selected_content_inner(self: Handle<Self>, app: &App) -> Option<SelectedContent> {
+        let this = app.get(self);
+        let start = this.text_selection_start?;
+        let end = this.text_selection_end?;
+        let range = TextRange::new(start.offset.min(end.offset), start.offset.max(end.offset));
+        Some(SelectedContent::new(range.text_inside(&this.full_text)))
+    }
+
+    fn selection_inner(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
+        let this = app.get(self);
+        Some(SelectedContentRange::new(
+            this.text_selection_start?.offset,
+            this.text_selection_end?.offset,
+        ))
+    }
+
+    fn set_selection_position(
+        self: Handle<Self>,
+        app: &mut App,
+        position: Option<TextPosition>,
+        is_end: bool,
+    ) {
+        if is_end {
+            app.get_mut(self).text_selection_end = position;
+        } else {
+            app.get_mut(self).text_selection_start = position;
+        }
+    }
+
+    fn handle_clear_selection(self: Handle<Self>, app: &mut App) -> SelectionResult {
+        let this = app.get_mut(self);
+        this.text_selection_start = None;
+        this.text_selection_end = None;
+        this.selectable_contains_origin_text_boundary = false;
+        SelectionResult::None
+    }
+
+    fn handle_select_all(self: Handle<Self>, app: &mut App) -> SelectionResult {
+        let range = app.get(self).range;
+        let this = app.get_mut(self);
+        this.text_selection_start = Some(TextPosition::new(range.start));
+        this.text_selection_end = Some(TextPosition::with_affinity(
+            range.end,
+            TextAffinity::Upstream,
+        ));
+        SelectionResult::None
+    }
+
+    fn handle_select_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        text_boundary: TextBoundaryRecord,
+    ) -> SelectionResult {
+        let range = app.get(self).range;
+        if text_boundary.boundary_start.offset < range.start
+            && text_boundary.boundary_end.offset <= range.start
+        {
+            return SelectionResult::Previous;
+        } else if text_boundary.boundary_start.offset >= range.end
+            && text_boundary.boundary_end.offset > range.end
+        {
+            return SelectionResult::Next;
+        }
+        debug_assert!(
+            text_boundary.boundary_start.offset >= range.start
+                && text_boundary.boundary_end.offset <= range.end
+        );
+        let this = app.get_mut(self);
+        this.text_selection_start = Some(text_boundary.boundary_start);
+        this.text_selection_end = Some(text_boundary.boundary_end);
+        this.selectable_contains_origin_text_boundary = true;
+        SelectionResult::End
+    }
+
+    fn intersect(a: TextRange, b: TextRange) -> Option<TextRange> {
+        debug_assert!(a.is_normalized());
+        debug_assert!(b.is_normalized());
+        let start_max = a.start.max(b.start);
+        let end_min = a.end.min(b.end);
+        (start_max <= end_min).then(|| TextRange::new(start_max, end_min))
+    }
+
+    fn handle_select_multi_fragment_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        text_boundary: TextBoundaryRecord,
+    ) -> SelectionResult {
+        let range = app.get(self).range;
+        if text_boundary.boundary_start.offset < range.start
+            && text_boundary.boundary_end.offset <= range.start
+        {
+            return SelectionResult::Previous;
+        } else if text_boundary.boundary_start.offset >= range.end
+            && text_boundary.boundary_end.offset > range.end
+        {
+            return SelectionResult::Next;
+        }
+        let boundary_as_range = TextRange::new(
+            text_boundary.boundary_start.offset,
+            text_boundary.boundary_end.offset,
+        );
+        let Some(intersect_range) = Self::intersect(range, boundary_as_range) else {
+            return SelectionResult::None;
+        };
+        let this = app.get_mut(self);
+        this.text_selection_start = Some(TextPosition::new(intersect_range.start));
+        this.text_selection_end = Some(TextPosition::new(intersect_range.end));
+        this.selectable_contains_origin_text_boundary = true;
+        if range.end < text_boundary.boundary_end.offset {
+            return SelectionResult::Next;
+        }
+        SelectionResult::End
+    }
+
+    fn adjust_text_boundary_at_position(
+        text_boundary: TextRange,
+        position: TextPosition,
+    ) -> TextBoundaryRecord {
+        if position.offset > text_boundary.end {
+            let at = TextPosition::new(position.offset);
+            TextBoundaryRecord::new(at, at)
+        } else {
+            TextBoundaryRecord::new(
+                TextPosition::new(text_boundary.start),
+                TextPosition::with_affinity(text_boundary.end, TextAffinity::Upstream),
+            )
+        }
+    }
+
+    fn handle_select_word(
+        self: Handle<Self>,
+        app: &mut App,
+        global_position: Offset,
+    ) -> SelectionResult {
+        let Some(local) = self.local_position(app, global_position) else {
+            return SelectionResult::None;
+        };
+        let paragraph = app.get(self).paragraph;
+        let position = paragraph.get_position_for_offset(app, local);
+        if self.position_is_within_current_selection(app, position)
+            && app.get(self).text_selection_start != app.get(self).text_selection_end
+        {
+            return SelectionResult::End;
+        }
+        let word_boundary = self.get_word_boundary_at_position(app, position);
+        self.handle_select_text_boundary(app, word_boundary)
+    }
+
+    fn get_word_boundary_at_position(
+        self: Handle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextBoundaryRecord {
+        let word = app.get(self).paragraph.get_word_boundary(app, position);
+        debug_assert!(word.is_normalized());
+        Self::adjust_text_boundary_at_position(word, position)
+    }
+
+    fn handle_select_paragraph(
+        self: Handle<Self>,
+        app: &mut App,
+        global_position: Offset,
+    ) -> SelectionResult {
+        let Some(local_position) = self.local_position(app, global_position) else {
+            return SelectionResult::None;
+        };
+        let paragraph = app.get(self).paragraph;
+        let position = paragraph.get_position_for_offset(app, local_position);
+        let full_text = app.get(self).full_text.clone();
+        let paragraph_boundary = self.get_paragraph_boundary_at_position(app, position, &full_text);
+        self.handle_select_multi_fragment_text_boundary(app, paragraph_boundary)
+    }
+
+    fn get_position_in_paragraph(
+        self: Handle<Self>,
+        app: &mut App,
+        target_paragraph: RenderHandle<RenderParagraph>,
+    ) -> TextPosition {
+        let paragraph = app.get(self).paragraph;
+        let transform = paragraph
+            .as_object()
+            .get_transform_to(app, Some(target_paragraph.as_object()));
+        let local_center = paragraph.as_object().paint_bounds(app).center_left();
+        let local_pos = waft_painting::transform_point(&transform, local_center);
+        target_paragraph.get_position_for_offset(app, local_pos)
+    }
+
+    fn get_paragraph_boundary_at_position(
+        self: Handle<Self>,
+        app: &mut App,
+        position: TextPosition,
+        text: &str,
+    ) -> TextBoundaryRecord {
+        let paragraph_boundary = ParagraphBoundary::new(text);
+        let paragraph_start = paragraph_boundary
+            .get_leading_text_boundary_at(
+                app,
+                if position.offset == text.encode_utf16().count() as i32
+                    || position.affinity == TextAffinity::Upstream
+                {
+                    position.offset - 1
+                } else {
+                    position.offset
+                },
+            )
+            .unwrap_or(0);
+        let paragraph_end = paragraph_boundary
+            .get_trailing_text_boundary_at(app, position.offset)
+            .unwrap_or(text.encode_utf16().count() as i32);
+        let paragraph_range = TextRange::new(paragraph_start, paragraph_end);
+        debug_assert!(paragraph_range.is_normalized());
+        Self::adjust_text_boundary_at_position(paragraph_range, position)
+    }
+
+    fn get_clamped_paragraph_boundary_at_position(
+        self: Handle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextBoundaryRecord {
+        let full_text = app.get(self).full_text.clone();
+        let range = app.get(self).range;
+        let paragraph_boundary = ParagraphBoundary::new(&full_text);
+        let mut paragraph_start = paragraph_boundary
+            .get_leading_text_boundary_at(
+                app,
+                if position.offset == full_text.encode_utf16().count() as i32
+                    || position.affinity == TextAffinity::Upstream
+                {
+                    position.offset - 1
+                } else {
+                    position.offset
+                },
+            )
+            .unwrap_or(0);
+        let mut paragraph_end = paragraph_boundary
+            .get_trailing_text_boundary_at(app, position.offset)
+            .unwrap_or(full_text.encode_utf16().count() as i32);
+        paragraph_start = if paragraph_start < range.start {
+            range.start
+        } else if paragraph_start > range.end {
+            range.end
+        } else {
+            paragraph_start
+        };
+        paragraph_end = if paragraph_end > range.end {
+            range.end
+        } else if paragraph_end < range.start {
+            range.start
+        } else {
+            paragraph_end
+        };
+        let paragraph_range = TextRange::new(paragraph_start, paragraph_end);
+        debug_assert!(paragraph_range.is_normalized());
+        Self::adjust_text_boundary_at_position(paragraph_range, position)
+    }
+
+    fn closest_text_boundary(
+        text_boundary: TextBoundaryRecord,
+        position: TextPosition,
+    ) -> TextPosition {
+        let difference_a = (position.offset - text_boundary.boundary_start.offset).abs();
+        let difference_b = (position.offset - text_boundary.boundary_end.offset).abs();
+        if difference_a < difference_b {
+            text_boundary.boundary_start
+        } else {
+            text_boundary.boundary_end
+        }
+    }
+
+    fn is_placeholder(self: Handle<Self>, app: &App) -> bool {
+        let mut current = app.get(self).paragraph.as_object().parent(app);
+        while let Some(object) = current {
+            if object.downcast::<RenderParagraph>(app).is_some() {
+                return true;
+            }
+            current = object.parent(app);
+        }
+        false
+    }
+
+    fn get_origin_paragraph(self: Handle<Self>, app: &App) -> RenderHandle<RenderParagraph> {
+        debug_assert!(app.get(self).selectable_contains_origin_text_boundary);
+        let paragraph = app.get(self).paragraph;
+        let mut current = paragraph.as_object().parent(app);
+        let mut origin_paragraph = None;
+        while let Some(object) = current {
+            if let Some(candidate) = object.downcast::<RenderParagraph>(app) {
+                if let Some(fragments) = &app.get(candidate.handle()).last_selectable_fragments {
+                    let mut paragraph_contains_origin = false;
+                    for fragment in fragments {
+                        if app.get(fragment).selectable_contains_origin_text_boundary {
+                            paragraph_contains_origin = true;
+                            origin_paragraph = Some(candidate);
+                            break;
+                        }
+                    }
+                    if !paragraph_contains_origin {
+                        return origin_paragraph.unwrap_or(paragraph);
+                    }
+                }
+            }
+            current = object.parent(app);
+        }
+        origin_paragraph.unwrap_or(paragraph)
+    }
+
+    fn get_paragraph_containing_position(
+        self: Handle<Self>,
+        app: &App,
+        global_position: Offset,
+    ) -> Option<(RenderHandle<RenderParagraph>, Offset)> {
+        let mut current = Some(app.get(self).paragraph.as_object());
+        while let Some(object) = current {
+            if let Some(paragraph) = object.downcast::<RenderParagraph>(app) {
+                let transform = paragraph.as_object().get_transform_to(app, None);
+                let inverse = transform.invert()?;
+                let local = waft_painting::transform_point(&inverse, global_position);
+                if paragraph.as_object().paint_bounds(app).contains(local) {
+                    return Some((paragraph, local));
+                }
+            }
+            current = object.parent(app);
+        }
+        None
+    }
+
+    fn bounding_boxes_contain(self: Handle<Self>, app: &mut App, position: Offset) -> bool {
+        self.bounding_boxes(app)
+            .iter()
+            .any(|rect| rect.contains(position))
+    }
+
+    fn clamp_text_position(self: Handle<Self>, app: &App, position: TextPosition) -> TextPosition {
+        let range = app.get(self).range;
+        if position.offset > range.end
+            || (position.offset == range.end && position.affinity == TextAffinity::Downstream)
+        {
+            return TextPosition::with_affinity(range.end, TextAffinity::Upstream);
+        }
+        if position.offset < range.start {
+            return TextPosition::new(range.start);
+        }
+        position
+    }
+
+    fn compare_text_positions(position: TextPosition, other_position: TextPosition) -> i32 {
+        if position.offset < other_position.offset {
+            1
+        } else if position.offset > other_position.offset {
+            -1
+        } else if position.affinity == other_position.affinity {
+            0
+        } else if position.affinity == TextAffinity::Upstream {
+            1
+        } else {
+            -1
+        }
+    }
+
+    fn position_is_within_current_selection(
+        self: Handle<Self>,
+        app: &App,
+        position: TextPosition,
+    ) -> bool {
+        let (Some(start), Some(end)) = (
+            app.get(self).text_selection_start,
+            app.get(self).text_selection_end,
+        ) else {
+            return false;
+        };
+        let (current_start, current_end) = if Self::compare_text_positions(start, end) > 0 {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        Self::compare_text_positions(current_start, position) >= 0
+            && Self::compare_text_positions(current_end, position) <= 0
+    }
+
+    fn rect(self: Handle<Self>, app: &mut App) -> Rect {
+        if let Some(cached) = app.get(self).cached_rect {
+            return cached;
+        }
+        let range = app.get(self).range;
+        let paragraph = app.get(self).paragraph;
+        let boxes = paragraph.get_boxes_for_selection(
+            app,
+            TextSelection::new(range.start, range.end),
+            BoxHeightStyle::Max,
+            BoxWidthStyle::Tight,
+        );
+        let rect = if let Some(first) = boxes.first() {
+            boxes
+                .iter()
+                .skip(1)
+                .fold(first.to_rect(), |result, text_box| {
+                    result.expand_to_include(text_box.to_rect())
+                })
+        } else {
+            let offset = paragraph.get_offset_for_position(app, TextPosition::new(range.start));
+            let line_height = paragraph.preferred_line_height(app);
+            Rect::from_ltrb(
+                offset.dx(),
+                offset.dy() - line_height,
+                offset.dx(),
+                offset.dy(),
+            )
+        };
+        app.get_mut(self).cached_rect = Some(rect);
+        rect
+    }
+
+    fn local_position(self: Handle<Self>, app: &App, global_position: Offset) -> Option<Offset> {
+        let transform = app
+            .get(self)
+            .paragraph
+            .as_object()
+            .get_transform_to(app, None);
+        transform
+            .invert()
+            .map(|inverse| waft_painting::transform_point(&inverse, global_position))
+    }
+
+    fn update_selection_edge(
+        self: Handle<Self>,
+        app: &mut App,
+        global_position: Offset,
+        is_end: bool,
+    ) -> SelectionResult {
+        self.set_selection_position(app, None, is_end);
+        let Some(local_position) = self.local_position(app, global_position) else {
+            return SelectionResult::None;
+        };
+        let rect = self.rect(app);
+        let range = app.get(self).range;
+        if rect.is_empty() {
+            let result = SelectionUtils::get_result_based_on_rect(rect, local_position);
+            let position = if result == SelectionResult::Next {
+                TextPosition::new(range.end)
+            } else {
+                TextPosition::with_affinity(range.start, TextAffinity::Upstream)
+            };
+            self.set_selection_position(app, Some(position), is_end);
+            return result;
+        }
+        let direction = app.get(self).paragraph.text_direction(app);
+        let adjusted_offset = SelectionUtils::adjust_drag_offset(rect, local_position, direction);
+        let paragraph = app.get(self).paragraph;
+        let position = paragraph.get_position_for_offset(app, adjusted_offset);
+        let position = self.clamp_text_position(app, position);
+        self.set_selection_position(app, Some(position), is_end);
+        if position.offset == range.end {
+            return SelectionResult::Next;
+        }
+        if position.offset == range.start {
+            return SelectionResult::Previous;
+        }
+        SelectionUtils::get_result_based_on_rect(rect, local_position)
+    }
+
+    fn update_selection_edge_by_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        global_position: Offset,
+        is_end: bool,
+        get_text_boundary: BoundaryAtPosition,
+    ) -> SelectionResult {
+        let existing_selection_start = app.get(self).text_selection_start;
+        let existing_selection_end = app.get(self).text_selection_end;
+        self.set_selection_position(app, None, is_end);
+        let Some(local_position) = self.local_position(app, global_position) else {
+            return SelectionResult::None;
+        };
+        let rect = self.rect(app);
+        let range = app.get(self).range;
+        if rect.is_empty() {
+            let result = SelectionUtils::get_result_based_on_rect(rect, local_position);
+            let position = if result == SelectionResult::Next {
+                TextPosition::new(range.end)
+            } else {
+                TextPosition::with_affinity(range.start, TextAffinity::Upstream)
+            };
+            self.set_selection_position(app, Some(position), is_end);
+            return result;
+        }
+        let direction = app.get(self).paragraph.text_direction(app);
+        let adjusted_offset = SelectionUtils::adjust_drag_offset(rect, local_position, direction);
+        let paragraph = app.get(self).paragraph;
+        let position = paragraph.get_position_for_offset(app, adjusted_offset);
+        let mut text_boundary = if rect.contains(local_position) {
+            Some(self.text_boundary_at_position(app, get_text_boundary, position))
+        } else {
+            None
+        };
+        if let Some(boundary) = text_boundary {
+            if (boundary.boundary_start.offset < range.start
+                && boundary.boundary_end.offset <= range.start)
+                || (boundary.boundary_start.offset >= range.end
+                    && boundary.boundary_end.offset > range.end)
+            {
+                text_boundary = None;
+            }
+        }
+        let edge_position = if is_end {
+            self.update_selection_end_edge_by_text_boundary(
+                app,
+                text_boundary,
+                get_text_boundary,
+                position,
+                existing_selection_start,
+                existing_selection_end,
+            )
+        } else {
+            self.update_selection_start_edge_by_text_boundary(
+                app,
+                text_boundary,
+                get_text_boundary,
+                position,
+                existing_selection_start,
+                existing_selection_end,
+            )
+        };
+        let target_position = self.clamp_text_position(app, edge_position);
+        self.set_selection_position(app, Some(target_position), is_end);
+        if target_position.offset == range.end {
+            return SelectionResult::Next;
+        }
+        if target_position.offset == range.start {
+            return SelectionResult::Previous;
+        }
+        SelectionUtils::get_result_based_on_rect(rect, local_position)
+    }
+
+    fn text_boundary_at_position(
+        self: Handle<Self>,
+        app: &mut App,
+        kind: BoundaryAtPosition,
+        position: TextPosition,
+    ) -> TextBoundaryRecord {
+        match kind {
+            BoundaryAtPosition::Word => self.get_word_boundary_at_position(app, position),
+            BoundaryAtPosition::Paragraph => {
+                self.get_clamped_paragraph_boundary_at_position(app, position)
+            }
+        }
+    }
+
+    fn text_boundary_in_text(
+        self: Handle<Self>,
+        app: &mut App,
+        kind: BoundaryInText,
+        position: TextPosition,
+        text: &str,
+    ) -> TextBoundaryRecord {
+        match kind {
+            BoundaryInText::Paragraph => {
+                self.get_paragraph_boundary_at_position(app, position, text)
+            }
+        }
+    }
+
+    fn update_selection_start_edge_by_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        text_boundary: Option<TextBoundaryRecord>,
+        get_text_boundary: BoundaryAtPosition,
+        position: TextPosition,
+        existing_selection_start: Option<TextPosition>,
+        existing_selection_end: Option<TextPosition>,
+    ) -> TextPosition {
+        let range = app.get(self).range;
+        let contains_origin = app.get(self).selectable_contains_origin_text_boundary;
+        let mut target_position = None;
+
+        if contains_origin
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+            && text_boundary.is_some()
+        {
+            let text_boundary = text_boundary.unwrap();
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            debug_assert!(
+                text_boundary.boundary_start.offset >= range.start
+                    && text_boundary.boundary_end.offset <= range.end
+            );
+            let is_same_position = position.offset == existing_end.offset;
+            let is_selection_inverted = existing_start.offset > existing_end.offset;
+            let should_swap_edges = !is_same_position
+                && (is_selection_inverted != (position.offset > existing_end.offset));
+            if should_swap_edges {
+                target_position = Some(if position.offset < existing_end.offset {
+                    text_boundary.boundary_start
+                } else {
+                    text_boundary.boundary_end
+                });
+                let local_text_boundary =
+                    self.text_boundary_at_position(app, get_text_boundary, existing_end);
+                debug_assert!(
+                    local_text_boundary.boundary_start.offset >= range.start
+                        && local_text_boundary.boundary_end.offset <= range.end
+                );
+                self.set_selection_position(
+                    app,
+                    Some(
+                        if existing_end.offset == local_text_boundary.boundary_start.offset {
+                            local_text_boundary.boundary_end
+                        } else {
+                            local_text_boundary.boundary_start
+                        },
+                    ),
+                    true,
+                );
+            } else if position.offset < existing_end.offset {
+                target_position = Some(text_boundary.boundary_start);
+            } else if position.offset > existing_end.offset {
+                target_position = Some(text_boundary.boundary_end);
+            } else {
+                target_position = Some(existing_start);
+            }
+        } else if let Some(text_boundary) = text_boundary {
+            if let Some(existing_end) = existing_selection_end {
+                if position.offset < existing_end.offset {
+                    target_position = Some(text_boundary.boundary_start);
+                } else {
+                    target_position = Some(text_boundary.boundary_end);
+                }
+            } else {
+                target_position = Some(Self::closest_text_boundary(text_boundary, position));
+            }
+        } else if contains_origin
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+        {
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            let is_same_position = position.offset == existing_end.offset;
+            let is_selection_inverted = existing_start.offset > existing_end.offset;
+            let should_swap_edges = !is_same_position
+                && (is_selection_inverted != (position.offset > existing_end.offset));
+            if should_swap_edges {
+                let local_text_boundary =
+                    self.text_boundary_at_position(app, get_text_boundary, existing_end);
+                debug_assert!(
+                    local_text_boundary.boundary_start.offset >= range.start
+                        && local_text_boundary.boundary_end.offset <= range.end
+                );
+                self.set_selection_position(
+                    app,
+                    Some(if is_selection_inverted {
+                        local_text_boundary.boundary_end
+                    } else {
+                        local_text_boundary.boundary_start
+                    }),
+                    true,
+                );
+            }
+        }
+        target_position.unwrap_or(position)
+    }
+
+    fn update_selection_end_edge_by_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        text_boundary: Option<TextBoundaryRecord>,
+        get_text_boundary: BoundaryAtPosition,
+        position: TextPosition,
+        existing_selection_start: Option<TextPosition>,
+        existing_selection_end: Option<TextPosition>,
+    ) -> TextPosition {
+        let range = app.get(self).range;
+        let contains_origin = app.get(self).selectable_contains_origin_text_boundary;
+        let mut target_position = None;
+
+        if contains_origin
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+            && text_boundary.is_some()
+        {
+            let text_boundary = text_boundary.unwrap();
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            debug_assert!(
+                text_boundary.boundary_start.offset >= range.start
+                    && text_boundary.boundary_end.offset <= range.end
+            );
+            let is_same_position = position.offset == existing_start.offset;
+            let is_selection_inverted = existing_start.offset > existing_end.offset;
+            let should_swap_edges = !is_same_position
+                && (is_selection_inverted != (position.offset < existing_start.offset));
+            if should_swap_edges {
+                target_position = Some(if position.offset < existing_start.offset {
+                    text_boundary.boundary_start
+                } else {
+                    text_boundary.boundary_end
+                });
+                let local_text_boundary =
+                    self.text_boundary_at_position(app, get_text_boundary, existing_start);
+                debug_assert!(
+                    local_text_boundary.boundary_start.offset >= range.start
+                        && local_text_boundary.boundary_end.offset <= range.end
+                );
+                self.set_selection_position(
+                    app,
+                    Some(
+                        if existing_start.offset == local_text_boundary.boundary_start.offset {
+                            local_text_boundary.boundary_end
+                        } else {
+                            local_text_boundary.boundary_start
+                        },
+                    ),
+                    false,
+                );
+            } else if position.offset < existing_start.offset {
+                target_position = Some(text_boundary.boundary_start);
+            } else if position.offset > existing_start.offset {
+                target_position = Some(text_boundary.boundary_end);
+            } else {
+                target_position = Some(existing_end);
+            }
+        } else if let Some(text_boundary) = text_boundary {
+            if let Some(existing_start) = existing_selection_start {
+                if position.offset < existing_start.offset {
+                    target_position = Some(text_boundary.boundary_start);
+                } else {
+                    target_position = Some(text_boundary.boundary_end);
+                }
+            } else {
+                target_position = Some(Self::closest_text_boundary(text_boundary, position));
+            }
+        } else if contains_origin
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+        {
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            let is_same_position = position.offset == existing_start.offset;
+            let is_selection_inverted = existing_start.offset > existing_end.offset;
+            let should_swap_edges = is_selection_inverted
+                != (position.offset < existing_start.offset)
+                || is_same_position;
+            if should_swap_edges {
+                let local_text_boundary =
+                    self.text_boundary_at_position(app, get_text_boundary, existing_start);
+                debug_assert!(
+                    local_text_boundary.boundary_start.offset >= range.start
+                        && local_text_boundary.boundary_end.offset <= range.end
+                );
+                self.set_selection_position(
+                    app,
+                    Some(if is_selection_inverted {
+                        local_text_boundary.boundary_start
+                    } else {
+                        local_text_boundary.boundary_end
+                    }),
+                    false,
+                );
+            }
+        }
+        target_position.unwrap_or(position)
+    }
+
+    fn update_selection_start_edge_by_multi_selectable_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        get_text_boundary: BoundaryInText,
+        paragraph_contains_position: bool,
+        position: TextPosition,
+        existing_selection_start: Option<TextPosition>,
+        existing_selection_end: Option<TextPosition>,
+    ) -> Option<SelectionResult> {
+        let is_end = false;
+        let range = app.get(self).range;
+        let full_text = app.get(self).full_text.clone();
+        if app.get(self).selectable_contains_origin_text_boundary
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+        {
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            let forward_selection = existing_end.offset >= existing_start.offset;
+            if paragraph_contains_position {
+                let boundary_at_position =
+                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
+                let origin_text_boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    if forward_selection {
+                        TextPosition::with_affinity(existing_end.offset - 1, existing_end.affinity)
+                    } else {
+                        existing_end
+                    },
+                    &full_text,
+                );
+                let pivot_offset = if forward_selection {
+                    origin_text_boundary.boundary_end.offset
+                } else {
+                    origin_text_boundary.boundary_start.offset
+                };
+                let should_swap_edges = !forward_selection != (position.offset > pivot_offset);
+                let target_position = if position.offset < pivot_offset {
+                    boundary_at_position.boundary_start
+                } else if position.offset > pivot_offset {
+                    boundary_at_position.boundary_end
+                } else {
+                    if forward_selection {
+                        existing_start
+                    } else {
+                        existing_end
+                    }
+                };
+                if should_swap_edges {
+                    let clamped = self.clamp_text_position(
+                        app,
+                        if forward_selection {
+                            origin_text_boundary.boundary_start
+                        } else {
+                            origin_text_boundary.boundary_end
+                        },
+                    );
+                    self.set_selection_position(app, Some(clamped), true);
+                }
+                let clamped = self.clamp_text_position(app, target_position);
+                self.set_selection_position(app, Some(clamped), is_end);
+                let final_selection_is_forward = app.get(self).text_selection_end.unwrap().offset
+                    >= app.get(self).text_selection_start.unwrap().offset;
+                if boundary_at_position.boundary_start.offset > range.end
+                    && boundary_at_position.boundary_end.offset > range.end
+                {
+                    return Some(SelectionResult::Next);
+                }
+                if boundary_at_position.boundary_start.offset < range.start
+                    && boundary_at_position.boundary_end.offset < range.start
+                {
+                    return Some(SelectionResult::Previous);
+                }
+                if final_selection_is_forward {
+                    if boundary_at_position.boundary_start.offset
+                        >= origin_text_boundary.boundary_start.offset
+                    {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary_at_position.boundary_start.offset
+                        < origin_text_boundary.boundary_start.offset
+                    {
+                        return Some(SelectionResult::Previous);
+                    }
+                } else {
+                    if boundary_at_position.boundary_end.offset
+                        <= origin_text_boundary.boundary_end.offset
+                    {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary_at_position.boundary_end.offset
+                        > origin_text_boundary.boundary_end.offset
+                    {
+                        return Some(SelectionResult::Next);
+                    }
+                }
+            } else {
+                let clamped_position = self.clamp_text_position(app, position);
+                let origin_text_boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    if forward_selection {
+                        TextPosition::with_affinity(existing_end.offset - 1, existing_end.affinity)
+                    } else {
+                        existing_end
+                    },
+                    &full_text,
+                );
+                if forward_selection && clamped_position.offset == range.start {
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if !forward_selection && clamped_position.offset == range.end {
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if forward_selection && clamped_position.offset == range.end {
+                    let clamped =
+                        self.clamp_text_position(app, origin_text_boundary.boundary_start);
+                    self.set_selection_position(app, Some(clamped), true);
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if !forward_selection && clamped_position.offset == range.start {
+                    let clamped = self.clamp_text_position(app, origin_text_boundary.boundary_end);
+                    self.set_selection_position(app, Some(clamped), true);
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+            }
+        } else {
+            let position_on_placeholder = app
+                .get(self)
+                .paragraph
+                .get_word_boundary(app, position)
+                .text_inside(&full_text)
+                == "\u{FFFC}";
+            if !paragraph_contains_position || position_on_placeholder {
+                return None;
+            }
+            if let Some(existing_end) = existing_selection_end {
+                let boundary_at_position =
+                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
+                let backward_selection = (existing_selection_start.is_none()
+                    && existing_end.offset == range.start)
+                    || (existing_selection_start == existing_selection_end
+                        && existing_end.offset == range.start)
+                    || (existing_selection_start.is_some()
+                        && existing_selection_start.unwrap().offset > existing_end.offset);
+                if boundary_at_position.boundary_start.offset < range.start
+                    && boundary_at_position.boundary_end.offset < range.start
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if boundary_at_position.boundary_start.offset > range.end
+                    && boundary_at_position.boundary_end.offset > range.end
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if backward_selection {
+                    if boundary_at_position.boundary_end.offset <= range.end {
+                        let clamped =
+                            self.clamp_text_position(app, boundary_at_position.boundary_end);
+                        self.set_selection_position(app, Some(clamped), is_end);
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary_at_position.boundary_end.offset > range.end {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.end)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::Next);
+                    }
+                } else {
+                    let clamped =
+                        self.clamp_text_position(app, boundary_at_position.boundary_start);
+                    self.set_selection_position(app, Some(clamped), is_end);
+                    if boundary_at_position.boundary_start.offset < range.start {
+                        return Some(SelectionResult::Previous);
+                    }
+                    if boundary_at_position.boundary_start.offset >= range.start {
+                        return Some(SelectionResult::End);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn update_selection_end_edge_by_multi_selectable_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        get_text_boundary: BoundaryInText,
+        paragraph_contains_position: bool,
+        position: TextPosition,
+        existing_selection_start: Option<TextPosition>,
+        existing_selection_end: Option<TextPosition>,
+    ) -> Option<SelectionResult> {
+        let is_end = true;
+        let range = app.get(self).range;
+        let full_text = app.get(self).full_text.clone();
+        if app.get(self).selectable_contains_origin_text_boundary
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+        {
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            let forward_selection = existing_end.offset >= existing_start.offset;
+            if paragraph_contains_position {
+                let boundary_at_position =
+                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
+                let origin_text_boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    if forward_selection {
+                        existing_start
+                    } else {
+                        TextPosition::with_affinity(
+                            existing_start.offset - 1,
+                            existing_start.affinity,
+                        )
+                    },
+                    &full_text,
+                );
+                let pivot_offset = if forward_selection {
+                    origin_text_boundary.boundary_start.offset
+                } else {
+                    origin_text_boundary.boundary_end.offset
+                };
+                let should_swap_edges = !forward_selection != (position.offset < pivot_offset);
+                let target_position = if position.offset < pivot_offset {
+                    boundary_at_position.boundary_start
+                } else if position.offset > pivot_offset {
+                    boundary_at_position.boundary_end
+                } else {
+                    if forward_selection {
+                        existing_end
+                    } else {
+                        existing_start
+                    }
+                };
+                if should_swap_edges {
+                    let clamped = self.clamp_text_position(
+                        app,
+                        if forward_selection {
+                            origin_text_boundary.boundary_end
+                        } else {
+                            origin_text_boundary.boundary_start
+                        },
+                    );
+                    self.set_selection_position(app, Some(clamped), false);
+                }
+                let clamped = self.clamp_text_position(app, target_position);
+                self.set_selection_position(app, Some(clamped), is_end);
+                let final_selection_is_forward = app.get(self).text_selection_end.unwrap().offset
+                    >= app.get(self).text_selection_start.unwrap().offset;
+                if boundary_at_position.boundary_start.offset > range.end
+                    && boundary_at_position.boundary_end.offset > range.end
+                {
+                    return Some(SelectionResult::Next);
+                }
+                if boundary_at_position.boundary_start.offset < range.start
+                    && boundary_at_position.boundary_end.offset < range.start
+                {
+                    return Some(SelectionResult::Previous);
+                }
+                if final_selection_is_forward {
+                    if boundary_at_position.boundary_end.offset
+                        <= origin_text_boundary.boundary_end.offset
+                    {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary_at_position.boundary_end.offset
+                        > origin_text_boundary.boundary_end.offset
+                    {
+                        return Some(SelectionResult::Next);
+                    }
+                } else {
+                    if boundary_at_position.boundary_start.offset
+                        >= origin_text_boundary.boundary_start.offset
+                    {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary_at_position.boundary_start.offset
+                        < origin_text_boundary.boundary_start.offset
+                    {
+                        return Some(SelectionResult::Previous);
+                    }
+                }
+            } else {
+                let clamped_position = self.clamp_text_position(app, position);
+                let origin_text_boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    if forward_selection {
+                        existing_start
+                    } else {
+                        TextPosition::with_affinity(
+                            existing_start.offset - 1,
+                            existing_start.affinity,
+                        )
+                    },
+                    &full_text,
+                );
+                if forward_selection && clamped_position.offset == range.start {
+                    let clamped = self.clamp_text_position(app, origin_text_boundary.boundary_end);
+                    self.set_selection_position(app, Some(clamped), false);
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if !forward_selection && clamped_position.offset == range.end {
+                    let clamped =
+                        self.clamp_text_position(app, origin_text_boundary.boundary_start);
+                    self.set_selection_position(app, Some(clamped), false);
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if forward_selection && clamped_position.offset == range.end {
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if !forward_selection && clamped_position.offset == range.start {
+                    self.set_selection_position(app, Some(clamped_position), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+            }
+        } else {
+            let position_on_placeholder = app
+                .get(self)
+                .paragraph
+                .get_word_boundary(app, position)
+                .text_inside(&full_text)
+                == "\u{FFFC}";
+            if !paragraph_contains_position || position_on_placeholder {
+                return None;
+            }
+            if let Some(existing_start) = existing_selection_start {
+                let boundary_at_position =
+                    self.text_boundary_in_text(app, get_text_boundary, position, &full_text);
+                let backward_selection = (existing_selection_end.is_none()
+                    && existing_start.offset == range.end)
+                    || (existing_selection_start == existing_selection_end
+                        && existing_start.offset == range.end)
+                    || (existing_selection_end.is_some()
+                        && existing_start.offset > existing_selection_end.unwrap().offset);
+                if boundary_at_position.boundary_start.offset < range.start
+                    && boundary_at_position.boundary_end.offset < range.start
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if boundary_at_position.boundary_start.offset > range.end
+                    && boundary_at_position.boundary_end.offset > range.end
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if backward_selection {
+                    let clamped =
+                        self.clamp_text_position(app, boundary_at_position.boundary_start);
+                    self.set_selection_position(app, Some(clamped), is_end);
+                    if boundary_at_position.boundary_start.offset < range.start {
+                        return Some(SelectionResult::Previous);
+                    }
+                    if boundary_at_position.boundary_start.offset >= range.start {
+                        return Some(SelectionResult::End);
+                    }
+                } else {
+                    if boundary_at_position.boundary_end.offset <= range.end {
+                        let clamped =
+                            self.clamp_text_position(app, boundary_at_position.boundary_end);
+                        self.set_selection_position(app, Some(clamped), is_end);
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary_at_position.boundary_end.offset > range.end {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.end)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::Next);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn update_selection_edge_by_multi_selectable_text_boundary(
+        self: Handle<Self>,
+        app: &mut App,
+        global_position: Offset,
+        is_end: bool,
+        get_text_boundary: BoundaryInText,
+    ) -> SelectionResult {
+        let existing_selection_start = app.get(self).text_selection_start;
+        let existing_selection_end = app.get(self).text_selection_end;
+        self.set_selection_position(app, None, is_end);
+        let Some(local_position) = self.local_position(app, global_position) else {
+            return SelectionResult::None;
+        };
+        let rect = self.rect(app);
+        let range = app.get(self).range;
+        if rect.is_empty() {
+            let result = SelectionUtils::get_result_based_on_rect(rect, local_position);
+            let position = if result == SelectionResult::Next {
+                TextPosition::new(range.end)
+            } else {
+                TextPosition::with_affinity(range.start, TextAffinity::Upstream)
+            };
+            self.set_selection_position(app, Some(position), is_end);
+            return result;
+        }
+        let paragraph = app.get(self).paragraph;
+        let direction = paragraph.text_direction(app);
+        let adjusted_offset = SelectionUtils::adjust_drag_offset(rect, local_position, direction);
+        let paint_bounds = paragraph.as_object().paint_bounds(app);
+        let adjusted_offset_relative_to_paragraph =
+            SelectionUtils::adjust_drag_offset(paint_bounds, local_position, direction);
+        let position = paragraph.get_position_for_offset(app, adjusted_offset);
+        let position_in_full_text =
+            paragraph.get_position_for_offset(app, adjusted_offset_relative_to_paragraph);
+        let paragraph_contains_position = paint_bounds.contains(local_position);
+        let result = if self.is_placeholder(app) {
+            if is_end {
+                self.update_selection_end_edge_at_placeholder(
+                    app,
+                    get_text_boundary,
+                    global_position,
+                    paragraph_contains_position,
+                    position_in_full_text,
+                    existing_selection_start,
+                    existing_selection_end,
+                )
+            } else {
+                self.update_selection_start_edge_at_placeholder(
+                    app,
+                    get_text_boundary,
+                    global_position,
+                    paragraph_contains_position,
+                    position_in_full_text,
+                    existing_selection_start,
+                    existing_selection_end,
+                )
+            }
+        } else if is_end {
+            self.update_selection_end_edge_by_multi_selectable_text_boundary(
+                app,
+                get_text_boundary,
+                paragraph_contains_position,
+                position_in_full_text,
+                existing_selection_start,
+                existing_selection_end,
+            )
+        } else {
+            self.update_selection_start_edge_by_multi_selectable_text_boundary(
+                app,
+                get_text_boundary,
+                paragraph_contains_position,
+                position_in_full_text,
+                existing_selection_start,
+                existing_selection_end,
+            )
+        };
+        if let Some(result) = result {
+            return result;
+        }
+        let mut text_boundary = if self.bounding_boxes_contain(app, local_position) {
+            Some(self.get_clamped_paragraph_boundary_at_position(app, position))
+        } else {
+            None
+        };
+        if let Some(boundary) = text_boundary {
+            if (boundary.boundary_start.offset < range.start
+                && boundary.boundary_end.offset <= range.start)
+                || (boundary.boundary_start.offset >= range.end
+                    && boundary.boundary_end.offset > range.end)
+            {
+                text_boundary = None;
+            }
+        }
+        let edge_position = if is_end {
+            self.update_selection_end_edge_by_text_boundary(
+                app,
+                text_boundary,
+                BoundaryAtPosition::Paragraph,
+                position,
+                existing_selection_start,
+                existing_selection_end,
+            )
+        } else {
+            self.update_selection_start_edge_by_text_boundary(
+                app,
+                text_boundary,
+                BoundaryAtPosition::Paragraph,
+                position,
+                existing_selection_start,
+                existing_selection_end,
+            )
+        };
+        let target_position = self.clamp_text_position(app, edge_position);
+        self.set_selection_position(app, Some(target_position), is_end);
+        if target_position.offset == range.end {
+            return SelectionResult::Next;
+        }
+        if target_position.offset == range.start {
+            return SelectionResult::Previous;
+        }
+        SelectionUtils::get_result_based_on_rect(rect, local_position)
+    }
+
+    fn update_selection_start_edge_at_placeholder(
+        self: Handle<Self>,
+        app: &mut App,
+        get_text_boundary: BoundaryInText,
+        global_position: Offset,
+        paragraph_contains_position: bool,
+        position: TextPosition,
+        existing_selection_start: Option<TextPosition>,
+        existing_selection_end: Option<TextPosition>,
+    ) -> Option<SelectionResult> {
+        let is_end = false;
+        let range = app.get(self).range;
+        if app.get(self).selectable_contains_origin_text_boundary
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+        {
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            let forward_selection = existing_end.offset >= existing_start.offset;
+            let origin_paragraph = self.get_origin_paragraph(app);
+            if origin_paragraph == app.get(self).paragraph {
+                return self.update_selection_start_edge_by_multi_selectable_text_boundary(
+                    app,
+                    get_text_boundary,
+                    paragraph_contains_position,
+                    position,
+                    existing_selection_start,
+                    existing_selection_end,
+                );
+            }
+            let transform = origin_paragraph.as_object().get_transform_to(app, None);
+            let inverse = transform.invert()?;
+            let origin_local = waft_painting::transform_point(&inverse, global_position);
+            let within_origin = origin_paragraph
+                .as_object()
+                .paint_bounds(app)
+                .contains(origin_local);
+            let origin_position = origin_paragraph.get_position_for_offset(app, origin_local);
+            if within_origin {
+                let origin_text = origin_paragraph.text(app).to_plain_text(false, true);
+                let boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    origin_position,
+                    &origin_text,
+                );
+                let origin_placeholder_position =
+                    self.get_position_in_paragraph(app, origin_paragraph);
+                let origin_boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    origin_placeholder_position,
+                    &origin_text,
+                );
+                let pivot = if forward_selection {
+                    origin_boundary.boundary_end.offset
+                } else {
+                    origin_boundary.boundary_start.offset
+                };
+                let swap = !forward_selection != (origin_position.offset > pivot);
+                let target = if origin_position.offset < pivot {
+                    boundary.boundary_start
+                } else if origin_position.offset > pivot {
+                    boundary.boundary_end
+                } else {
+                    existing_start
+                };
+                if swap {
+                    self.set_selection_position(app, Some(existing_start), true);
+                }
+                let target = self.clamp_text_position(app, target);
+                self.set_selection_position(app, Some(target), is_end);
+                let forward = app.get(self).text_selection_end.unwrap().offset
+                    >= app.get(self).text_selection_start.unwrap().offset;
+                let placeholder = self.get_position_in_paragraph(app, origin_paragraph);
+                let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
+                if boundary.boundary_start.offset > placeholder_range.end
+                    && boundary.boundary_end.offset > placeholder_range.end
+                {
+                    return Some(SelectionResult::Next);
+                }
+                if boundary.boundary_start.offset < placeholder_range.start
+                    && boundary.boundary_end.offset < placeholder_range.start
+                {
+                    return Some(SelectionResult::Previous);
+                }
+                if forward {
+                    if boundary.boundary_end.offset <= origin_boundary.boundary_end.offset {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_end.offset > origin_boundary.boundary_end.offset {
+                        return Some(SelectionResult::Next);
+                    }
+                } else {
+                    if boundary.boundary_start.offset >= origin_boundary.boundary_start.offset {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_start.offset < origin_boundary.boundary_start.offset {
+                        return Some(SelectionResult::Previous);
+                    }
+                }
+            } else {
+                let direction = app.get(self).paragraph.text_direction(app);
+                let adjusted = SelectionUtils::adjust_drag_offset(
+                    origin_paragraph.as_object().paint_bounds(app),
+                    origin_local,
+                    direction,
+                );
+                let adjusted_position = origin_paragraph.get_position_for_offset(app, adjusted);
+                let placeholder = self.get_position_in_paragraph(app, origin_paragraph);
+                let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
+                if forward_selection && adjusted_position.offset <= placeholder_range.start {
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if !forward_selection && adjusted_position.offset >= placeholder_range.end {
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if forward_selection && adjusted_position.offset >= placeholder_range.end {
+                    self.set_selection_position(app, Some(existing_start), true);
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if !forward_selection && adjusted_position.offset <= placeholder_range.start {
+                    self.set_selection_position(app, Some(existing_start), true);
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+            }
+        } else {
+            if paragraph_contains_position {
+                return self.update_selection_start_edge_by_multi_selectable_text_boundary(
+                    app,
+                    get_text_boundary,
+                    paragraph_contains_position,
+                    position,
+                    existing_selection_start,
+                    existing_selection_end,
+                );
+            }
+            if existing_selection_end.is_some() {
+                let (target_paragraph, target_local) =
+                    self.get_paragraph_containing_position(app, global_position)?;
+                let target_position = target_paragraph.get_position_for_offset(app, target_local);
+                let target_text = target_paragraph.text(app).to_plain_text(false, true);
+                if target_paragraph
+                    .get_word_boundary(app, target_position)
+                    .text_inside(&target_text)
+                    == "\u{FFFC}"
+                {
+                    return None;
+                }
+                let existing_end = existing_selection_end.unwrap();
+                let backward = (existing_selection_start.is_none()
+                    && existing_end.offset == range.start)
+                    || (existing_selection_start == existing_selection_end
+                        && existing_end.offset == range.start)
+                    || (existing_selection_start.is_some()
+                        && existing_selection_start.unwrap().offset > existing_end.offset);
+                let boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    target_position,
+                    &target_text,
+                );
+                let placeholder = self.get_position_in_paragraph(app, target_paragraph);
+                let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
+                if boundary.boundary_start.offset < placeholder_range.start
+                    && boundary.boundary_end.offset < placeholder_range.start
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if boundary.boundary_start.offset > placeholder_range.end
+                    && boundary.boundary_end.offset > placeholder_range.end
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if backward {
+                    if boundary.boundary_end.offset <= placeholder_range.end {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.end)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_end.offset > placeholder_range.end {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.end)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::Next);
+                    }
+                } else {
+                    if boundary.boundary_start.offset >= placeholder_range.start {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.start)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_start.offset < placeholder_range.start {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.start)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::Previous);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn update_selection_end_edge_at_placeholder(
+        self: Handle<Self>,
+        app: &mut App,
+        get_text_boundary: BoundaryInText,
+        global_position: Offset,
+        paragraph_contains_position: bool,
+        position: TextPosition,
+        existing_selection_start: Option<TextPosition>,
+        existing_selection_end: Option<TextPosition>,
+    ) -> Option<SelectionResult> {
+        let is_end = true;
+        let range = app.get(self).range;
+        if app.get(self).selectable_contains_origin_text_boundary
+            && existing_selection_start.is_some()
+            && existing_selection_end.is_some()
+        {
+            let existing_start = existing_selection_start.unwrap();
+            let existing_end = existing_selection_end.unwrap();
+            let forward_selection = existing_end.offset >= existing_start.offset;
+            let origin_paragraph = self.get_origin_paragraph(app);
+            if origin_paragraph == app.get(self).paragraph {
+                return self.update_selection_end_edge_by_multi_selectable_text_boundary(
+                    app,
+                    get_text_boundary,
+                    paragraph_contains_position,
+                    position,
+                    existing_selection_start,
+                    existing_selection_end,
+                );
+            }
+            let transform = origin_paragraph.as_object().get_transform_to(app, None);
+            let inverse = transform.invert()?;
+            let origin_local = waft_painting::transform_point(&inverse, global_position);
+            let within_origin = origin_paragraph
+                .as_object()
+                .paint_bounds(app)
+                .contains(origin_local);
+            let origin_position = origin_paragraph.get_position_for_offset(app, origin_local);
+            if within_origin {
+                let origin_text = origin_paragraph.text(app).to_plain_text(false, true);
+                let boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    origin_position,
+                    &origin_text,
+                );
+                let origin_placeholder_position =
+                    self.get_position_in_paragraph(app, origin_paragraph);
+                let origin_boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    origin_placeholder_position,
+                    &origin_text,
+                );
+                let pivot = if forward_selection {
+                    origin_boundary.boundary_start.offset
+                } else {
+                    origin_boundary.boundary_end.offset
+                };
+                let swap = !forward_selection != (origin_position.offset < pivot);
+                let target = if origin_position.offset < pivot {
+                    boundary.boundary_start
+                } else if origin_position.offset > pivot {
+                    boundary.boundary_end
+                } else {
+                    existing_end
+                };
+                if swap {
+                    self.set_selection_position(app, Some(existing_end), false);
+                }
+                let target = self.clamp_text_position(app, target);
+                self.set_selection_position(app, Some(target), is_end);
+                let forward = app.get(self).text_selection_end.unwrap().offset
+                    >= app.get(self).text_selection_start.unwrap().offset;
+                let placeholder = self.get_position_in_paragraph(app, origin_paragraph);
+                let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
+                if boundary.boundary_start.offset > placeholder_range.end
+                    && boundary.boundary_end.offset > placeholder_range.end
+                {
+                    return Some(SelectionResult::Next);
+                }
+                if boundary.boundary_start.offset < placeholder_range.start
+                    && boundary.boundary_end.offset < placeholder_range.start
+                {
+                    return Some(SelectionResult::Previous);
+                }
+                if forward {
+                    if boundary.boundary_end.offset <= origin_boundary.boundary_end.offset {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_end.offset > origin_boundary.boundary_end.offset {
+                        return Some(SelectionResult::Next);
+                    }
+                } else {
+                    if boundary.boundary_start.offset >= origin_boundary.boundary_start.offset {
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_start.offset < origin_boundary.boundary_start.offset {
+                        return Some(SelectionResult::Previous);
+                    }
+                }
+            } else {
+                let direction = app.get(self).paragraph.text_direction(app);
+                let adjusted = SelectionUtils::adjust_drag_offset(
+                    origin_paragraph.as_object().paint_bounds(app),
+                    origin_local,
+                    direction,
+                );
+                let adjusted_position = origin_paragraph.get_position_for_offset(app, adjusted);
+                let placeholder = self.get_position_in_paragraph(app, origin_paragraph);
+                let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
+                if forward_selection && adjusted_position.offset <= placeholder_range.start {
+                    self.set_selection_position(app, Some(existing_end), false);
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if !forward_selection && adjusted_position.offset >= placeholder_range.end {
+                    self.set_selection_position(app, Some(existing_end), false);
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if forward_selection && adjusted_position.offset >= placeholder_range.end {
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if !forward_selection && adjusted_position.offset <= placeholder_range.start {
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+            }
+        } else {
+            if paragraph_contains_position {
+                return self.update_selection_end_edge_by_multi_selectable_text_boundary(
+                    app,
+                    get_text_boundary,
+                    paragraph_contains_position,
+                    position,
+                    existing_selection_start,
+                    existing_selection_end,
+                );
+            }
+            if existing_selection_start.is_some() {
+                let (target_paragraph, target_local) =
+                    self.get_paragraph_containing_position(app, global_position)?;
+                let target_position = target_paragraph.get_position_for_offset(app, target_local);
+                let target_text = target_paragraph.text(app).to_plain_text(false, true);
+                if target_paragraph
+                    .get_word_boundary(app, target_position)
+                    .text_inside(&target_text)
+                    == "\u{FFFC}"
+                {
+                    return None;
+                }
+                let existing_start = existing_selection_start.unwrap();
+                let backward = (existing_selection_end.is_none()
+                    && existing_start.offset == range.end)
+                    || (existing_selection_start == existing_selection_end
+                        && existing_start.offset == range.end)
+                    || (existing_selection_end.is_some()
+                        && existing_start.offset > existing_selection_end.unwrap().offset);
+                let boundary = self.text_boundary_in_text(
+                    app,
+                    get_text_boundary,
+                    target_position,
+                    &target_text,
+                );
+                let placeholder = self.get_position_in_paragraph(app, target_paragraph);
+                let placeholder_range = TextRange::new(placeholder.offset, placeholder.offset + 1);
+                if boundary.boundary_start.offset < placeholder_range.start
+                    && boundary.boundary_end.offset < placeholder_range.start
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.start)), is_end);
+                    return Some(SelectionResult::Previous);
+                }
+                if boundary.boundary_start.offset > placeholder_range.end
+                    && boundary.boundary_end.offset > placeholder_range.end
+                {
+                    self.set_selection_position(app, Some(TextPosition::new(range.end)), is_end);
+                    return Some(SelectionResult::Next);
+                }
+                if backward {
+                    if boundary.boundary_start.offset >= placeholder_range.start {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.start)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_start.offset < placeholder_range.start {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.start)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::Previous);
+                    }
+                } else {
+                    if boundary.boundary_end.offset <= placeholder_range.end {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.end)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::End);
+                    }
+                    if boundary.boundary_end.offset > placeholder_range.end {
+                        self.set_selection_position(
+                            app,
+                            Some(TextPosition::new(range.end)),
+                            is_end,
+                        );
+                        return Some(SelectionResult::Next);
+                    }
+                }
+            }
+        }
+        None
+    }
+    fn handle_granularly_extend_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        forward: bool,
+        is_extent: bool,
+        granularity: TextGranularity,
+    ) -> SelectionResult {
+        let range = app.get(self).range;
+        if app.get(self).text_selection_end.is_none() {
+            app.get_mut(self).text_selection_end = Some(if forward {
+                TextPosition::new(range.start)
+            } else {
+                TextPosition::with_affinity(range.end, TextAffinity::Upstream)
+            });
+        }
+        if app.get(self).text_selection_start.is_none() {
+            let end = app.get(self).text_selection_end.unwrap();
+            app.get_mut(self).text_selection_start = Some(end);
+        }
+        let targeted_edge = if is_extent {
+            app.get(self).text_selection_end.unwrap()
+        } else {
+            app.get(self).text_selection_start.unwrap()
+        };
+        if forward && targeted_edge.offset == range.end {
+            return SelectionResult::Next;
+        }
+        if !forward && targeted_edge.offset == range.start {
+            return SelectionResult::Previous;
+        }
+        let (new_position, result) = match granularity {
+            TextGranularity::Character => {
+                let text = range.text_inside(&app.get(self).full_text).to_owned();
+                (
+                    self.move_beyond_text_boundary_at_direction(
+                        app,
+                        targeted_edge,
+                        forward,
+                        &CharacterBoundary::new(text),
+                    ),
+                    SelectionResult::End,
+                )
+            }
+            TextGranularity::Word => {
+                let paragraph = app.get(self).paragraph;
+                let text = paragraph.text(app);
+                let boundary = WordBoundary::for_paragraph(text, paragraph);
+                (
+                    self.move_beyond_text_boundary_at_direction(
+                        app,
+                        targeted_edge,
+                        forward,
+                        &*boundary.move_by_word_boundary(),
+                    ),
+                    SelectionResult::End,
+                )
+            }
+            TextGranularity::Paragraph => {
+                let text = range.text_inside(&app.get(self).full_text).to_owned();
+                (
+                    self.move_beyond_text_boundary_at_direction(
+                        app,
+                        targeted_edge,
+                        forward,
+                        &ParagraphBoundary::new(&text),
+                    ),
+                    SelectionResult::End,
+                )
+            }
+            TextGranularity::Line => {
+                let boundary = FragmentLineBoundary { fragment: self };
+                (
+                    self.move_to_text_boundary_at_direction(app, targeted_edge, forward, &boundary),
+                    SelectionResult::End,
+                )
+            }
+            TextGranularity::Document => {
+                let text = range.text_inside(&app.get(self).full_text).to_owned();
+                let position = self.move_beyond_text_boundary_at_direction(
+                    app,
+                    targeted_edge,
+                    forward,
+                    &DocumentBoundary::new(text),
+                );
+                let result = if forward && position.offset == range.end {
+                    SelectionResult::Next
+                } else if !forward && position.offset == range.start {
+                    SelectionResult::Previous
+                } else {
+                    SelectionResult::End
+                };
+                (position, result)
+            }
+        };
+        if is_extent {
+            app.get_mut(self).text_selection_end = Some(new_position);
+        } else {
+            app.get_mut(self).text_selection_start = Some(new_position);
+        }
+        result
+    }
+
+    fn move_beyond_text_boundary_at_direction(
+        self: Handle<Self>,
+        app: &mut App,
+        end: TextPosition,
+        forward: bool,
+        text_boundary: &dyn TextBoundary,
+    ) -> TextPosition {
+        let range = app.get(self).range;
+        let new_offset = if forward {
+            text_boundary
+                .get_trailing_text_boundary_at(app, end.offset)
+                .unwrap_or(range.end)
+        } else {
+            text_boundary
+                .get_leading_text_boundary_at(app, end.offset - 1)
+                .unwrap_or(range.start)
+        };
+        TextPosition::new(new_offset)
+    }
+
+    fn move_to_text_boundary_at_direction(
+        self: Handle<Self>,
+        app: &mut App,
+        end: TextPosition,
+        forward: bool,
+        text_boundary: &dyn TextBoundary,
+    ) -> TextPosition {
+        let range = app.get(self).range;
+        debug_assert!(end.offset >= 0);
+        let caret_offset = match end.affinity {
+            TextAffinity::Upstream => {
+                if end.offset < 1 && !forward {
+                    debug_assert_eq!(end.offset, 0);
+                    return TextPosition::new(0);
+                }
+                let full_text = app.get(self).full_text.clone();
+                let character_boundary = CharacterBoundary::new(full_text);
+                character_boundary
+                    .get_leading_text_boundary_at(app, range.start + end.offset)
+                    .unwrap_or(range.start)
+                    .max(0)
+                    - 1
+            }
+            TextAffinity::Downstream => end.offset,
+        };
+        let offset = if forward {
+            text_boundary
+                .get_trailing_text_boundary_at(app, caret_offset)
+                .unwrap_or(range.end)
+        } else {
+            text_boundary
+                .get_leading_text_boundary_at(app, caret_offset)
+                .unwrap_or(range.start)
+        };
+        TextPosition::new(offset)
+    }
+
+    fn handle_vertical_movement(
+        self: Handle<Self>,
+        app: &mut App,
+        position: TextPosition,
+        horizontal_baseline_in_paragraph_coordinates: f64,
+        below: bool,
+    ) -> (TextPosition, SelectionResult) {
+        let range = app.get(self).range;
+        let paragraph = app.get(self).paragraph;
+        let constraints = paragraph.constraints(app);
+        paragraph.layout_text_with_constraints(app, constraints);
+        let lines = paragraph.painter_mut(app).compute_line_metrics();
+        let offset = paragraph.get_offset_for_caret(app, position, Rect::ZERO);
+        let mut current_line = lines.len() as i32 - 1;
+        for line_metrics in &lines {
+            if line_metrics.baseline > offset.dy() {
+                current_line = line_metrics.line_number;
+                break;
+            }
+        }
+        let new_position = if below && current_line == lines.len() as i32 - 1 {
+            TextPosition::with_affinity(range.end, TextAffinity::Upstream)
+        } else if !below && current_line == 0 {
+            TextPosition::new(range.start)
+        } else {
+            let new_line = if below {
+                current_line + 1
+            } else {
+                current_line - 1
+            };
+            let position = paragraph.get_position_for_offset(
+                app,
+                Offset::new(
+                    horizontal_baseline_in_paragraph_coordinates,
+                    lines[new_line as usize].baseline,
+                ),
+            );
+            self.clamp_text_position(app, position)
+        };
+        let result = if new_position.offset == range.start {
+            SelectionResult::Previous
+        } else if new_position.offset == range.end {
+            SelectionResult::Next
+        } else {
+            SelectionResult::End
+        };
+        debug_assert!(result != SelectionResult::Next || below);
+        debug_assert!(result != SelectionResult::Previous || !below);
+        (new_position, result)
+    }
+
+    fn handle_directionally_extend_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        horizontal_baseline: f64,
+        is_extent: bool,
+        movement: SelectionExtendDirection,
+    ) -> SelectionResult {
+        let transform = app
+            .get(self)
+            .paragraph
+            .as_object()
+            .get_transform_to(app, None);
+        let Some(inverse) = transform.invert() else {
+            return match movement {
+                SelectionExtendDirection::PreviousLine | SelectionExtendDirection::Backward => {
+                    SelectionResult::Previous
+                }
+                SelectionExtendDirection::NextLine | SelectionExtendDirection::Forward => {
+                    SelectionResult::Next
+                }
+            };
+        };
+        let baseline_in_paragraph_coordinates =
+            waft_painting::transform_point(&inverse, Offset::new(horizontal_baseline, 0.0)).dx();
+        debug_assert!(!baseline_in_paragraph_coordinates.is_nan());
+        let (new_position, result) = match movement {
+            SelectionExtendDirection::PreviousLine | SelectionExtendDirection::NextLine => {
+                debug_assert!(app.get(self).text_selection_end.is_some());
+                debug_assert!(app.get(self).text_selection_start.is_some());
+                let targeted_edge = if is_extent {
+                    app.get(self).text_selection_end.unwrap()
+                } else {
+                    app.get(self).text_selection_start.unwrap()
+                };
+                self.handle_vertical_movement(
+                    app,
+                    targeted_edge,
+                    baseline_in_paragraph_coordinates,
+                    movement == SelectionExtendDirection::NextLine,
+                )
+            }
+            SelectionExtendDirection::Forward | SelectionExtendDirection::Backward => {
+                if app.get(self).text_selection_end.is_none() {
+                    app.get_mut(self).text_selection_end =
+                        Some(if movement == SelectionExtendDirection::Forward {
+                            TextPosition::new(app.get(self).range.start)
+                        } else {
+                            TextPosition::with_affinity(
+                                app.get(self).range.end,
+                                TextAffinity::Upstream,
+                            )
+                        });
+                }
+                if app.get(self).text_selection_start.is_none() {
+                    let end = app.get(self).text_selection_end.unwrap();
+                    app.get_mut(self).text_selection_start = Some(end);
+                }
+                let targeted_edge = if is_extent {
+                    app.get(self).text_selection_end.unwrap()
+                } else {
+                    app.get(self).text_selection_start.unwrap()
+                };
+                let edge_offset = app
+                    .get(self)
+                    .paragraph
+                    .get_offset_for_position(app, targeted_edge);
+                let line_height = app.get(self).paragraph.preferred_line_height(app);
+                let baseline_offset = Offset::new(
+                    baseline_in_paragraph_coordinates,
+                    edge_offset.dy() - line_height / 2.0,
+                );
+                let new_position = app
+                    .get(self)
+                    .paragraph
+                    .get_position_for_offset(app, baseline_offset);
+                (new_position, SelectionResult::End)
+            }
+        };
+        if is_extent {
+            app.get_mut(self).text_selection_end = Some(new_position);
+        } else {
+            app.get_mut(self).text_selection_start = Some(new_position);
+        }
+        result
+    }
+
+    fn dispatch_selection_event_inner(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let existing_start = app.get(self).text_selection_start;
+        let existing_end = app.get(self).text_selection_end;
+        let result = match event {
+            SelectionEvent::StartEdgeUpdate {
+                global_position,
+                granularity,
+            }
+            | SelectionEvent::EndEdgeUpdate {
+                global_position,
+                granularity,
+            } => {
+                let is_end = matches!(event, SelectionEvent::EndEdgeUpdate { .. });
+                match granularity {
+                    TextGranularity::Character => {
+                        self.update_selection_edge(app, *global_position, is_end)
+                    }
+                    TextGranularity::Word => self.update_selection_edge_by_text_boundary(
+                        app,
+                        *global_position,
+                        is_end,
+                        BoundaryAtPosition::Word,
+                    ),
+                    TextGranularity::Paragraph => self
+                        .update_selection_edge_by_multi_selectable_text_boundary(
+                            app,
+                            *global_position,
+                            is_end,
+                            BoundaryInText::Paragraph,
+                        ),
+                    TextGranularity::Document | TextGranularity::Line => {
+                        debug_assert!(
+                            false,
+                            "Moving the selection edge by line or document is not supported."
+                        );
+                        unreachable!()
+                    }
+                }
+            }
+            SelectionEvent::Clear => self.handle_clear_selection(app),
+            SelectionEvent::SelectAll => self.handle_select_all(app),
+            SelectionEvent::SelectWord { global_position } => {
+                self.handle_select_word(app, *global_position)
+            }
+            SelectionEvent::SelectParagraph {
+                global_position,
+                absorb,
+            } => {
+                if *absorb {
+                    self.handle_select_all(app);
+                    app.get_mut(self).selectable_contains_origin_text_boundary = true;
+                    SelectionResult::Next
+                } else {
+                    self.handle_select_paragraph(app, *global_position)
+                }
+            }
+            SelectionEvent::GranularlyExtendSelection {
+                forward,
+                is_end,
+                granularity,
+            } => self.handle_granularly_extend_selection(app, *forward, *is_end, *granularity),
+            SelectionEvent::DirectionallyExtendSelection {
+                dx,
+                is_end,
+                direction,
+            } => self.handle_directionally_extend_selection(app, *dx, *is_end, *direction),
+        };
+        if existing_start != app.get(self).text_selection_start
+            || existing_end != app.get(self).text_selection_end
+        {
+            self.did_change_selection(app);
+        }
+        result
+    }
+
+    fn paint_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let (Some(start), Some(end)) = (
+            app.get(self).text_selection_start,
+            app.get(self).text_selection_end,
+        ) else {
+            return;
+        };
+        let paragraph = app.get(self).paragraph;
+        let Some(selection_color) = paragraph.selection_color(app) else {
+            return;
+        };
+        let selection = TextSelection::new(start.offset, end.offset);
+        let selection_paint = Paint::from_color(selection_color.into());
+        let boxes = paragraph.get_boxes_for_selection(
+            app,
+            selection,
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        for text_box in boxes {
+            context
+                .canvas()
+                .draw_rect(text_box.to_rect().shift(offset), &selection_paint);
+        }
+    }
+
+    #[allow(dead_code)] // SelectableRegion's delegate paints the handles.
+    fn paint_handles(
+        self: Handle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        let geometry = app.get(self).selection_geometry.clone();
+        let start_link = app.get(self).start_handle_layer_link.clone();
+        let end_link = app.get(self).end_handle_layer_link.clone();
+        if let (Some(link), Some(point)) = (start_link, geometry.start_selection_point) {
+            let layer = LeaderLayer::new(app, link);
+            layer.set_offset(app, offset + point.local_position);
+            context.push_layer(
+                app,
+                ContainerLayer::as_container_layer(layer),
+                |_, _, _| {},
+                Offset::ZERO,
+                None,
+            );
+        }
+        if let (Some(link), Some(point)) = (end_link, geometry.end_selection_point) {
+            let layer = LeaderLayer::new(app, link);
+            layer.set_offset(app, offset + point.local_position);
+            context.push_layer(
+                app,
+                ContainerLayer::as_container_layer(layer),
+                |_, _, _| {},
+                Offset::ZERO,
+                None,
+            );
+        }
+    }
+}
+/// The fragment's own line boundary: Dart's `LineBoundary(this)` in `_SelectableFragment`.
+struct FragmentLineBoundary {
+    fragment: Handle<SelectableFragment>,
+}
+
+impl TextBoundary for FragmentLineBoundary {
+    fn get_text_boundary_at(&self, app: &mut App, position: i32) -> TextRange {
+        let selection = self
+            .fragment
+            .get_line_at_offset(app, TextPosition::new(position.max(0)));
+        selection.range()
+    }
+}
+
+impl SelectableFragment {
+    fn get_line_at_offset(
+        self: Handle<Self>,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextSelection {
+        let range = app.get(self).range;
+        let line = app.get(self).paragraph.get_line_at_offset(app, position);
+        TextSelection::new(
+            line.base_offset.clamp(range.start, range.end),
+            line.extent_offset.clamp(range.start, range.end),
+        )
+    }
+
+    fn bounding_boxes(self: Handle<Self>, app: &mut App) -> Vec<Rect> {
+        if let Some(cached) = &app.get(self).cached_bounding_boxes {
+            return cached.clone();
+        }
+        let range = app.get(self).range;
+        let paragraph = app.get(self).paragraph;
+        let boxes = paragraph.get_boxes_for_selection(
+            app,
+            TextSelection::new(range.start, range.end),
+            BoxHeightStyle::Max,
+            BoxWidthStyle::Tight,
+        );
+        let rects: Vec<Rect> = if boxes.is_empty() {
+            let offset = paragraph.get_offset_for_position(app, TextPosition::new(range.start));
+            let line_height = paragraph.preferred_line_height(app);
+            vec![Rect::from_ltrb(
+                offset.dx(),
+                offset.dy() - line_height,
+                offset.dx(),
+                offset.dy(),
+            )]
+        } else {
+            boxes
+                .into_iter()
+                .map(|text_box| text_box.to_rect())
+                .collect()
+        };
+        app.get_mut(self).cached_bounding_boxes = Some(rects.clone());
+        rects
+    }
+}
+
+impl ChangeNotifier for SelectableFragment {
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self.change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self.change_notifier
+    }
+}
+
+impl SelectionHandler for SelectableFragment {
+    fn selection_geometry(self: Handle<Self>, app: &App) -> SelectionGeometry {
+        app.get(self).selection_geometry.clone()
+    }
+
+    fn push_handle_layers(
+        self: Handle<Self>,
+        app: &mut App,
+        start_handle: Option<Ref<LayerLink>>,
+        end_handle: Option<Ref<LayerLink>>,
+    ) {
+        let paragraph = app.get(self).paragraph;
+        if !paragraph.as_object().attached(app) {
+            debug_assert!(
+                start_handle.is_none() && end_handle.is_none(),
+                "Only clean up can be called."
+            );
+            return;
+        }
+        let mut needs_paint = false;
+        if app.get(self).start_handle_layer_link != start_handle {
+            app.get_mut(self).start_handle_layer_link = start_handle;
+            needs_paint = true;
+        }
+        if app.get(self).end_handle_layer_link != end_handle {
+            app.get_mut(self).end_handle_layer_link = end_handle;
+            needs_paint = true;
+        }
+        if needs_paint {
+            paragraph.mark_needs_paint(app);
+        }
+    }
+
+    fn selected_content(self: Handle<Self>, app: &App) -> Option<SelectedContent> {
+        self.selected_content_inner(app)
+    }
+
+    fn selection(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
+        self.selection_inner(app)
+    }
+
+    fn dispatch_selection_event(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        self.dispatch_selection_event_inner(app, event)
+    }
+
+    fn content_length(self: Handle<Self>, app: &App) -> usize {
+        let range = app.get(self).range;
+        (range.end - range.start) as usize
+    }
+}
+
+impl Selectable for SelectableFragment {
+    fn get_transform_to(
+        self: Handle<Self>,
+        app: &App,
+        ancestor: Option<AnyRenderObject>,
+    ) -> Matrix4 {
+        app.get(self)
+            .paragraph
+            .as_object()
+            .get_transform_to(app, ancestor)
+    }
+
+    fn size(self: Handle<Self>, app: &mut App) -> Size {
+        self.rect(app).size()
+    }
+
+    fn bounding_boxes(self: Handle<Self>, app: &mut App) -> Vec<Rect> {
+        SelectableFragment::bounding_boxes(self, app)
+    }
+
+    fn dispose_selectable(self: Handle<Self>, app: &mut App) {
+        SelectionRegistrant::dispose_selection_registrant(self, app);
+        ChangeNotifierData::dispose(app, self);
+    }
+}
+
+impl SelectionRegistrant for SelectableFragment {
+    fn selection_registrant_data(self: Handle<Self>, app: &App) -> &SelectionRegistrantData {
+        &app.get(self).selection_registrant
+    }
+
+    fn selection_registrant_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SelectionRegistrantData {
+        &mut app.get_mut(self).selection_registrant
     }
 }
 
@@ -1644,5 +4385,535 @@ mod tests {
         assert_eq!(*log.borrow(), ["enter"]);
         tracker.update_with_event(&mut app, &mouse(Offset::new(5000.0, 5000.0)), None);
         assert_eq!(*log.borrow(), ["enter", "exit"]);
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    //! The `Selection` group of `paragraph_test.dart`.
+
+    use waft_embedder::{
+        BoxHeightStyle, BoxWidthStyle, Color, Offset, Rect, TextPosition, TextSelection,
+    };
+    use waft_foundation::{AppCell, Handle};
+    use waft_painting::{PaintingBinding, TextSpan};
+
+    use super::*;
+    use crate::selection::{
+        AnySelectable, SelectionEvent, SelectionExtendDirection, SelectionRegistrar,
+        TextGranularity,
+    };
+    use crate::testing::EnginePhase;
+
+    struct TestSelectionRegistrar {
+        selectables: Vec<AnySelectable>,
+    }
+
+    impl SelectionRegistrar for TestSelectionRegistrar {
+        fn add(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+            let selectables = &mut app.get_mut(self).selectables;
+            if !selectables.contains(&selectable) {
+                selectables.push(selectable);
+            }
+        }
+
+        fn remove(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+            app.get_mut(self).selectables.retain(|s| *s != selectable);
+        }
+    }
+
+    fn install_fonts(app: &mut App) {
+        let binding = PaintingBinding::instance(app);
+        if !binding.has_fonts(app) {
+            binding.install_fonts(app, |fonts| {
+                fonts.add_source(valo_system_fonts::SystemFonts::load());
+            });
+        }
+    }
+
+    fn span(text: &str) -> InlineSpanRef {
+        TextSpan::new().text(text).into_span()
+    }
+
+    fn registrar(app: &mut App) -> Ref<TestSelectionRegistrar> {
+        app.create(TestSelectionRegistrar {
+            selectables: Vec::new(),
+        })
+    }
+
+    fn selectables(app: &App, registrar: &Ref<TestSelectionRegistrar>) -> Vec<AnySelectable> {
+        app.get(registrar).selectables.clone()
+    }
+
+    fn paragraph_with_registrar(
+        app: &mut App,
+        text: &str,
+        registrar: &Ref<TestSelectionRegistrar>,
+    ) -> RenderHandle<RenderParagraph> {
+        install_fonts(app);
+        let paragraph = RenderParagraph::new(app, span(text), TextDirection::Ltr, None);
+        paragraph.set_registrar(app, Some(registrar.as_selection_registrar()));
+        paragraph
+    }
+
+    fn selection_paragraph(
+        app: &mut App,
+        paragraph: RenderHandle<RenderParagraph>,
+        registrar: &Ref<TestSelectionRegistrar>,
+        start: TextPosition,
+        end: TextPosition,
+    ) {
+        for selectable in selectables(app, registrar) {
+            let start_offset =
+                paragraph.get_offset_for_caret(app, start, Rect::ZERO) + Offset::new(0.0, 5.0);
+            let end_offset =
+                paragraph.get_offset_for_caret(app, end, Rect::ZERO) + Offset::new(0.0, 5.0);
+            selectable
+                .dispatch_selection_event(app, &SelectionEvent::for_start(start_offset, None));
+            selectable.dispatch_selection_event(app, &SelectionEvent::for_end(end_offset, None));
+        }
+    }
+
+    fn start_and_end(app: &App, paragraph: RenderHandle<RenderParagraph>) -> Option<(i32, i32)> {
+        let selections = paragraph.selections(app);
+        selections
+            .first()
+            .map(|selection| (selection.start(), selection.end()))
+    }
+
+    // 'subscribe to SelectionRegistrar'.
+    #[test]
+    fn subscribe_to_selection_registrar() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph = paragraph_with_registrar(&mut app, "1234567", &registrar);
+        assert_eq!(selectables(&app, &registrar).len(), 1);
+
+        paragraph.set_text(&mut app, span(""));
+        assert_eq!(selectables(&app, &registrar).len(), 0);
+    }
+
+    // 'paints selection highlight'.
+    #[test]
+    fn paints_selection_highlight() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let selection_color = Color::from_argb(0xAF, 0x66, 0x94, 0xE8);
+        let paragraph = paragraph_with_registrar(&mut app, "1234567", &registrar);
+        paragraph.set_selection_color(&mut app, Some(selection_color));
+        lay_out(&mut app, paragraph);
+        let before = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        assert!(
+            !before
+                .iter()
+                .any(|op| matches!(op, waft_embedder::valo::Op::DrawRect { .. }))
+        );
+
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(1),
+            TextPosition::new(5),
+        );
+        let boxes = paragraph.get_boxes_for_selection(
+            &mut app,
+            TextSelection::new(1, 5),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        let expected = boxes.first().expect("a box for the selection").to_rect();
+
+        let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        let drawn: Vec<(Rect, Color)> = ops
+            .iter()
+            .filter_map(|op| match op {
+                waft_embedder::valo::Op::DrawRect { rect, paint, .. } => Some((
+                    Rect::from_ltrb(
+                        rect.x as f64,
+                        rect.y as f64,
+                        (rect.x + rect.width) as f64,
+                        (rect.y + rect.height) as f64,
+                    ),
+                    paint.color.into(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn[0].0, expected);
+        let actual = drawn[0].1;
+        let step = 1.0 / 255.0;
+        assert!(
+            actual.color_space == selection_color.color_space
+                && (actual.a - selection_color.a).abs() <= step
+                && (actual.r - selection_color.r).abs() <= step
+                && (actual.g - selection_color.g).abs() <= step
+                && (actual.b - selection_color.b).abs() <= step,
+            "{actual:?} is not {selection_color:?}"
+        );
+        let first_rect = ops
+            .iter()
+            .position(|op| matches!(op, waft_embedder::valo::Op::DrawRect { .. }))
+            .expect("a selection rect");
+        let first_glyph = ops
+            .iter()
+            .position(|op| matches!(op, waft_embedder::valo::Op::GlyphRun { .. }))
+            .expect("the text");
+        assert!(
+            first_rect < first_glyph,
+            "the highlight is painted before the text"
+        );
+
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(2),
+            TextPosition::new(4),
+        );
+        let boxes = paragraph.get_boxes_for_selection(
+            &mut app,
+            TextSelection::new(2, 4),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        let expected = boxes.first().expect("a box").to_rect();
+        let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        let rect = ops
+            .iter()
+            .find_map(|op| match op {
+                waft_embedder::valo::Op::DrawRect { rect, .. } => Some(Rect::from_ltrb(
+                    rect.x as f64,
+                    rect.y as f64,
+                    (rect.x + rect.width) as f64,
+                    (rect.y + rect.height) as f64,
+                )),
+                _ => None,
+            })
+            .expect("a selection rect");
+        assert_eq!(rect, expected);
+    }
+
+    fn lay_out(app: &mut App, paragraph: RenderHandle<RenderParagraph>) {
+        let constraints = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
+        crate::testing::layout_with(
+            app,
+            paragraph.as_box(),
+            Some(constraints),
+            waft_painting::AlignmentGeometry::TOP_LEFT,
+            EnginePhase::Layout,
+        );
+    }
+
+    // 'can granularly extend selection - character'.
+    #[test]
+    fn can_granularly_extend_selection_character() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        assert_eq!(selectables(&app, &registrar).len(), 1);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(4),
+            TextPosition::new(5),
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((4, 5)));
+        let selectable = selectables(&app, &registrar)[0];
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: true,
+                is_end: true,
+                granularity: TextGranularity::Character,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((4, 6)));
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: false,
+                is_end: true,
+                granularity: TextGranularity::Character,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((4, 5)));
+    }
+
+    // 'can granularly extend selection - word'.
+    #[test]
+    fn can_granularly_extend_selection_word() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(4),
+            TextPosition::new(5),
+        );
+        let selectable = selectables(&app, &registrar)[0];
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: true,
+                is_end: true,
+                granularity: TextGranularity::Word,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((4, 7)));
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: false,
+                is_end: true,
+                granularity: TextGranularity::Word,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((4, 4)));
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: false,
+                is_end: true,
+                granularity: TextGranularity::Word,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((0, 4)));
+    }
+
+    // 'can granularly extend selection - line'.
+    #[test]
+    fn can_granularly_extend_selection_line() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(4),
+            TextPosition::new(5),
+        );
+        let selectable = selectables(&app, &registrar)[0];
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: true,
+                is_end: true,
+                granularity: TextGranularity::Line,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((4, 11)));
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: false,
+                is_end: true,
+                granularity: TextGranularity::Line,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((0, 4)));
+    }
+
+    // 'can granularly extend selection - document'.
+    #[test]
+    fn can_granularly_extend_selection_document() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(14),
+            TextPosition::new(15),
+        );
+        let selectable = selectables(&app, &registrar)[0];
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: true,
+                is_end: true,
+                granularity: TextGranularity::Document,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((14, 31)));
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: false,
+                is_end: true,
+                granularity: TextGranularity::Document,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((0, 14)));
+    }
+
+    // 'can granularly extend selection when no active selection'.
+    #[test]
+    fn can_granularly_extend_selection_when_no_active_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        let selectable = selectables(&app, &registrar)[0];
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: true,
+                is_end: true,
+                granularity: TextGranularity::Word,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((0, 3)));
+        selectable.dispatch_selection_event(&mut app, &SelectionEvent::Clear);
+        assert!(paragraph.selections(&app).is_empty());
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::GranularlyExtendSelection {
+                forward: false,
+                is_end: true,
+                granularity: TextGranularity::Word,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((28, 31)));
+    }
+
+    // 'paints selection when tap at chinese character'.
+    #[test]
+    fn paints_selection_when_tap_at_chinese_character() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let selection_color = Color::from_argb(0xAF, 0x66, 0x94, 0xE8);
+        let paragraph = paragraph_with_registrar(&mut app, "\u{4F60}\u{597D}", &registrar);
+        paragraph.set_selection_color(&mut app, Some(selection_color));
+        lay_out(&mut app, paragraph);
+        let before = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        assert!(
+            !before
+                .iter()
+                .any(|op| matches!(op, waft_embedder::valo::Op::DrawRect { .. }))
+        );
+
+        for selectable in selectables(&app, &registrar) {
+            selectable.dispatch_selection_event(
+                &mut app,
+                &SelectionEvent::SelectWord {
+                    global_position: Offset::new(7.0, 0.0),
+                },
+            );
+        }
+        let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
+        let rect = ops.iter().find_map(|op| match op {
+            waft_embedder::valo::Op::DrawRect { rect, .. } => Some(rect),
+            _ => None,
+        });
+        assert!(rect.is_some_and(|rect| rect.width > 0.0 && rect.height > 0.0));
+    }
+
+    // 'can directionally extend selection'.
+    #[test]
+    fn can_directionally_extend_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        selection_paragraph(
+            &mut app,
+            paragraph,
+            &registrar,
+            TextPosition::new(14),
+            TextPosition::new(15),
+        );
+        let selectable = selectables(&app, &registrar)[0];
+        let geometry = selectable.selection_geometry(&app);
+        let transform = selectable.get_transform_to(&app, None);
+        let baseline = transform
+            .map_point(waft_embedder::valo::Point::new(
+                geometry.end_selection_point.unwrap().local_position.dx() as f32,
+                geometry.end_selection_point.unwrap().local_position.dy() as f32,
+            ))
+            .x as f64;
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::DirectionallyExtendSelection {
+                dx: baseline,
+                is_end: true,
+                direction: SelectionExtendDirection::NextLine,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((14, 24)));
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::DirectionallyExtendSelection {
+                dx: baseline,
+                is_end: true,
+                direction: SelectionExtendDirection::PreviousLine,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((14, 15)));
+    }
+
+    // 'can directionally extend selection when no selection'.
+    #[test]
+    fn can_directionally_extend_selection_when_no_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let registrar = registrar(&mut app);
+        let paragraph =
+            paragraph_with_registrar(&mut app, "how are you\nI am fine\nThank you", &registrar);
+        lay_out(&mut app, paragraph);
+        let selectable = selectables(&app, &registrar)[0];
+        let size = selectable.size(&mut app);
+        let transform = selectable.get_transform_to(&app, None);
+        let baseline = transform
+            .map_point(waft_embedder::valo::Point::new(
+                (size.width() / 2.0) as f32,
+                0.0,
+            ))
+            .x as f64;
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::DirectionallyExtendSelection {
+                dx: baseline,
+                is_end: true,
+                direction: SelectionExtendDirection::Forward,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((0, 5)));
+        selectable.dispatch_selection_event(&mut app, &SelectionEvent::Clear);
+        assert!(paragraph.selections(&app).is_empty());
+        selectable.dispatch_selection_event(
+            &mut app,
+            &SelectionEvent::DirectionallyExtendSelection {
+                dx: baseline,
+                is_end: true,
+                direction: SelectionExtendDirection::Backward,
+            },
+        );
+        assert_eq!(start_and_end(&app, paragraph), Some((27, 31)));
     }
 }
