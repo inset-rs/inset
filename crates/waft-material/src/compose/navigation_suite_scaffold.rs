@@ -1,0 +1,513 @@
+//! One list of destinations shown as a bar, a rail or a drawer for the window's size.
+
+use waft_embedder::TextDirection;
+use waft_foundation::{App, ValueChanged};
+use waft_widgets::{
+    BuildContext, Column, Directionality, Expanded, IntoWidget, KeyRef, MediaQuery, Positioned,
+    Row, SizedBox, Stack, StatelessWidget, Text, WidgetRef,
+};
+
+use crate::compose::{WindowSizeClass, WindowWidthSizeClass};
+use crate::navigation_bar::{NavigationBar, NavigationDestination};
+use crate::navigation_drawer::{NavigationDrawer, NavigationDrawerDestination};
+use crate::navigation_rail::{NavigationRail, NavigationRailDestination};
+
+/// What a [`NavigationSuiteScaffold`] shows its destinations in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavigationSuiteType {
+    /// A bottom bar.
+    NavigationBar,
+    /// A rail with icons and optional labels.
+    NavigationRail,
+    /// Flutter's extended rail: icons with labels, 256 wide.
+    ExtendedNavigationRail,
+    /// A permanent drawer beside the content.
+    NavigationDrawer,
+    /// No navigation widget; the app shows its own.
+    None,
+}
+
+impl NavigationSuiteType {
+    /// A bar when the width or height is Compact; the extended rail from Large; the rail
+    /// otherwise.
+    pub fn from_window_size_class(size_class: WindowSizeClass) -> NavigationSuiteType {
+        if size_class.width == WindowWidthSizeClass::Compact
+            || size_class.height == crate::compose::WindowHeightSizeClass::Compact
+        {
+            NavigationSuiteType::NavigationBar
+        } else {
+            match size_class.width {
+                WindowWidthSizeClass::Large | WindowWidthSizeClass::ExtraLarge => {
+                    NavigationSuiteType::ExtendedNavigationRail
+                }
+                _ => NavigationSuiteType::NavigationRail,
+            }
+        }
+    }
+}
+
+/// One destination in a navigation suite.
+#[derive(Clone)]
+pub struct NavigationSuiteDestination {
+    /// The icon shown when the destination is not selected.
+    pub icon: WidgetRef,
+    /// The icon shown when it is selected.
+    pub selected_icon: Option<WidgetRef>,
+    /// Its label.
+    pub label: String,
+    /// Whether it can be selected.
+    pub enabled: bool,
+}
+
+impl NavigationSuiteDestination {
+    /// Creates a destination with an icon and a label.
+    pub fn new<K>(
+        icon: impl IntoWidget<K>,
+        label: impl Into<String>,
+    ) -> NavigationSuiteDestination {
+        NavigationSuiteDestination {
+            icon: icon.into_widget(),
+            selected_icon: None,
+            label: label.into(),
+            enabled: true,
+        }
+    }
+
+    /// The icon shown when the destination is selected.
+    pub fn selected_icon<K>(
+        mut self,
+        selected_icon: impl IntoWidget<K>,
+    ) -> NavigationSuiteDestination {
+        self.selected_icon = Some(selected_icon.into_widget());
+        self
+    }
+
+    /// Whether the destination can be selected. Defaults to `true`.
+    pub fn enabled(mut self, enabled: bool) -> NavigationSuiteDestination {
+        self.enabled = enabled;
+        self
+    }
+}
+
+/// Content beside a bar, rail or drawer built from one list of destinations.
+pub struct NavigationSuiteScaffold {
+    /// The scaffold's key.
+    pub key: Option<KeyRef>,
+    /// The destinations, in order.
+    pub destinations: Vec<NavigationSuiteDestination>,
+    /// The selected destination.
+    pub selected_index: usize,
+    /// Called with a selected destination's index.
+    pub on_destination_selected: Option<ValueChanged<usize>>,
+    /// What to show the destinations in; `None` follows the window's size class.
+    pub navigation_suite_type: Option<NavigationSuiteType>,
+    /// The rail's leading widget, the drawer's header, or a button above the bar's end.
+    pub primary_action: Option<WidgetRef>,
+    /// The content beside the navigation widget.
+    pub content: WidgetRef,
+}
+
+impl NavigationSuiteScaffold {
+    /// Creates a suite around `content`.
+    pub fn new<K>(
+        destinations: Vec<NavigationSuiteDestination>,
+        content: impl IntoWidget<K>,
+    ) -> NavigationSuiteScaffold {
+        NavigationSuiteScaffold {
+            key: None,
+            destinations,
+            selected_index: 0,
+            on_destination_selected: None,
+            navigation_suite_type: None,
+            primary_action: None,
+            content: content.into_widget(),
+        }
+    }
+
+    /// Sets the selected destination.
+    pub fn selected_index(mut self, selected_index: usize) -> NavigationSuiteScaffold {
+        self.selected_index = selected_index;
+        self
+    }
+
+    /// Sets the callback for a selected destination.
+    pub fn on_destination_selected(
+        mut self,
+        on_destination_selected: ValueChanged<usize>,
+    ) -> NavigationSuiteScaffold {
+        self.on_destination_selected = Some(on_destination_selected);
+        self
+    }
+
+    /// Sets what to show the destinations in.
+    pub fn navigation_suite_type(
+        mut self,
+        navigation_suite_type: NavigationSuiteType,
+    ) -> NavigationSuiteScaffold {
+        self.navigation_suite_type = Some(navigation_suite_type);
+        self
+    }
+
+    /// Sets the rail's leading widget, the drawer's header, or the button above the bar's end.
+    pub fn primary_action<K>(
+        mut self,
+        primary_action: impl IntoWidget<K>,
+    ) -> NavigationSuiteScaffold {
+        self.primary_action = Some(primary_action.into_widget());
+        self
+    }
+
+    /// Sets the scaffold's key.
+    pub fn key(mut self, key: KeyRef) -> NavigationSuiteScaffold {
+        self.key = Some(key);
+        self
+    }
+
+    fn bar(&self) -> WidgetRef {
+        let destinations = self
+            .destinations
+            .iter()
+            .map(|destination| {
+                let mut item =
+                    NavigationDestination::new(destination.icon.clone(), destination.label.clone())
+                        .enabled(destination.enabled);
+                if let Some(selected_icon) = &destination.selected_icon {
+                    item = item.selected_icon(selected_icon.clone());
+                }
+                item.into_widget()
+            })
+            .collect::<Vec<_>>();
+        let mut bar = NavigationBar::new(destinations).selected_index(self.selected_index);
+        if let Some(on_selected) = &self.on_destination_selected {
+            let on_selected = on_selected.clone();
+            bar = bar.on_destination_selected(move |app, index| on_selected(app, index));
+        }
+        bar.into_widget()
+    }
+
+    fn rail(&self, extended: bool) -> WidgetRef {
+        let destinations = self
+            .destinations
+            .iter()
+            .map(|destination| {
+                let selected_icon = destination
+                    .selected_icon
+                    .clone()
+                    .unwrap_or_else(|| destination.icon.clone());
+                NavigationRailDestination::new(
+                    destination.icon.clone(),
+                    Text::new(destination.label.clone()),
+                )
+                .selected_icon(selected_icon)
+                .disabled(!destination.enabled)
+            })
+            .collect::<Vec<_>>();
+        let mut rail = NavigationRail::new(destinations, Some(self.selected_index))
+            .label_type(crate::navigation_rail::NavigationRailLabelType::All);
+        if extended {
+            rail = rail
+                .extended(true)
+                .label_type(crate::navigation_rail::NavigationRailLabelType::None)
+                .min_extended_width(256.0);
+        }
+        if let Some(primary_action) = &self.primary_action {
+            rail = rail.leading(primary_action.clone());
+        }
+        if let Some(on_selected) = &self.on_destination_selected {
+            let on_selected = on_selected.clone();
+            rail = rail.on_destination_selected(move |app, index| on_selected(app, index));
+        }
+        rail.into_widget()
+    }
+
+    fn drawer(&self) -> WidgetRef {
+        let destinations = self
+            .destinations
+            .iter()
+            .map(|destination| {
+                let mut item = NavigationDrawerDestination::new(
+                    destination.icon.clone(),
+                    Text::new(destination.label.clone()),
+                )
+                .enabled(destination.enabled);
+                if let Some(selected_icon) = &destination.selected_icon {
+                    item = item.selected_icon(selected_icon.clone());
+                }
+                item.into_widget()
+            })
+            .collect::<Vec<_>>();
+        let mut drawer =
+            NavigationDrawer::new(destinations).selected_index(Some(self.selected_index as i32));
+        if let Some(primary_action) = &self.primary_action {
+            drawer = drawer.header(primary_action.clone());
+        }
+        if let Some(on_selected) = &self.on_destination_selected {
+            let on_selected = on_selected.clone();
+            drawer = drawer.on_destination_selected(std::rc::Rc::new(move |app, index| {
+                on_selected(app, index as usize);
+            }));
+        }
+        SizedBox::new().width(360.0).child(drawer).into_widget()
+    }
+
+    fn content_without_padding(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        suite_type: NavigationSuiteType,
+    ) -> WidgetRef {
+        let remove_start = matches!(
+            suite_type,
+            NavigationSuiteType::NavigationRail
+                | NavigationSuiteType::ExtendedNavigationRail
+                | NavigationSuiteType::NavigationDrawer
+        );
+        let remove_bottom = suite_type == NavigationSuiteType::NavigationBar;
+        if !remove_start && !remove_bottom {
+            return self.content.clone();
+        }
+        let rtl = Directionality::of(app, context) == TextDirection::Rtl;
+        let data = MediaQuery::of(app, context).remove_padding(
+            remove_start && !rtl,
+            false,
+            remove_start && rtl,
+            remove_bottom,
+        );
+        MediaQuery::new(data, self.content.clone()).into_widget()
+    }
+}
+
+impl std::fmt::Debug for NavigationSuiteScaffold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NavigationSuiteScaffold")
+            .field("key", &self.key)
+            .field("selected_index", &self.selected_index)
+            .field("navigation_suite_type", &self.navigation_suite_type)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StatelessWidget for NavigationSuiteScaffold {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        let suite_type = self.navigation_suite_type.unwrap_or_else(|| {
+            NavigationSuiteType::from_window_size_class(WindowSizeClass::of(app, context))
+        });
+        let content = self.content_without_padding(app, context, suite_type);
+        match suite_type {
+            NavigationSuiteType::None => content,
+            NavigationSuiteType::NavigationBar => {
+                let mut stack_children = vec![
+                    Column::new()
+                        .children([Expanded::new(content).into_widget(), self.bar()])
+                        .into_widget(),
+                ];
+                if let Some(primary_action) = &self.primary_action {
+                    stack_children.push(
+                        Positioned::new(primary_action.clone())
+                            .right(16.0)
+                            .bottom(96.0)
+                            .into_widget(),
+                    );
+                }
+                Stack::new().children(stack_children).into_widget()
+            }
+            NavigationSuiteType::NavigationRail => Row::new()
+                .children([self.rail(false), Expanded::new(content).into_widget()])
+                .into_widget(),
+            NavigationSuiteType::ExtendedNavigationRail => Row::new()
+                .children([self.rail(true), Expanded::new(content).into_widget()])
+                .into_widget(),
+            NavigationSuiteType::NavigationDrawer => Row::new()
+                .children([self.drawer(), Expanded::new(content).into_widget()])
+                .into_widget(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use waft_embedder::Size;
+    use waft_foundation::App;
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
+    use waft_widgets::{MediaQueryData, Text};
+
+    use super::*;
+    use crate::compose::WindowHeightSizeClass;
+    use crate::navigation_rail::NavigationRailLabelType;
+    use crate::test_support::material_app;
+    use crate::theme_data::ThemeData;
+
+    fn size_class(width: WindowWidthSizeClass, height: WindowHeightSizeClass) -> WindowSizeClass {
+        WindowSizeClass { width, height }
+    }
+
+    fn destination(label: &str) -> NavigationSuiteDestination {
+        NavigationSuiteDestination::new(Text::new(format!("{label} icon")), label)
+    }
+
+    fn suite() -> NavigationSuiteScaffold {
+        NavigationSuiteScaffold::new(
+            vec![destination("A"), destination("B")],
+            Text::new("content"),
+        )
+    }
+
+    fn pump(tester: &mut WidgetTester, width: f64, height: f64, suite: NavigationSuiteScaffold) {
+        let theme = ThemeData::new(&tester.cell.borrow());
+        let home = MediaQuery::new(MediaQueryData::new().size(Size::new(width, height)), suite);
+        tester.pump_widget(material_app(theme, home.into_widget()));
+    }
+
+    #[test]
+    fn the_suite_type_follows_the_window() {
+        assert_eq!(
+            NavigationSuiteType::from_window_size_class(size_class(
+                WindowWidthSizeClass::Compact,
+                WindowHeightSizeClass::Expanded
+            )),
+            NavigationSuiteType::NavigationBar
+        );
+        assert_eq!(
+            NavigationSuiteType::from_window_size_class(size_class(
+                WindowWidthSizeClass::Expanded,
+                WindowHeightSizeClass::Compact
+            )),
+            NavigationSuiteType::NavigationBar
+        );
+        assert_eq!(
+            NavigationSuiteType::from_window_size_class(size_class(
+                WindowWidthSizeClass::Medium,
+                WindowHeightSizeClass::Expanded
+            )),
+            NavigationSuiteType::NavigationRail
+        );
+        assert_eq!(
+            NavigationSuiteType::from_window_size_class(size_class(
+                WindowWidthSizeClass::Expanded,
+                WindowHeightSizeClass::Expanded
+            )),
+            NavigationSuiteType::NavigationRail
+        );
+        assert_eq!(
+            NavigationSuiteType::from_window_size_class(size_class(
+                WindowWidthSizeClass::Large,
+                WindowHeightSizeClass::Expanded
+            )),
+            NavigationSuiteType::ExtendedNavigationRail
+        );
+        assert_eq!(
+            NavigationSuiteType::from_window_size_class(size_class(
+                WindowWidthSizeClass::ExtraLarge,
+                WindowHeightSizeClass::Expanded
+            )),
+            NavigationSuiteType::ExtendedNavigationRail
+        );
+    }
+
+    #[test]
+    fn a_compact_window_shows_a_navigation_bar() {
+        test_widgets(|tester| {
+            pump(tester, 400.0, 700.0, suite());
+            assert_eq!(find::by_type::<NavigationBar>().evaluate(tester).len(), 1);
+            assert_eq!(find::by_type::<NavigationRail>().evaluate(tester).len(), 0);
+            assert!(!find::text("A").evaluate(tester).is_empty());
+        });
+    }
+
+    #[test]
+    fn a_short_window_keeps_the_bar() {
+        test_widgets(|tester| {
+            pump(tester, 800.0, 400.0, suite());
+            assert_eq!(find::by_type::<NavigationBar>().evaluate(tester).len(), 1);
+            assert_eq!(find::by_type::<NavigationRail>().evaluate(tester).len(), 0);
+        });
+    }
+
+    #[test]
+    fn a_medium_window_shows_a_rail_with_labels() {
+        test_widgets(|tester| {
+            pump(tester, 800.0, 700.0, suite());
+            assert_eq!(find::by_type::<NavigationRail>().evaluate(tester).len(), 1);
+            let (extended, labels) = tester.widget(
+                find::by_type::<NavigationRail>(),
+                |rail: &NavigationRail| (rail.extended, rail.label_type),
+            );
+            assert!(!extended);
+            assert_eq!(labels, Some(NavigationRailLabelType::All));
+        });
+    }
+
+    #[test]
+    fn a_large_window_shows_the_extended_rail() {
+        test_widgets(|tester| {
+            pump(tester, 1300.0, 700.0, suite());
+            let (extended, width, labels) = tester.widget(
+                find::by_type::<NavigationRail>(),
+                |rail: &NavigationRail| (rail.extended, rail.min_extended_width, rail.label_type),
+            );
+            assert!(extended);
+            assert_eq!(width, Some(256.0));
+            assert_eq!(labels, Some(NavigationRailLabelType::None));
+        });
+    }
+
+    #[test]
+    fn an_app_can_choose_the_drawer() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                1300.0,
+                700.0,
+                suite().navigation_suite_type(NavigationSuiteType::NavigationDrawer),
+            );
+            assert_eq!(
+                find::by_type::<NavigationDrawer>().evaluate(tester).len(),
+                1
+            );
+            assert_eq!(find::by_type::<NavigationRail>().evaluate(tester).len(), 0);
+        });
+    }
+
+    #[test]
+    fn selecting_a_destination_reports_its_index() {
+        test_widgets(|tester| {
+            let selected = Rc::new(Cell::new(None));
+            let callback = Rc::clone(&selected);
+            pump(
+                tester,
+                800.0,
+                700.0,
+                suite().on_destination_selected(Rc::new(move |_app: &mut App, index: usize| {
+                    callback.set(Some(index));
+                })),
+            );
+            tester.tap(find::text("B"));
+            assert_eq!(selected.get(), Some(1));
+        });
+    }
+
+    #[test]
+    fn the_primary_action_leads_the_rail() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                800.0,
+                700.0,
+                suite().primary_action(Text::new("compose")),
+            );
+            let leading = tester.widget(
+                find::by_type::<NavigationRail>(),
+                |rail: &NavigationRail| rail.leading.is_some(),
+            );
+            assert!(leading);
+            assert!(!find::text("compose").evaluate(tester).is_empty());
+        });
+    }
+}

@@ -32,6 +32,14 @@ Ported against: b8f12c706099a47e1e44d9772d03e14a4ae37146
   Reason: framework — Flutter's Navigator 2.0 owns the page list and its back gestures, and the app owns the back stack.
   Affect: an app supplies one entry-page builder, one scene-page builder and a truncate callback; a phone's detail is an ordinary pushed page with predictive back and the platform's swipe.
 
+## navigation_suite_scaffold.rs → NavigationSuiteScaffold.kt
+- Change: `NavigationSuiteType` has Compose's bar, rail and drawer plus Flutter's extended `NavigationRail`, and the default is a bar when the width or height is Compact, the rail at Medium and Expanded, and the extended rail from Large.
+  Reason: framework — Flutter has an extended rail and neither Compose's short navigation bar nor its wide navigation rail, and wide Flutter windows conventionally take a labelled rail.
+  Affect: crossing 1200 runs the rail's own extend animation instead of swapping to Compose's collapsed wide rail, and a drawer is only used when the app asks for one.
+- Change: the suite builds Waft's `NavigationBar`, `NavigationRail` and `NavigationDrawer`, and removes the padding that the bar or rail covers from the content's `MediaQuery`.
+  Reason: framework — Flutter's navigation widgets already carry their own layout and Material styling.
+  Affect: an app gets the existing Material themes and the content starts inside the bar's or rail's inset.
+
 ## Deferred
 - levitated panes (`AdaptStrategy::Levitate`, the scrim and drag-to-resize state). Trigger: a modal pane layer in `ThreePaneScaffold`.
 - pane expansion (`PaneExpansionState`, the draggable divider). Trigger: an optional field on `ThreePaneScaffold`.

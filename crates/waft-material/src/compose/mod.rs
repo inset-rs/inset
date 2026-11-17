@@ -10,6 +10,7 @@
 
 mod adapt_strategy;
 mod back_navigation_behavior;
+mod navigation_suite_scaffold;
 mod pane;
 mod pane_adapted_value;
 mod pane_scaffold_directive;
@@ -22,6 +23,7 @@ mod window_size_class;
 
 pub use adapt_strategy::*;
 pub use back_navigation_behavior::*;
+pub use navigation_suite_scaffold::*;
 pub use pane::*;
 pub use pane_adapted_value::*;
 pub use pane_scaffold_directive::*;
