@@ -435,6 +435,20 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the context menu is a web platform view, and Waft's `SelectableRegion` only names this widget on the web.
   Affect: an app on a non-web host never builds one; a host that did would panic.
 
+## widgets/selectable_region.rs → selectable_region.dart (`MultiSelectableSelectionContainerDelegate`, `StaticSelectionContainerDelegate`)
+
+- Change: Dart's two classes are traits over their field bags, the bodies an override reaches as `super` live on `MultiSelectableSelectionContainerDelegateBase` and `StaticSelectionContainerDelegateBase`, `PlainStaticSelectionContainerDelegate` is Dart's instantiable `StaticSelectionContainerDelegate()`, and a leaf writes the `*_accessors!`, `static_selection_container_delegate_overrides!` and `SelectionHandler` / `SelectionRegistrar` macros.
+  Reason: language — no class inheritance, and a trait and a struct cannot share a name.
+  Affect: an app that extends `StaticSelectionContainerDelegate` implements the trait over its own bags and forwards the inherited members with the macros, where Dart writes `extends StaticSelectionContainerDelegate`; `SelectableRegion` will build `PlainStaticSelectionContainerDelegate` where Dart writes `StaticSelectionContainerDelegate()`.
+
+- Change: `compareOrder` is a method taking the app, not a getter returning a `Comparator<Selectable>`.
+  Reason: language — a selectable's bounding boxes are read through `&mut App`, which the comparator a getter returned could not carry.
+  Affect: a subclass overrides `compare_order(self, app, a, b)` where Dart overrides `compareOrder`.
+
+- Change: the `selection_container_test.dart` cases run with a `RichText` wired to the enclosing container where Flutter writes `Text`.
+  Reason: platform — `Text`'s own selection container (`_SelectableTextContainer`) waits, so a `Text` under a container is not selectable yet.
+  Affect: the cases exercise the delegates through one paragraph per child either way, but not `Text`'s delegate.
+
 ## widgets/scroll_view.rs → scroll_view.dart
 
 - Change: the physics a primary scroll view implies is substituted in `build`, not stored on the widget.
@@ -759,7 +773,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - platform_selectable_region_context_menu_web.dart: the web context menu, a registered platform view over a DOM element. Trigger: a web host.
 
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
-- selection_container_test.dart: all seven cases build a `MultiSelectableSelectionContainerDelegate` (selectable_region.dart) or `Text`'s internal selection container (text.dart), neither ported yet. Trigger: `MultiSelectableSelectionContainerDelegate` and text.dart's selection container.
+- text.rs: `Text`'s internal selection container (`_SelectableTextContainer` and `_SelectableTextContainerDelegate`), and so `Text`'s own selection, `selectionColor` and registrar under a `SelectionContainer`; `selection_container_test.dart`'s cases run in `selectable_region.rs` with a `RichText` wired to the container instead. Trigger: the text selection delegate.
 - raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
 - form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).
 - form.rs: the error announcement `FormState._validate` sends through `SemanticsService`. Trigger: the semantics tree.
@@ -787,7 +801,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - view.rs, overlay.rs: the hidden-by-a-`LookupBoundary` variants of the `View.of` and `Overlay.of` error messages. Trigger: diagnostics.
 - form.rs, page_storage.rs, tap_region.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value (the check is in debug.rs). Trigger: each such widget's next edit.
-- text.rs: selection, `locale`, `strutStyle`, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; the next edit of text.rs for `locale` (embedder's `Locale` exists); `StrutStyle`.
+- text.rs: selection, `locale`, `strutStyle`, and the deprecated `textScaleFactor`. Trigger: the text selection delegate; the next edit of text.rs for `locale` (embedder's `Locale` exists); `StrutStyle`.
 - basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
 - basic.rs: `RepaintBoundary.wrap` and `wrapAll`, `DefaultAssetBundle`. Trigger: the sliver child delegates that call them; asset bundles.
