@@ -759,3 +759,10 @@ Ported against: 34b89b2086d4
   Affect: a radio list is named as the constructor's path, as elsewhere in the port.
 - expansion_panel.rs tests: the semantics cases and the pixel-metric header-padding cases, which read the semantics tree or an exact text width; the reported callback, radio one-open-at-a-time, initial value and header-tap cases are ported. Trigger: the semantics tree; FlutterTest font metrics.
 - button_bar.rs tests: the exact pixel positions of the alignment, main-axis-size and header-padding cases, the overflow direction and spacing cases, and the constraints-before-layout case, which depend on FlutterTest font metrics or on reading layout before the first frame; the default end alignment, alignment override, max main-axis size, wrapping, constrained height and zero-area cases are ported. Trigger: FlutterTest text metrics; a constraints query before layout.
+
+## stepper.rs → stepper.dart
+
+- Change: the rule that `stepIconHeight` and `stepIconWidth` are both given and equal is checked when the stepper builds, not when it is made.
+  Reason: language — the two values arrive in separate setter calls, where the constructor takes them together.
+  Affect: a mismatched pair panics on the first build rather than at the call that made it.
+- stepper.rs tests: the exact pixel heights of the expansion and horizontal-size cases, the focus-traversal cases and the semantics cases, which depend on FlutterTest text metrics, on the focus tree or on the semantics tree; the tap, disabled, index, error, icon size, custom controls, step style, icon builder, nested-stepper and zero-area cases are ported. Trigger: FlutterTest text metrics; the focus tree; the semantics tree.
