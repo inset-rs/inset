@@ -4,6 +4,14 @@ Ported against: b8f12c706099a47e1e44d9772d03e14a4ae37146
 
 Reasons are the porting skill's `language` and `platform`, plus `framework`: Compose's mechanism has no place in Flutter's model.
 
+## Identical
+- adapt_strategy.rs → AdaptStrategy.kt, ThreePaneScaffoldAdaptStrategies.kt
+- back_navigation_behavior.rs → BackNavigationBehavior.kt
+- pane_adapted_value.rs → PaneAdaptedValue.kt
+- pane_motion.rs → PaneMotion.kt, ThreePaneMotion.kt: the spring (damping 0.8, stiffness 380) on Flutter's `SpringSimulation`
+- pane_scaffold_role.rs → PaneScaffoldRole.kt
+- three_pane_scaffold_horizontal_order.rs → ThreePaneScaffoldHorizontalOrder.kt
+
 ## window_size_class.rs → androidx.window's WindowSizeClass
 - Change: `WindowSizeClass::of` and `maybe_of` read the nearest `MediaQuery`'s size through the `App`, where Compose reads `currentWindowAdaptiveInfoV2()`.
   Reason: framework — Flutter's window size is a `MediaQuery` a widget reads with its context, not an ambient Compose value.
@@ -24,15 +32,18 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
   Reason: framework — Flutter's Navigator 2.0 shows an app-owned `pages` list; the app owns the back stack and the scene only says which trailing entries share one page.
   Affect: an app maps its entries to destinations, asks for a scene, and builds one page per entry before it plus one page holding the scaffold.
 
-## three_pane_scaffold.rs → ThreePaneScaffold.kt, Pane.kt, PaneMotion.kt
-- Change: pane bounds move with `AnimatedPositioned` and panes fade with `AnimatedOpacity` on a 300 ms implicit curve, where Compose animates their bounds with a spring (damping 0.8, stiffness 380) from `PaneMotion` and `LookaheadScope`.
-  Reason: framework — Flutter's implicit animations take the place of Compose's animation core and lookahead bounds animation.
-  Affect: a hidden pane slides off the side and fades instead of taking Compose's per-role enter and exit transitions; the settled layout and which pane keeps its state are the same.
+## three_pane_scaffold.rs → ThreePaneScaffold.kt, Pane.kt
+- Change: a hidden pane stays mounted under an `Offstage`, where Compose disposes it once its exit motion ends and keeps its saved state in a `SaveableStateHolder`.
+  Reason: framework — Flutter keeps a subtree's state by keeping its element, and has no saveable state holder.
+  Affect: a list hidden behind its detail keeps its scroll position and its live state, and comes back as it was.
 
-## three_pane_navigator.rs → ThreePaneScaffoldNavigator.kt (replaced)
-- Change: `ThreePaneNavigator` turns the app's back stack and a `ThreePaneSceneStrategy` into Waft `Navigator` pages; there is no `ThreePaneScaffoldNavigator` and no pane history beside the app's navigation.
+## three_pane_navigator.rs → ThreePaneScaffoldNavigator.kt (replaced), Navigation 3's NavDisplay
+- Change: `ThreePaneNavigator` turns the app's back stack and a `ThreePaneSceneStrategy` into the pages of a nested Waft `Navigator`, behind a `NavigatorPopHandler`; there is no `ThreePaneScaffoldNavigator` and no pane history beside the app's navigation.
   Reason: framework — Flutter's Navigator 2.0 owns the page list and its back gestures, and the app owns the back stack.
-  Affect: an app supplies one entry-page builder, one scene-page builder and a truncate callback; a phone's detail is an ordinary pushed page with predictive back and the platform's swipe.
+  Affect: an app supplies an entry-page builder, a scene-page builder and a callback that truncates its stack; a phone's detail is an ordinary pushed page with predictive back and the platform's swipe, and the system back reaches it first.
+- Change: pages that a resize adds or removes, because the scene strategy changed while the back stack did not, come and go without a transition.
+  Reason: framework — Navigation 3 swaps scenes in place, where a Flutter `Navigator` pushes and pops pages unless its `TransitionDelegate` says otherwise.
+  Affect: crossing 840 swaps the detail's page for the shared page at once, instead of sliding it away.
 
 ## navigation_suite_scaffold.rs → NavigationSuiteScaffold.kt
 - Change: `NavigationSuiteType` has Compose's bar, rail and drawer plus Flutter's extended `NavigationRail`, and the default is a bar when the width or height is Compact, the rail at Medium and Expanded, and the extended rail from Large.
