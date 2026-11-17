@@ -1184,7 +1184,7 @@ mod tests {
 
     use waft_cupertino::{CupertinoButton, cupertino_text_selection_controls};
     use waft_embedder::Size;
-    use waft_embedder::TextAffinity;
+    use waft_embedder::{TextAffinity, TextPosition};
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{
         LogicalKeyboardKey, PhysicalKeyboardKey, SystemMouseCursors, TextInputClient,
@@ -3737,5 +3737,62 @@ mod tests {
                 assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(0, 1)));
             });
         }
+    }
+
+    #[test]
+    fn can_align_to_center() {
+        test_widgets(|tester| {
+            let root = material_app(
+                crate::theme_data::ThemeData::builder()
+                    .use_material3(false)
+                    .build(&tester.cell.borrow()),
+                waft_widgets::MediaQuery::new(
+                    MediaQueryData::new().size(Size::new(800.0, 600.0)),
+                    SizedBox::new()
+                        .width(300.0)
+                        .child(SelectableText::new("abcd").text_align(TextAlign::Center)),
+                )
+                .into_widget(),
+            );
+            tester.pump_widget(root);
+            let editable = render_editable_at(tester, 0);
+            let caret_at = |tester: &mut WidgetTester, offset: i32| {
+                let mut app = tester.cell.borrow_mut();
+                let rect = editable.get_local_rect_for_caret(&mut app, TextPosition::new(offset));
+                editable
+                    .as_box()
+                    .local_to_global(&app, rect.top_left(), None)
+            };
+            assert_eq!(caret_at(tester, 2).dx(), 399.0);
+        });
+    }
+
+    #[test]
+    fn can_align_to_center_within_center() {
+        test_widgets(|tester| {
+            let root = material_app(
+                crate::theme_data::ThemeData::builder()
+                    .use_material3(false)
+                    .build(&tester.cell.borrow()),
+                waft_widgets::MediaQuery::new(
+                    MediaQueryData::new().size(Size::new(800.0, 600.0)),
+                    SizedBox::new().width(300.0).child(
+                        Center::new()
+                            .child(SelectableText::new("abcd").text_align(TextAlign::Center)),
+                    ),
+                )
+                .into_widget(),
+            );
+            tester.pump_widget(root);
+            let editable = render_editable_at(tester, 0);
+            let caret_at = |tester: &mut WidgetTester, offset: i32| {
+                let mut app = tester.cell.borrow_mut();
+                let rect = editable.get_local_rect_for_caret(&mut app, TextPosition::new(offset));
+                editable
+                    .as_box()
+                    .local_to_global(&app, rect.top_left(), None)
+            };
+            assert_eq!(caret_at(tester, 2).dx(), 399.0);
+        });
     }
 }

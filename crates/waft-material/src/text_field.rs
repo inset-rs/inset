@@ -8609,4 +8609,99 @@ mod tests {
             assert_eq!(seen.iter().copied().fold(f64::NEG_INFINITY, f64::max), 50.0);
         });
     }
+
+    #[test]
+    fn tmp_caret_center() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = overlay(
+                tester,
+                SizedBox::new().width(300.0).child(
+                    TextField::new()
+                        .controller(controller.erase())
+                        .text_align(TextAlign::Center),
+                ),
+            );
+            tester.pump_widget(root);
+            let render = render_editable(tester);
+            let mut app = tester.cell.borrow_mut();
+            let rect = render.get_local_rect_for_caret(&mut app, TextPosition::new(0));
+            eprintln!(
+                "TMP caret rect {:?} origin {:?} size {:?}",
+                rect,
+                render.as_box().local_to_global(&app, Offset::ZERO, None),
+                render.size(&app)
+            );
+        });
+    }
+
+    #[test]
+    fn can_align_to_center() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                MediaQuery::new(
+                    MediaQueryData::new().size(waft_embedder::Size::new(800.0, 600.0)),
+                    SizedBox::new().width(300.0).child(
+                        TextField::new()
+                            .text_align(TextAlign::Center)
+                            .decoration(None),
+                    ),
+                )
+                .into_widget(),
+            );
+            tester.pump_widget(root);
+            let editable = render_editable(tester);
+            {
+                let app = tester.cell.borrow();
+                assert_eq!(editable.size(&app).width(), 300.0);
+            }
+            let caret_at = |tester: &mut WidgetTester, offset: i32| {
+                let mut app = tester.cell.borrow_mut();
+                let rect = editable.get_local_rect_for_caret(&mut app, TextPosition::new(offset));
+                editable
+                    .as_box()
+                    .local_to_global(&app, rect.top_left(), None)
+            };
+            assert_eq!(caret_at(tester, 0).dx(), 399.0);
+
+            tester.enter_text(find::by_type::<TextField>(), "abcd");
+            tester.pump();
+            assert_eq!(caret_at(tester, 2).dx(), 399.0);
+        });
+    }
+
+    #[test]
+    fn can_align_to_center_within_center() {
+        test_widgets(|tester| {
+            let root = overlay(
+                tester,
+                MediaQuery::new(
+                    MediaQueryData::new().size(waft_embedder::Size::new(800.0, 600.0)),
+                    SizedBox::new().width(300.0).child(
+                        Center::new().child(
+                            TextField::new()
+                                .text_align(TextAlign::Center)
+                                .decoration(None),
+                        ),
+                    ),
+                )
+                .into_widget(),
+            );
+            tester.pump_widget(root);
+            let editable = render_editable(tester);
+            let caret_at = |tester: &mut WidgetTester, offset: i32| {
+                let mut app = tester.cell.borrow_mut();
+                let rect = editable.get_local_rect_for_caret(&mut app, TextPosition::new(offset));
+                editable
+                    .as_box()
+                    .local_to_global(&app, rect.top_left(), None)
+            };
+            assert_eq!(caret_at(tester, 0).dx(), 399.0);
+
+            tester.enter_text(find::by_type::<TextField>(), "abcd");
+            tester.pump();
+            assert_eq!(caret_at(tester, 2).dx(), 399.0);
+        });
+    }
 }

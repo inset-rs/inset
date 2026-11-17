@@ -1154,6 +1154,14 @@ impl TextPainter {
         };
         // If the caret is at the end of the paragraph and beyond the layout width
         // (thus disregarding the paragraph's width), clamp it to the content width.
+        eprintln!(
+            "TP caret content {} para {} paint {} raw {} proto {}",
+            layout_cache.content_width,
+            layout_cache.paragraph().width(),
+            layout_cache.paint_offset().dx(),
+            raw_offset.dx(),
+            caret_prototype.width()
+        );
         let adjusted_dx = clamp_double(
             raw_offset.dx() + layout_cache.paint_offset().dx(),
             0.0,
