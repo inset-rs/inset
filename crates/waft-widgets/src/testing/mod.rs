@@ -16,15 +16,20 @@
 //! Each case has its own `App`, so nothing a case sets (a debug flag, the clock, a singleton)
 //! reaches another; flutter_test's resets between tests have no counterpart.
 
+mod delayed;
 mod entry;
 mod finder;
 mod finders;
 mod gestures;
 mod matchers;
+mod test_text_field;
+mod test_widgets_app;
 mod tester;
 #[cfg(test)]
 mod tests;
+mod text_input;
 
+pub use delayed::delayed;
 pub use entry::{TargetPlatformVariant, test_widgets, test_widgets_variant};
 pub use finder::{Finder, FindsOne, RenderTarget, find};
 pub use gestures::TestPointer;
@@ -32,7 +37,13 @@ pub use matchers::{
     FinderMatcher, expect, finds_at_least_n_widgets, finds_n_widgets, finds_nothing,
     finds_one_widget, finds_widgets,
 };
+pub use test_text_field::{
+    TestTextField, TestTextFieldState, TestTextSelectionHandleControls,
+    test_text_selection_handle_controls,
+};
+pub use test_widgets_app::TestWidgetsApp;
 pub use tester::{TestVSync, WidgetTester};
+pub use text_input::TestTextInput;
 pub use waft_rendering::testing::{
     MoreOrLessEquals, PRECISION_ERROR_TOLERANCE, assert_f32_equals, assert_more_or_less_equals,
     assert_more_or_less_equals_within,

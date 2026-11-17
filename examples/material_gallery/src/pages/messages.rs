@@ -12,8 +12,8 @@ use std::rc::Rc;
 use waft_foundation::{App, Listener};
 use waft_material::{
     FilledButton, Icons, MaterialBanner, MaterialBannerClosedReason, OutlinedButton,
-    ScaffoldMessenger, SnackBar, SnackBarAction, SnackBarBehavior, TextButton, Tooltip,
-    show_bottom_sheet, show_modal_bottom_sheet,
+    ScaffoldMessenger, ShowBottomSheet, ShowModalBottomSheet, SnackBar, SnackBarAction,
+    SnackBarBehavior, TextButton, Tooltip,
 };
 use waft_painting::{EdgeInsetsGeometry, TextSpan};
 use waft_rendering::MainAxisSize;
@@ -31,8 +31,6 @@ pub const BANNER_TEXT: &str = "A material banner";
 
 /// Flutter's `kDefaultScrollControlDisabledMaxHeightRatio`: the modal sheet's height cap when
 /// it is not scroll-controlled.
-const SCROLL_CONTROL_DISABLED_MAX_HEIGHT_RATIO: f64 = 9.0 / 16.0;
-
 pub fn body(_app: &mut App, _context: BuildContext) -> WidgetRef {
     // The body's own context, under the page's scaffold: the persistent sheet is shown in
     // the nearest scaffold, which the route's context is above.
@@ -132,29 +130,7 @@ fn modal_sheet_button(context: BuildContext) -> WidgetRef {
     FilledButton::new(
         Some(Listener::new(move |app: &mut App| {
             // Dart's defaults for every argument but the builder.
-            show_modal_bottom_sheet(
-                app,
-                context,
-                sheet(MODAL_SHEET_TEXT, "Close sheet"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-                SCROLL_CONTROL_DISABLED_MAX_HEIGHT_RATIO,
-                false,
-                true,
-                true,
-                None,
-                false,
-                None,
-                None,
-                None,
-                None,
-            );
+            ShowModalBottomSheet::new(sheet(MODAL_SHEET_TEXT, "Close sheet")).show(app, context);
         })),
         Some(Text::new("Modal sheet")),
     )
@@ -164,20 +140,11 @@ fn modal_sheet_button(context: BuildContext) -> WidgetRef {
 fn persistent_sheet_button(context: BuildContext) -> WidgetRef {
     OutlinedButton::new(
         Some(Listener::new(move |app: &mut App| {
-            show_bottom_sheet(
-                app,
-                context,
-                sheet(PERSISTENT_SHEET_TEXT, "Close persistent sheet"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            );
+            {
+                let mut show =
+                    ShowBottomSheet::new(sheet(PERSISTENT_SHEET_TEXT, "Close persistent sheet"));
+                show.show(app, context)
+            };
         })),
         Some(Text::new("Persistent sheet")),
     )

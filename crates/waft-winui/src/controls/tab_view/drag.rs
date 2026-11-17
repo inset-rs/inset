@@ -3,7 +3,7 @@ use super::*;
 use std::cell::Cell;
 use waft_embedder::{Offset, Rect};
 use waft_foundation::{OptionRetained, Ref, Timer};
-use waft_gestures::{GestureMultiDragStartCallback, RecognizerRef};
+use waft_gestures::{GestureMultiDragStartCallback, MultiDragRecognizerRef};
 
 /// Requests moving a tab within the owner's collection. `new_index` is its index after removal.
 #[derive(Clone, Debug)]
@@ -203,7 +203,7 @@ impl DraggableWidget for TabDraggable {
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> RecognizerRef {
+    ) -> MultiDragRecognizerRef {
         let data = self.draggable.data.as_ref().unwrap().clone();
         self.draggable.create_recognizer(
             app,

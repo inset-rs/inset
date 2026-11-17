@@ -2,7 +2,7 @@
 //!
 //! A [`PopupMenuEntry`] is a widget that also answers its height and whether it represents a
 //! value; the menu holds them erased as [`PopupMenuEntryRef`]s. A route's result is erased
-//! (waft-widgets' navigator), so [`show_menu`] resolves to the `Rc<dyn Any>` an item popped
+//! (waft-widgets' navigator), so [`ShowMenu`] resolves to the `Rc<dyn Any>` an item popped
 //! with, which holds its `T`.
 
 use std::any::Any;
@@ -42,8 +42,8 @@ use waft_widgets::{
     RouteSettingsRef, ScrollPositionAlignmentPolicy, Scrollable, Semantics,
     SingleChildRenderObjectWidget, SingleChildScrollView, SingleTickerProviderStateMixin,
     SingleTickerProviderStateMixinData, StandardComponentType, State, StateData, StatefulWidget,
-    TransitionRoute, TransitionRouteData, TraversalEdgeBehavior, WidgetRef, WidgetState,
-    WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
+    TransitionRoute, TransitionRouteBase, TransitionRouteData, TraversalEdgeBehavior, WidgetRef,
+    WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
     downcast_widget,
 };
 
@@ -81,7 +81,7 @@ const K_MENU_SCREEN_PADDING: f64 = 8.0;
 /// A base class for entries in a Material Design popup menu.
 ///
 /// The popup menu widget uses this interface to interact with the menu items. To show a popup
-/// menu, use the [`show_menu`] function. To create a button that shows a popup menu, consider
+/// menu, use the [`ShowMenu`] function. To create a button that shows a popup menu, consider
 /// using [`PopupMenuButton`].
 ///
 /// The type `T` is the type of the value(s) the entry represents. All the entries in a given
@@ -98,19 +98,19 @@ const K_MENU_SCREEN_PADDING: f64 = 8.0;
 ///  * [`PopupMenuItem`], a popup menu entry for a single value.
 ///  * [`PopupMenuDivider`], a popup menu entry that is just a horizontal line.
 ///  * [`CheckedPopupMenuItem`], a popup menu item with a checkmark.
-///  * [`show_menu`], a method to dynamically show a popup menu at a given location.
+///  * [`ShowMenu`], a method to dynamically show a popup menu at a given location.
 ///  * [`PopupMenuButton`], an [`IconButton`] that automatically shows a menu when it is tapped.
 pub trait PopupMenuEntry<T: 'static>: StatefulWidget {
     /// The amount of vertical space occupied by this entry.
     ///
-    /// This value is used at the time the [`show_menu`] method is called, if the
+    /// This value is used at the time the [`ShowMenu`] method is called, if the
     /// `initial_value` argument is provided, to determine the position of this entry when
     /// aligning the selected entry over the given `position`. It is otherwise ignored.
     fn height(&self) -> f64;
 
     /// Whether this entry represents a particular value.
     ///
-    /// This method is used by [`show_menu`], when it is called, to align the entry representing
+    /// This method is used by [`ShowMenu`], when it is called, to align the entry representing
     /// the `initial_value`, if any, to the given `position`, and then later is called on each
     /// entry to determine if it should be highlighted (if the method returns true, the entry
     /// will have its background color set to the ambient `ThemeData::highlight_color`). If
@@ -201,7 +201,7 @@ impl<T: 'static> IntoWidget<PopupMenuEntryRefKind> for PopupMenuEntryRef<T> {
 /// See also:
 ///
 ///  * [`PopupMenuItem`], for the kinds of items that this widget divides.
-///  * [`show_menu`], a method to dynamically show a popup menu at a given location.
+///  * [`ShowMenu`], a method to dynamically show a popup menu at a given location.
 ///  * [`PopupMenuButton`], an [`IconButton`] that automatically shows a menu when it is tapped.
 #[derive(Debug)]
 pub struct PopupMenuDivider {
@@ -562,7 +562,7 @@ impl RenderBox for RenderMenuItem {
 pub struct PopupMenuItemData<T> {
     pub key: Option<KeyRef>,
 
-    /// The value that will be returned by [`show_menu`] if this entry is selected.
+    /// The value that will be returned by [`ShowMenu`] if this entry is selected.
     pub value: Option<T>,
 
     /// Called when the menu item is tapped.
@@ -733,7 +733,7 @@ pub trait PopupMenuItemLeaf: StatefulWidget {
 
 /// An item in a Material Design popup menu.
 ///
-/// To show a popup menu, use the [`show_menu`] function. To create a button that shows a popup
+/// To show a popup menu, use the [`ShowMenu`] function. To create a button that shows a popup
 /// menu, consider using [`PopupMenuButton`].
 ///
 /// To show a checkmark next to a popup menu item, consider using [`CheckedPopupMenuItem`].
@@ -748,7 +748,7 @@ pub trait PopupMenuItemLeaf: StatefulWidget {
 ///
 ///  * [`PopupMenuDivider`], which can be used to divide items from each other.
 ///  * [`CheckedPopupMenuItem`], a variant of [`PopupMenuItem`] with a checkmark.
-///  * [`show_menu`], a method to dynamically show a popup menu at a given location.
+///  * [`ShowMenu`], a method to dynamically show a popup menu at a given location.
 ///  * [`PopupMenuButton`], an [`IconButton`] that automatically shows a menu when it is tapped.
 // TODO(framework): Add unit tests to this code snippet.
 // https://github.com/flutter/flutter/issues/188530
@@ -1044,7 +1044,7 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuItemState<T> {
 
 /// An item with a checkmark in a Material Design popup menu.
 ///
-/// To show a popup menu, use the [`show_menu`] function. To create a button that shows a popup
+/// To show a popup menu, use the [`ShowMenu`] function. To create a button that shows a popup
 /// menu, consider using [`PopupMenuButton`].
 ///
 /// A [`CheckedPopupMenuItem`] is [`K_MIN_INTERACTIVE_DIMENSION`] pixels high, which matches
@@ -1056,7 +1056,7 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuItemState<T> {
 ///  * [`PopupMenuItem`], a popup menu entry for picking a command (as opposed to toggling a
 ///    value).
 ///  * [`PopupMenuDivider`], a popup menu entry that is just a horizontal line.
-///  * [`show_menu`], a method to dynamically show a popup menu at a given location.
+///  * [`ShowMenu`], a method to dynamically show a popup menu at a given location.
 ///  * [`PopupMenuButton`], an [`IconButton`] that automatically shows a menu when it is tapped.
 // TODO(framework): Add unit tests to this code snippet.
 // https://github.com/flutter/flutter/issues/188530
@@ -1891,18 +1891,6 @@ impl<T: Clone + PartialEq + 'static> PopupMenuRoute<T> {
             None,
         );
     }
-
-    /// Dart's `TransitionRoute.createAnimation`, which the override runs as `super`: the
-    /// trait's default body.
-    fn transition_route_create_animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
-        debug_assert!(
-            !TransitionRoute::debug_transition_completed(self, app),
-            "cannot reuse a route after disposing it"
-        );
-        let controller =
-            TransitionRoute::controller(self, app).expect("createAnimationController ran first");
-        controller.keep(app).into_erased()
-    }
 }
 
 // Dart's `_PopupMenuRoute.dispose` disposes its curved animation and runs `super.dispose()`,
@@ -2032,7 +2020,7 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
             if let Some(animation) = app.get(self).animation.as_ref() {
                 return animation.erase();
             }
-            let parent = self.transition_route_create_animation(app);
+            let parent = TransitionRouteBase::create_animation(self, app);
             let curve = style
                 .as_ref()
                 .and_then(|style| style.curve.clone())
@@ -2051,7 +2039,7 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
             app.get_mut(self).animation = Some(animation.clone());
             return animation.into_erased();
         }
-        self.transition_route_create_animation(app)
+        TransitionRouteBase::create_animation(self, app)
     }
 }
 
@@ -2215,13 +2203,7 @@ pub type PopupMenuPositionBuilder =
 ///  * [`PopupMenuButton`], which provides an [`IconButton`] that shows a menu by calling this
 ///    method automatically.
 ///  * `SemanticsConfiguration::names_route`, for a description of edge triggered semantics.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_menu<T: Clone + PartialEq + 'static>(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowMenu<T: Clone + PartialEq + 'static> {
     position: Option<RelativeRect>,
     position_builder: Option<PopupMenuPositionBuilder>,
     items: Vec<PopupMenuEntryRef<T>>,
@@ -2239,58 +2221,203 @@ pub fn show_menu<T: Clone + PartialEq + 'static>(
     route_settings: Option<RouteSettingsRef>,
     pop_up_animation_style: Option<AnimationStyle>,
     request_focus: Option<bool>,
-) -> CompleterFuture<RouteResult> {
-    debug_assert!(!items.is_empty());
-    debug_assert!(debug_check_has_material_localizations(app, context));
-    debug_assert!(
-        position.is_some() != position_builder.is_some(),
-        "Either position or positionBuilder must be provided."
-    );
+}
 
-    let mut semantic_label = semantic_label;
-    match app.platform().target_platform() {
-        TargetPlatform::IOS | TargetPlatform::MacOS => {}
-        TargetPlatform::Android
-        | TargetPlatform::Fuchsia
-        | TargetPlatform::Linux
-        | TargetPlatform::Windows => {
-            if semantic_label.is_none() {
-                semantic_label =
-                    Some(<dyn MaterialLocalizations>::of(app, context).popup_menu_label());
-            }
+impl<T: Clone + PartialEq + 'static> ShowMenu<T> {
+    /// Creates a builder for a popup menu; Dart's `showMenu` required argument is the items,
+    /// and every other argument is a setter.
+    pub fn new(items: Vec<PopupMenuEntryRef<T>>) -> ShowMenu<T> {
+        ShowMenu {
+            position: None,
+            position_builder: None,
+            items,
+            initial_value: None,
+            elevation: None,
+            shadow_color: None,
+            surface_tint_color: None,
+            semantic_label: None,
+            shape: None,
+            menu_padding: None,
+            color: None,
+            use_root_navigator: false,
+            constraints: None,
+            clip_behavior: Clip::None,
+            route_settings: None,
+            pop_up_animation_style: None,
+            request_focus: None,
         }
     }
 
-    let menu_item_keys: Vec<GlobalKey> = (0..items.len()).map(|_| GlobalKey::new()).collect();
-    let navigator = Navigator::of(app, context, use_root_navigator);
-    let barrier_label = <dyn MaterialLocalizations>::of(app, context).menu_dismiss_label();
-    let navigator_context = navigator.context(app);
-    let captured_themes = <dyn InheritedTheme>::capture(app, context, Some(navigator_context));
-    let route = PopupMenuRoute::new(
-        app,
-        PopupMenuRouteArguments {
+    /// The rectangle the menu is positioned against.
+    pub fn position(mut self, position: RelativeRect) -> ShowMenu<T> {
+        self.position = Some(position);
+        self
+    }
+
+    /// A builder of the rectangle the menu is positioned against.
+    pub fn position_builder(mut self, position_builder: PopupMenuPositionBuilder) -> ShowMenu<T> {
+        self.position_builder = Some(position_builder);
+        self
+    }
+
+    /// The value the menu opens with.
+    pub fn initial_value(mut self, initial_value: T) -> ShowMenu<T> {
+        self.initial_value = Some(initial_value);
+        self
+    }
+
+    /// The z-coordinate of the menu.
+    pub fn elevation(mut self, elevation: f64) -> ShowMenu<T> {
+        self.elevation = Some(elevation);
+        self
+    }
+
+    /// The color of the menu's shadow.
+    pub fn shadow_color(mut self, shadow_color: Color) -> ShowMenu<T> {
+        self.shadow_color = Some(shadow_color);
+        self
+    }
+
+    /// The color of the menu's surface tint.
+    pub fn surface_tint_color(mut self, surface_tint_color: Color) -> ShowMenu<T> {
+        self.surface_tint_color = Some(surface_tint_color);
+        self
+    }
+
+    /// The semantic label announced when the menu opens and closes.
+    pub fn semantic_label(mut self, semantic_label: impl Into<String>) -> ShowMenu<T> {
+        self.semantic_label = Some(semantic_label.into());
+        self
+    }
+
+    /// The shape of the menu.
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ShowMenu<T> {
+        self.shape = Some(shape.into());
+        self
+    }
+
+    /// The padding inside the menu.
+    pub fn menu_padding(mut self, menu_padding: EdgeInsetsGeometry) -> ShowMenu<T> {
+        self.menu_padding = Some(menu_padding);
+        self
+    }
+
+    /// The menu's background color.
+    pub fn color(mut self, color: Color) -> ShowMenu<T> {
+        self.color = Some(color);
+        self
+    }
+
+    /// Whether to push the menu to the root navigator. Defaults to `false`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowMenu<T> {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// The size constraints on the menu.
+    pub fn constraints(mut self, constraints: BoxConstraints) -> ShowMenu<T> {
+        self.constraints = Some(constraints);
+        self
+    }
+
+    /// The clip behavior of the menu. Defaults to `Clip::None`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> ShowMenu<T> {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// The route settings passed to the menu's route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowMenu<T> {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// An animation style that overrides the menu's animation.
+    pub fn pop_up_animation_style(mut self, pop_up_animation_style: AnimationStyle) -> ShowMenu<T> {
+        self.pop_up_animation_style = Some(pop_up_animation_style);
+        self
+    }
+
+    /// Whether the menu's route requests focus when it appears.
+    pub fn request_focus(mut self, request_focus: bool) -> ShowMenu<T> {
+        self.request_focus = Some(request_focus);
+        self
+    }
+
+    /// Shows the menu and returns the value the menu was popped with.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowMenu {
             position,
             position_builder,
             items,
-            item_keys: menu_item_keys,
             initial_value,
             elevation,
             shadow_color,
             surface_tint_color,
             semantic_label,
-            barrier_label,
             shape,
             menu_padding,
             color,
-            captured_themes,
+            use_root_navigator,
             constraints,
             clip_behavior,
-            settings: route_settings,
+            route_settings,
             pop_up_animation_style,
             request_focus,
-        },
-    );
-    navigator.push(app, route.into_erased())
+        } = self;
+
+        debug_assert!(!items.is_empty());
+        debug_assert!(debug_check_has_material_localizations(app, context));
+        debug_assert!(
+            position.is_some() != position_builder.is_some(),
+            "Either position or positionBuilder must be provided."
+        );
+
+        let mut semantic_label = semantic_label;
+        match app.platform().target_platform() {
+            TargetPlatform::IOS | TargetPlatform::MacOS => {}
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Linux
+            | TargetPlatform::Windows => {
+                if semantic_label.is_none() {
+                    semantic_label =
+                        Some(<dyn MaterialLocalizations>::of(app, context).popup_menu_label());
+                }
+            }
+        }
+
+        let menu_item_keys: Vec<GlobalKey> = (0..items.len()).map(|_| GlobalKey::new()).collect();
+        let navigator = Navigator::of(app, context, use_root_navigator);
+        let barrier_label = <dyn MaterialLocalizations>::of(app, context).menu_dismiss_label();
+        let navigator_context = navigator.context(app);
+        let captured_themes = <dyn InheritedTheme>::capture(app, context, Some(navigator_context));
+        let route = PopupMenuRoute::new(
+            app,
+            PopupMenuRouteArguments {
+                position,
+                position_builder,
+                items,
+                item_keys: menu_item_keys,
+                initial_value,
+                elevation,
+                shadow_color,
+                surface_tint_color,
+                semantic_label,
+                barrier_label,
+                shape,
+                menu_padding,
+                color,
+                captured_themes,
+                constraints,
+                clip_behavior,
+                settings: route_settings,
+                pop_up_animation_style,
+                request_focus,
+            },
+        );
+        navigator.push(app, route.into_erased())
+    }
 }
 
 /// Signature for the callback invoked when a menu item is selected. The argument is the value
@@ -2339,7 +2466,7 @@ pub type PopupMenuItemBuilder<T> = Rc<dyn Fn(&mut App, BuildContext) -> Vec<Popu
 ///  * [`PopupMenuItem`], a popup menu entry for a single value.
 ///  * [`PopupMenuDivider`], a popup menu entry that is just a horizontal line.
 ///  * [`CheckedPopupMenuItem`], a popup menu item with a checkmark.
-///  * [`show_menu`], a method to dynamically show a popup menu at a given location.
+///  * [`ShowMenu`], a method to dynamically show a popup menu at a given location.
 pub struct PopupMenuButton<T: 'static> {
     pub key: Option<KeyRef>,
 
@@ -2905,29 +3032,46 @@ impl<T: Clone + PartialEq + 'static> PopupMenuButtonState<T> {
             let route_settings = widget.route_settings.clone();
             let request_focus = widget.request_focus;
             let last_position = Rc::clone(&app.get(self).last_position);
-            let popped = show_menu(
-                app,
-                context,
-                None,
-                Some(Rc::new(move |app, context, constraints| {
+            let mut show = ShowMenu::new(items)
+                .position_builder(Rc::new(move |app, context, constraints| {
                     self.position_builder(&last_position, app, context, constraints)
-                })),
-                items,
-                initial_value,
-                elevation,
-                shadow_color,
-                surface_tint_color,
-                None,
-                shape,
-                menu_padding,
-                color,
-                use_root_navigator,
-                constraints,
-                clip_behavior,
-                route_settings,
-                pop_up_animation_style,
-                request_focus,
-            );
+                }))
+                .use_root_navigator(use_root_navigator)
+                .clip_behavior(clip_behavior);
+            if let Some(initial_value) = initial_value {
+                show = show.initial_value(initial_value);
+            }
+            if let Some(elevation) = elevation {
+                show = show.elevation(elevation);
+            }
+            if let Some(shadow_color) = shadow_color {
+                show = show.shadow_color(shadow_color);
+            }
+            if let Some(surface_tint_color) = surface_tint_color {
+                show = show.surface_tint_color(surface_tint_color);
+            }
+            if let Some(shape) = shape {
+                show = show.shape(shape);
+            }
+            if let Some(menu_padding) = menu_padding {
+                show = show.menu_padding(menu_padding);
+            }
+            if let Some(color) = color {
+                show = show.color(color);
+            }
+            if let Some(constraints) = constraints {
+                show = show.constraints(constraints);
+            }
+            if let Some(route_settings) = route_settings {
+                show = show.route_settings(route_settings);
+            }
+            if let Some(pop_up_animation_style) = pop_up_animation_style {
+                show = show.pop_up_animation_style(pop_up_animation_style);
+            }
+            if let Some(request_focus) = request_focus {
+                show = show.request_focus(request_focus);
+            }
+            let popped = show.show(app, context);
             drop(app.spawn(async move |cx| {
                 let new_value = popped.await;
                 cx.update(|app| {
@@ -4571,27 +4715,12 @@ mod tests {
                         Rc::new(move |_app, context| {
                             crate::elevated_button::ElevatedButton::new(
                                 Some(Listener::new(move |app| {
-                                    drop(show_menu(
-                                        app,
-                                        context,
-                                        Some(RelativeRect::FILL),
-                                        None,
-                                        vec![item(1, "1")],
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        None,
-                                        use_root_navigator,
-                                        None,
-                                        Clip::None,
-                                        None,
-                                        None,
-                                        None,
-                                    ));
+                                    drop(
+                                        ShowMenu::new(vec![item(1, "1")])
+                                            .position(RelativeRect::FILL)
+                                            .use_root_navigator(use_root_navigator)
+                                            .show(app, context),
+                                    );
                                 })),
                                 Some(Text::new("Show Menu")),
                             )
@@ -5100,27 +5229,11 @@ mod tests {
         items: Vec<PopupMenuEntryRef<T>>,
         route_settings: Option<RouteSettingsRef>,
     ) -> CompleterFuture<RouteResult> {
-        show_menu(
-            app,
-            context,
-            Some(RelativeRect::FILL),
-            None,
-            items,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            Clip::None,
-            route_settings,
-            None,
-            None,
-        )
+        let mut show = ShowMenu::new(items).position(RelativeRect::FILL);
+        if let Some(route_settings) = route_settings {
+            show = show.route_settings(route_settings);
+        }
+        show.show(app, context)
     }
 
     /// Dart's `feedback` group, 'PopupMenuButton enableFeedback works properly': the click
@@ -5785,38 +5898,19 @@ mod tests {
                                 vec![PopupMenuEntryRef::new(
                                     PopupMenuItem::new(Some(Text::new("ACTION")))
                                         .on_tap(Listener::new(move |app| {
-                                            drop(crate::bottom_sheet::show_modal_bottom_sheet(
-                                                app,
-                                                context,
-                                                Rc::new(|_app, _context| {
-                                                    SizedBox::new()
-                                                        .height(200.0)
-                                                        .child(
-                                                            Center::new().child(Text::new(
+                                            drop(
+                                                crate::bottom_sheet::ShowModalBottomSheet::new(
+                                                    Rc::new(|_app, _context| {
+                                                        SizedBox::new()
+                                                            .height(200.0)
+                                                            .child(Center::new().child(Text::new(
                                                                 "ModalBottomSheet",
-                                                            )),
-                                                        )
-                                                        .into_widget()
-                                                }),
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                false,
-                                                9.0 / 16.0,
-                                                false,
-                                                true,
-                                                true,
-                                                None,
-                                                false,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                            ));
+                                                            )))
+                                                            .into_widget()
+                                                    }),
+                                                )
+                                                .show(app, context),
+                                            );
                                         }))
                                         .value(10),
                                 )]

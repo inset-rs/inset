@@ -91,18 +91,18 @@ pub type BottomSheetDragEndHandler = Rc<dyn Fn(&mut App, DragEndDetails, bool)>;
 ///
 ///  * _Modal_. A modal bottom sheet is an alternative to a menu or a dialog and
 ///    prevents the user from interacting with the rest of the app. Modal bottom
-///    sheets can be created and displayed with the [`show_modal_bottom_sheet`]
+///    sheets can be created and displayed with the [`ShowModalBottomSheet`]
 ///    function.
 ///
 /// The [`BottomSheet`] widget itself is rarely used directly. Instead, prefer to
 /// create a persistent bottom sheet with `ScaffoldState::show_bottom_sheet` or
-/// `Scaffold::bottom_sheet`, and a modal bottom sheet with [`show_modal_bottom_sheet`].
+/// `Scaffold::bottom_sheet`, and a modal bottom sheet with [`ShowModalBottomSheet`].
 ///
 /// See also:
 ///
 ///  * [`show_bottom_sheet`] and `ScaffoldState::show_bottom_sheet`, for showing
 ///    non-modal "persistent" bottom sheets.
-///  * [`show_modal_bottom_sheet`], which can be used to display a modal bottom
+///  * [`ShowModalBottomSheet`], which can be used to display a modal bottom
 ///    sheet.
 ///  * [`BottomSheetThemeData`], which can be used to customize the default
 ///    bottom sheet property values.
@@ -253,7 +253,7 @@ impl BottomSheet {
     ///
     /// Typically, bottom sheets are created implicitly by
     /// `ScaffoldState::show_bottom_sheet`, for persistent bottom sheets, or by
-    /// [`show_modal_bottom_sheet`], for modal bottom sheets.
+    /// [`ShowModalBottomSheet`], for modal bottom sheets.
     pub fn new(on_closing: VoidCallback, builder: WidgetBuilder) -> BottomSheet {
         BottomSheet {
             key: None,
@@ -1422,7 +1422,7 @@ impl State for ModalBottomSheetState {
 /// A closely related widget is a persistent bottom sheet, which shows
 /// information that supplements the primary content of the app without
 /// preventing the user from interacting with the app. Persistent bottom sheets
-/// can be created and displayed with the [`show_bottom_sheet`] function or the
+/// can be created and displayed with the [`ShowBottomSheet`] builder or the
 /// `ScaffoldState::show_bottom_sheet` method.
 ///
 /// The [`is_scroll_controlled`](Self::is_scroll_controlled) parameter specifies whether this
@@ -1462,9 +1462,9 @@ impl State for ModalBottomSheetState {
 ///
 /// See also:
 ///
-///  * [`show_modal_bottom_sheet`], which is a way to display a ModalBottomSheetRoute.
+///  * [`ShowModalBottomSheet`], which is a way to display a ModalBottomSheetRoute.
 ///  * [`BottomSheet`], which becomes the parent of the widget returned by the
-///    function passed as the `builder` argument to [`show_modal_bottom_sheet`].
+///    function passed as the `builder` argument to [`ShowModalBottomSheet`].
 ///  * [`show_bottom_sheet`] and `ScaffoldState::show_bottom_sheet`, for showing
 ///    non-modal bottom sheets.
 ///  * `DraggableScrollableSheet`, creates a bottom sheet that grows
@@ -2150,7 +2150,7 @@ impl PopupRoute for ModalBottomSheetRoute {}
 /// A closely related widget is a persistent bottom sheet, which shows
 /// information that supplements the primary content of the app without
 /// preventing the user from interacting with the app. Persistent bottom sheets
-/// can be created and displayed with the [`show_bottom_sheet`] function or the
+/// can be created and displayed with the [`ShowBottomSheet`] builder or the
 /// `ScaffoldState::show_bottom_sheet` method.
 ///
 /// The `is_scroll_controlled` parameter specifies whether this is a route for
@@ -2222,7 +2222,7 @@ impl PopupRoute for ModalBottomSheetRoute {}
 /// See also:
 ///
 ///  * [`BottomSheet`], which becomes the parent of the widget returned by the
-///    function passed as the `builder` argument to [`show_modal_bottom_sheet`].
+///    function passed as the `builder` argument to [`ShowModalBottomSheet`].
 ///  * [`show_bottom_sheet`] and `ScaffoldState::show_bottom_sheet`, for showing
 ///    non-modal bottom sheets.
 ///  * `DraggableScrollableSheet`, creates a bottom sheet that grows
@@ -2231,13 +2231,7 @@ impl PopupRoute for ModalBottomSheetRoute {}
 ///  * The Material 3 spec at <https://m3.material.io/components/bottom-sheets/overview>.
 ///  * [`AnimationStyle`], which is used to override the modal bottom sheet
 ///    animation duration and reverse animation duration.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_modal_bottom_sheet(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowModalBottomSheet {
     builder: WidgetBuilder,
     background_color: Option<Color>,
     barrier_label: Option<String>,
@@ -2257,49 +2251,222 @@ pub fn show_modal_bottom_sheet(
     transition_animation_controller: Option<Ref<AnimationController>>,
     sheet_animation_style: Option<AnimationStyle>,
     request_focus: Option<bool>,
-) -> CompleterFuture<RouteResult> {
-    debug_assert!(debug_check_has_media_query(app, context));
-    debug_assert!(debug_check_has_material_localizations(app, context));
+}
 
-    let navigator = Navigator::of(app, context, use_root_navigator);
-    let localizations = <dyn MaterialLocalizations>::of(app, context);
-    let navigator_context = navigator.context(app);
-    let captured_themes = <dyn InheritedTheme>::capture(app, context, Some(navigator_context));
-    let modal_barrier_color = barrier_color.or(Theme::of(app, context)
-        .bottom_sheet_theme
-        .modal_barrier_color);
-    let route = ModalBottomSheetRoute::new(app, builder, is_scroll_controlled)
-        .captured_themes(app, captured_themes)
-        .scroll_control_disabled_max_height_ratio(app, scroll_control_disabled_max_height_ratio)
-        .barrier_label(
-            app,
-            barrier_label.unwrap_or_else(|| localizations.scrim_label()),
-        )
-        .barrier_on_tap_hint(
-            app,
-            localizations.scrim_on_tap_hint(&localizations.bottom_sheet_label()),
-        )
-        .is_dismissible(app, is_dismissible)
-        .enable_drag(app, enable_drag)
-        .use_safe_area(app, use_safe_area);
-    let mut route = route;
-    let this = app.get_mut(&route);
-    this.background_color = background_color;
-    this.elevation = elevation;
-    this.shape = shape;
-    this.clip_behavior = clip_behavior;
-    this.constraints = constraints;
-    this.modal_barrier_color = modal_barrier_color;
-    this.show_drag_handle = show_drag_handle;
-    this.transition_animation_controller = transition_animation_controller;
-    this.sheet_animation_style = sheet_animation_style;
-    if let Some(route_settings) = route_settings {
-        route = route.settings(app, route_settings);
+impl ShowModalBottomSheet {
+    /// Creates a builder for a modal bottom sheet; Dart's `showModalBottomSheet` required
+    /// argument is the `builder`, and every other argument is a setter.
+    pub fn new(builder: WidgetBuilder) -> ShowModalBottomSheet {
+        ShowModalBottomSheet {
+            builder,
+            background_color: None,
+            barrier_label: None,
+            elevation: None,
+            shape: None,
+            clip_behavior: None,
+            constraints: None,
+            barrier_color: None,
+            is_scroll_controlled: false,
+            scroll_control_disabled_max_height_ratio:
+                K_DEFAULT_SCROLL_CONTROL_DISABLED_MAX_HEIGHT_RATIO,
+            use_root_navigator: false,
+            is_dismissible: true,
+            enable_drag: true,
+            show_drag_handle: None,
+            use_safe_area: false,
+            route_settings: None,
+            transition_animation_controller: None,
+            sheet_animation_style: None,
+            request_focus: None,
+        }
     }
-    if let Some(request_focus) = request_focus {
-        route = route.request_focus(app, request_focus);
+
+    /// The background color of the sheet.
+    pub fn background_color(mut self, background_color: Color) -> ShowModalBottomSheet {
+        self.background_color = Some(background_color);
+        self
     }
-    navigator.push(app, route.into_erased())
+
+    /// The semantic label of the sheet's modal barrier.
+    pub fn barrier_label(mut self, barrier_label: impl Into<String>) -> ShowModalBottomSheet {
+        self.barrier_label = Some(barrier_label.into());
+        self
+    }
+
+    /// The z-coordinate of the sheet.
+    pub fn elevation(mut self, elevation: f64) -> ShowModalBottomSheet {
+        self.elevation = Some(elevation);
+        self
+    }
+
+    /// The shape of the sheet's material.
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ShowModalBottomSheet {
+        self.shape = Some(shape.into());
+        self
+    }
+
+    /// The clip behavior of the sheet.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> ShowModalBottomSheet {
+        self.clip_behavior = Some(clip_behavior);
+        self
+    }
+
+    /// The size constraints on the sheet.
+    pub fn constraints(mut self, constraints: BoxConstraints) -> ShowModalBottomSheet {
+        self.constraints = Some(constraints);
+        self
+    }
+
+    /// The color of the modal barrier below the sheet.
+    pub fn barrier_color(mut self, barrier_color: Color) -> ShowModalBottomSheet {
+        self.barrier_color = Some(barrier_color);
+        self
+    }
+
+    /// Whether the sheet may take the full height when a scroll view is inside it. Defaults to
+    /// `false`.
+    pub fn is_scroll_controlled(mut self, is_scroll_controlled: bool) -> ShowModalBottomSheet {
+        self.is_scroll_controlled = is_scroll_controlled;
+        self
+    }
+
+    /// The maximum height of a non-scroll-controlled sheet, as a ratio of the available height.
+    pub fn scroll_control_disabled_max_height_ratio(
+        mut self,
+        scroll_control_disabled_max_height_ratio: f64,
+    ) -> ShowModalBottomSheet {
+        self.scroll_control_disabled_max_height_ratio = scroll_control_disabled_max_height_ratio;
+        self
+    }
+
+    /// Whether to push the sheet to the root navigator. Defaults to `false`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowModalBottomSheet {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// Whether tapping the barrier dismisses the sheet. Defaults to `true`.
+    pub fn is_dismissible(mut self, is_dismissible: bool) -> ShowModalBottomSheet {
+        self.is_dismissible = is_dismissible;
+        self
+    }
+
+    /// Whether the sheet can be dragged up and down. Defaults to `true`.
+    pub fn enable_drag(mut self, enable_drag: bool) -> ShowModalBottomSheet {
+        self.enable_drag = enable_drag;
+        self
+    }
+
+    /// Whether the sheet shows a drag handle.
+    pub fn show_drag_handle(mut self, show_drag_handle: bool) -> ShowModalBottomSheet {
+        self.show_drag_handle = Some(show_drag_handle);
+        self
+    }
+
+    /// Whether the sheet avoids the operating system's safe areas. Defaults to `false`.
+    pub fn use_safe_area(mut self, use_safe_area: bool) -> ShowModalBottomSheet {
+        self.use_safe_area = use_safe_area;
+        self
+    }
+
+    /// The route settings passed to the sheet's route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowModalBottomSheet {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// An animation controller the sheet uses instead of creating one.
+    pub fn transition_animation_controller(
+        mut self,
+        transition_animation_controller: Ref<AnimationController>,
+    ) -> ShowModalBottomSheet {
+        self.transition_animation_controller = Some(transition_animation_controller);
+        self
+    }
+
+    /// An animation style that overrides the sheet's animation durations.
+    pub fn sheet_animation_style(
+        mut self,
+        sheet_animation_style: AnimationStyle,
+    ) -> ShowModalBottomSheet {
+        self.sheet_animation_style = Some(sheet_animation_style);
+        self
+    }
+
+    /// Whether the sheet's route requests focus when it is pushed.
+    pub fn request_focus(mut self, request_focus: bool) -> ShowModalBottomSheet {
+        self.request_focus = Some(request_focus);
+        self
+    }
+
+    /// Shows the sheet and returns a future that resolves to the value passed to
+    /// [`Navigator::pop`] when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowModalBottomSheet {
+            builder,
+            background_color,
+            barrier_label,
+            elevation,
+            shape,
+            clip_behavior,
+            constraints,
+            barrier_color,
+            is_scroll_controlled,
+            scroll_control_disabled_max_height_ratio,
+            use_root_navigator,
+            is_dismissible,
+            enable_drag,
+            show_drag_handle,
+            use_safe_area,
+            route_settings,
+            transition_animation_controller,
+            sheet_animation_style,
+            request_focus,
+        } = self;
+
+        debug_assert!(debug_check_has_media_query(app, context));
+        debug_assert!(debug_check_has_material_localizations(app, context));
+
+        let navigator = Navigator::of(app, context, use_root_navigator);
+        let localizations = <dyn MaterialLocalizations>::of(app, context);
+        let navigator_context = navigator.context(app);
+        let captured_themes = <dyn InheritedTheme>::capture(app, context, Some(navigator_context));
+        let modal_barrier_color = barrier_color.or(Theme::of(app, context)
+            .bottom_sheet_theme
+            .modal_barrier_color);
+        let route = ModalBottomSheetRoute::new(app, builder, is_scroll_controlled)
+            .captured_themes(app, captured_themes)
+            .scroll_control_disabled_max_height_ratio(app, scroll_control_disabled_max_height_ratio)
+            .barrier_label(
+                app,
+                barrier_label.unwrap_or_else(|| localizations.scrim_label()),
+            )
+            .barrier_on_tap_hint(
+                app,
+                localizations.scrim_on_tap_hint(&localizations.bottom_sheet_label()),
+            )
+            .is_dismissible(app, is_dismissible)
+            .enable_drag(app, enable_drag)
+            .use_safe_area(app, use_safe_area);
+        let mut route = route;
+        let this = app.get_mut(&route);
+        this.background_color = background_color;
+        this.elevation = elevation;
+        this.shape = shape;
+        this.clip_behavior = clip_behavior;
+        this.constraints = constraints;
+        this.modal_barrier_color = modal_barrier_color;
+        this.show_drag_handle = show_drag_handle;
+        this.transition_animation_controller = transition_animation_controller;
+        this.sheet_animation_style = sheet_animation_style;
+        if let Some(route_settings) = route_settings {
+            route = route.settings(app, route_settings);
+        }
+        if let Some(request_focus) = request_focus {
+            route = route.request_focus(app, request_focus);
+        }
+        navigator.push(app, route.into_erased())
+    }
 }
 
 /// Shows a Material Design bottom sheet in the nearest [`Scaffold`] ancestor. To
@@ -2345,7 +2512,7 @@ pub fn show_modal_bottom_sheet(
 /// A closely related widget is a modal bottom sheet, which is an alternative
 /// to a menu or a dialog and prevents the user from interacting with the rest
 /// of the app. Modal bottom sheets can be created and displayed with the
-/// [`show_modal_bottom_sheet`] function.
+/// [`ShowModalBottomSheet`] function.
 ///
 /// The `context` argument is used to look up the [`Scaffold`] for the bottom
 /// sheet. It is only used when the method is called. Its corresponding widget
@@ -2355,20 +2522,14 @@ pub fn show_modal_bottom_sheet(
 ///
 ///  * [`BottomSheet`], which becomes the parent of the widget returned by the
 ///    `builder`.
-///  * [`show_modal_bottom_sheet`], which can be used to display a modal bottom
+///  * [`ShowModalBottomSheet`], which can be used to display a modal bottom
 ///    sheet.
 ///  * [`Scaffold::of`], for information about how to obtain the [`BuildContext`].
 ///  * The Material 2 spec at <https://m2.material.io/components/sheets-bottom>.
 ///  * The Material 3 spec at <https://m3.material.io/components/bottom-sheets/overview>.
 ///  * [`AnimationStyle`], which is used to override the bottom sheet animation
 ///    duration and reverse animation duration.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_bottom_sheet(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowBottomSheet {
     builder: WidgetBuilder,
     background_color: Option<Color>,
     elevation: Option<f64>,
@@ -2379,22 +2540,117 @@ pub fn show_bottom_sheet(
     show_drag_handle: Option<bool>,
     transition_animation_controller: Option<Ref<AnimationController>>,
     sheet_animation_style: Option<AnimationStyle>,
-) -> Rc<PersistentBottomSheetController> {
-    debug_assert!(debug_check_has_scaffold(app, context));
+}
 
-    Scaffold::of(app, context).show_bottom_sheet(
-        app,
-        builder,
-        background_color,
-        elevation,
-        shape,
-        clip_behavior,
-        constraints,
-        enable_drag,
-        show_drag_handle,
-        transition_animation_controller,
-        sheet_animation_style,
-    )
+impl ShowBottomSheet {
+    /// Creates a builder for a persistent bottom sheet; Dart's `showBottomSheet` required
+    /// argument is the `builder`, and every other argument is a setter.
+    pub fn new(builder: WidgetBuilder) -> ShowBottomSheet {
+        ShowBottomSheet {
+            builder,
+            background_color: None,
+            elevation: None,
+            shape: None,
+            clip_behavior: None,
+            constraints: None,
+            enable_drag: None,
+            show_drag_handle: None,
+            transition_animation_controller: None,
+            sheet_animation_style: None,
+        }
+    }
+
+    /// The background color of the sheet.
+    pub fn background_color(mut self, background_color: Color) -> ShowBottomSheet {
+        self.background_color = Some(background_color);
+        self
+    }
+
+    /// The z-coordinate of the sheet.
+    pub fn elevation(mut self, elevation: f64) -> ShowBottomSheet {
+        self.elevation = Some(elevation);
+        self
+    }
+
+    /// The shape of the sheet's material.
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ShowBottomSheet {
+        self.shape = Some(shape.into());
+        self
+    }
+
+    /// The clip behavior of the sheet.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> ShowBottomSheet {
+        self.clip_behavior = Some(clip_behavior);
+        self
+    }
+
+    /// The size constraints on the sheet.
+    pub fn constraints(mut self, constraints: BoxConstraints) -> ShowBottomSheet {
+        self.constraints = Some(constraints);
+        self
+    }
+
+    /// Whether the sheet can be dragged up and down.
+    pub fn enable_drag(mut self, enable_drag: bool) -> ShowBottomSheet {
+        self.enable_drag = Some(enable_drag);
+        self
+    }
+
+    /// Whether the sheet shows a drag handle.
+    pub fn show_drag_handle(mut self, show_drag_handle: bool) -> ShowBottomSheet {
+        self.show_drag_handle = Some(show_drag_handle);
+        self
+    }
+
+    /// An animation controller the sheet uses instead of creating one.
+    pub fn transition_animation_controller(
+        mut self,
+        transition_animation_controller: Ref<AnimationController>,
+    ) -> ShowBottomSheet {
+        self.transition_animation_controller = Some(transition_animation_controller);
+        self
+    }
+
+    /// An animation style that overrides the sheet's animation durations.
+    pub fn sheet_animation_style(
+        mut self,
+        sheet_animation_style: AnimationStyle,
+    ) -> ShowBottomSheet {
+        self.sheet_animation_style = Some(sheet_animation_style);
+        self
+    }
+
+    /// Shows the sheet and returns its controller.
+    pub fn show(self, app: &mut App, context: BuildContext) -> Rc<PersistentBottomSheetController> {
+        let ShowBottomSheet {
+            builder,
+            background_color,
+            elevation,
+            shape,
+            clip_behavior,
+            constraints,
+            enable_drag,
+            show_drag_handle,
+            transition_animation_controller,
+            sheet_animation_style,
+        } = self;
+
+        debug_assert!(debug_check_has_scaffold(app, context));
+
+        Scaffold::of(app, context).show_bottom_sheet(
+            app,
+            builder,
+            background_color,
+            elevation,
+            shape,
+            clip_behavior,
+            constraints,
+            enable_drag,
+            show_drag_handle,
+            transition_animation_controller,
+            sheet_animation_style,
+        )
+    }
 }
 
 /// Dart's `_BottomSheetGestureDetector`.
@@ -2576,29 +2832,52 @@ mod tests {
             context: BuildContext,
             builder: WidgetBuilder,
         ) -> CompleterFuture<RouteResult> {
-            show_modal_bottom_sheet(
-                app,
-                context,
-                builder,
-                self.background_color,
-                self.barrier_label,
-                self.elevation,
-                self.shape,
-                self.clip_behavior,
-                self.constraints,
-                self.barrier_color,
-                self.is_scroll_controlled,
-                self.scroll_control_disabled_max_height_ratio,
-                self.use_root_navigator,
-                self.is_dismissible,
-                self.enable_drag,
-                self.show_drag_handle,
-                self.use_safe_area,
-                self.route_settings,
-                self.transition_animation_controller,
-                self.sheet_animation_style,
-                self.request_focus,
-            )
+            let mut show = ShowModalBottomSheet::new(builder)
+                .is_scroll_controlled(self.is_scroll_controlled)
+                .scroll_control_disabled_max_height_ratio(
+                    self.scroll_control_disabled_max_height_ratio,
+                )
+                .use_root_navigator(self.use_root_navigator)
+                .is_dismissible(self.is_dismissible)
+                .enable_drag(self.enable_drag)
+                .use_safe_area(self.use_safe_area);
+            if let Some(background_color) = self.background_color {
+                show = show.background_color(background_color);
+            }
+            if let Some(barrier_label) = self.barrier_label {
+                show = show.barrier_label(barrier_label);
+            }
+            if let Some(elevation) = self.elevation {
+                show = show.elevation(elevation);
+            }
+            if let Some(shape) = self.shape {
+                show = show.shape(shape);
+            }
+            if let Some(clip_behavior) = self.clip_behavior {
+                show = show.clip_behavior(clip_behavior);
+            }
+            if let Some(constraints) = self.constraints {
+                show = show.constraints(constraints);
+            }
+            if let Some(barrier_color) = self.barrier_color {
+                show = show.barrier_color(barrier_color);
+            }
+            if let Some(show_drag_handle) = self.show_drag_handle {
+                show = show.show_drag_handle(show_drag_handle);
+            }
+            if let Some(route_settings) = self.route_settings {
+                show = show.route_settings(route_settings);
+            }
+            if let Some(transition_animation_controller) = self.transition_animation_controller {
+                show = show.transition_animation_controller(transition_animation_controller);
+            }
+            if let Some(sheet_animation_style) = self.sheet_animation_style {
+                show = show.sheet_animation_style(sheet_animation_style);
+            }
+            if let Some(request_focus) = self.request_focus {
+                show = show.request_focus(request_focus);
+            }
+            show.show(app, context)
         }
     }
 
@@ -3841,21 +4120,14 @@ mod tests {
             assert_eq!(found(tester, "BottomSheet"), 0);
 
             let saving = sheet.clone();
-            show_bottom_sheet(
-                &mut tester.cell.borrow_mut(),
-                saved.get(),
-                Rc::new(move |_app, _context| saving.builder(|| text("BottomSheet"))),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                // The default duration and reverseDuration is 1 second
-                Some(controller.clone()),
-                None,
-            );
+            {
+                let mut show = ShowBottomSheet::new(Rc::new(move |_app, _context| {
+                    saving.builder(|| text("BottomSheet"))
+                }));
+                // The default duration and reverseDuration is 1 second.
+                show = show.transition_animation_controller(controller.clone());
+                show.show(&mut tester.cell.borrow_mut(), saved.get())
+            };
             tester.pump();
 
             assert_eq!(found(tester, "BottomSheet"), 1);
@@ -5406,27 +5678,17 @@ mod tests {
             let context = key
                 .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
-            show_bottom_sheet(
-                &mut tester.cell.borrow_mut(),
-                context,
-                Rc::new(move |_app, _context| {
+            {
+                let show = ShowBottomSheet::new(Rc::new(move |_app, _context| {
                     let count = Rc::clone(&count);
                     Builder::new(move |_app, _context| {
                         count.set(count.get() + 1);
                         Container::new().height(200.0).into_widget()
                     })
                     .into_widget()
-                }),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            );
+                }));
+                show.show(&mut tester.cell.borrow_mut(), context)
+            };
             tester.pump();
             assert_eq!(build_count.get(), 1);
         });
@@ -5460,23 +5722,13 @@ mod tests {
             tester.pump();
 
             let saving = bottom_sheet_context.clone();
-            show_bottom_sheet(
-                &mut tester.cell.borrow_mut(),
-                scaffold_context.get(),
-                Rc::new(move |_app, context| {
+            {
+                let show = ShowBottomSheet::new(Rc::new(move |_app, context| {
                     saving.0.set(Some(context));
                     Container::new().into_widget()
-                }),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            );
+                }));
+                show.show(&mut tester.cell.borrow_mut(), scaffold_context.get())
+            };
 
             tester.pump();
 
@@ -6251,20 +6503,10 @@ mod tests {
 
     /// Dart's 'Show Persistent' button.
     fn show_persistent_from(tester: &WidgetTester, saved: &Saved) {
-        show_bottom_sheet(
-            &mut tester.cell.borrow_mut(),
-            saved.get(),
-            sheet_builder("This is a persistent bottom sheet."),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        {
+            let show = ShowBottomSheet::new(sheet_builder("This is a persistent bottom sheet."));
+            show.show(&mut tester.cell.borrow_mut(), saved.get())
+        };
     }
 
     /// Dart's 'Modal bottom sheet-specific parameters are used for modal bottom sheets'.

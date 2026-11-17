@@ -24,6 +24,11 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - spell_check_suggestions_toolbar.rs → spell_check_suggestions_toolbar.dart
 - search_field.rs → search_field.dart
 
+## show_* functions → their .dart files
+- Change: `show_cupertino_modal_popup`, `show_cupertino_dialog` and `show_cupertino_sheet` are builders — `ShowCupertinoModalPopup::new(builder)`, `ShowCupertinoDialog::new(builder)` and `ShowCupertinoSheet::new()`, with a setter per optional Dart argument — whose `show(app, context)` runs the body the free function ran.
+  Reason: language — Rust has no named optional arguments, so the required arguments stay in `new` and every optional one is a fluent setter.
+  Affect: a call site writes `ShowCupertinoDialog::new(builder).barrier_dismissible(true).show(app, context)` where Dart writes named arguments, and the free functions no longer exist.
+
 ## app.rs → app.dart
 
 - Change: the overlay style `CupertinoApp` sets from its brightness is set for the view it is built in (`View::maybe_of`), and for none outside a view.

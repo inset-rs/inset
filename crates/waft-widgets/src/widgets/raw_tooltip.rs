@@ -1590,19 +1590,15 @@ mod tests {
     use super::*;
     use crate::framework::GlobalKey;
     use crate::testing::{
-        Finder, TestPointer, WidgetTester, assert_more_or_less_equals, expect, find, finds_nothing,
-        finds_one_widget, test_widgets,
+        Finder, TestPointer, TestWidgetsApp, WidgetTester, assert_more_or_less_equals, expect,
+        find, finds_nothing, finds_one_widget, test_widgets,
     };
     use crate::widgets::app::WidgetsApp;
     use crate::widgets::basic::{
         Align, Builder, Center, ColoredBox, Column, Directionality, Padding, Spacer, Stack,
-        WidgetBuilder,
     };
     use crate::widgets::gesture_detector::GestureDetector;
-    use crate::widgets::navigator::{RouteSettings, RouteSettingsRef};
     use crate::widgets::overlay::{Overlay, OverlayEntry};
-    use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
-    use crate::widgets::routes::RoutePageBuilder;
     use crate::widgets::text::Text;
     use crate::widgets::transitions::FadeTransition;
 
@@ -1693,7 +1689,7 @@ mod tests {
             self.entry = None;
             self.tester.pump_widget(
                 WidgetsApp::new(Color::new(0x00000000))
-                    .page_route_builder(page_route)
+                    .page_route_builder(TestWidgetsApp::default_page_route_builder)
                     .home(home),
             );
         }
@@ -1767,15 +1763,6 @@ mod tests {
             key.current_state::<RawTooltipState>(&self.tester.cell.borrow())
                 .expect("the tooltip is mounted")
         }
-    }
-
-    /// The tests' `pageRouteBuilder`: a `PageRouteBuilder` whose page is the builder's.
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
-        let page_builder: RoutePageBuilder =
-            Rc::new(move |app, context, _animation, _secondary| builder(app, context));
-        let route = PageRouteBuilder::new(app, page_builder)
-            .settings(app, RouteSettingsRef::Settings(settings.clone()));
-        route.erase()
     }
 
     fn sized_box(width: f64, height: f64) -> SizedBox {

@@ -2,24 +2,17 @@
 
 use std::rc::Rc;
 
-use waft_embedder::{Matrix4, Offset};
-use waft_foundation::{App, Handle, PRECISION_ERROR_TOLERANCE};
+use waft_foundation::{App, PRECISION_ERROR_TOLERANCE};
 
 use crate::box_::{AnyRenderBox, BoxConstraints};
-use crate::object::{
-    AnyRenderObject, ContainerRenderObjectData, ContainerRenderObjectMixin, RenderHandle,
-    RenderObject, RenderObjectData,
-};
-use crate::painting_context::PaintingContext;
-use crate::pipeline_owner::PipelineOwner;
+use crate::object::{ContainerRenderObjectData, RenderHandle, RenderObjectData};
 use crate::sliver::{
-    ItemExtentBuilder, RenderSliver, RenderSliverData, RenderSliverHelpers, SliverConstraints,
-    SliverGeometry, SliverHitTestResult, SliverLayoutDimensions, calculate_cache_offset,
-    calculate_paint_offset,
+    ItemExtentBuilder, RenderSliver, RenderSliverData, SliverConstraints, SliverGeometry,
+    SliverLayoutDimensions, calculate_cache_offset, calculate_paint_offset,
 };
 use crate::sliver_multi_box_adaptor::{
     RenderSliverBoxChildManager, RenderSliverMultiBoxAdaptor, RenderSliverMultiBoxAdaptorData,
-    RenderSliverWithKeepAliveMixin, SliverMultiBoxAdaptorParentData,
+    SliverMultiBoxAdaptorParentData,
 };
 
 /// Flutter's `RenderSliverFixedExtentBoxAdaptor` field.
@@ -505,131 +498,157 @@ pub trait RenderSliverFixedExtentBoxAdaptor: RenderSliverMultiBoxAdaptor {
 
 /// Declares the [`ContainerRenderObjectMixin`], [`RenderObject`] and [`RenderSliver`] impls that
 /// a [`RenderSliverFixedExtentBoxAdaptor`] leaf forwards to its base traits.
+#[macro_export]
 macro_rules! fixed_extent_box_adaptor_leaf {
     ($leaf:ty) => {
-        impl ContainerRenderObjectMixin for $leaf {
-            type ChildType = AnyRenderBox;
-            type ParentDataType = SliverMultiBoxAdaptorParentData;
+        impl $crate::ContainerRenderObjectMixin for $leaf {
+            type ChildType = $crate::AnyRenderBox;
+            type ParentDataType = $crate::SliverMultiBoxAdaptorParentData;
 
             fn container_data(
-                self: RenderHandle<Self>,
-                app: &App,
-            ) -> &ContainerRenderObjectData<AnyRenderBox> {
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+            ) -> &$crate::ContainerRenderObjectData<$crate::AnyRenderBox> {
                 &self.get(app).container
             }
 
             fn container_data_mut(
-                self: RenderHandle<Self>,
-                app: &mut App,
-            ) -> &mut ContainerRenderObjectData<AnyRenderBox> {
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+            ) -> &mut $crate::ContainerRenderObjectData<$crate::AnyRenderBox> {
                 &mut self.get_mut(app).container
             }
 
             fn insert(
-                self: RenderHandle<Self>,
-                app: &mut App,
-                child: AnyRenderBox,
-                after: Option<AnyRenderBox>,
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                child: $crate::AnyRenderBox,
+                after: Option<$crate::AnyRenderBox>,
             ) {
-                RenderSliverMultiBoxAdaptor::insert(self, app, child, after)
+                $crate::RenderSliverMultiBoxAdaptor::insert(self, app, child, after)
             }
 
             fn move_child(
-                self: RenderHandle<Self>,
-                app: &mut App,
-                child: AnyRenderBox,
-                after: Option<AnyRenderBox>,
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                child: $crate::AnyRenderBox,
+                after: Option<$crate::AnyRenderBox>,
             ) {
-                RenderSliverMultiBoxAdaptor::move_child(self, app, child, after)
+                $crate::RenderSliverMultiBoxAdaptor::move_child(self, app, child, after)
             }
 
-            fn remove(self: RenderHandle<Self>, app: &mut App, child: AnyRenderBox) {
-                RenderSliverMultiBoxAdaptor::remove(self, app, child)
+            fn remove(
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                child: $crate::AnyRenderBox,
+            ) {
+                $crate::RenderSliverMultiBoxAdaptor::remove(self, app, child)
             }
 
-            fn remove_all(self: RenderHandle<Self>, app: &mut App) {
-                RenderSliverMultiBoxAdaptor::remove_all(self, app)
-            }
-        }
-
-        impl RenderSliverHelpers for $leaf {}
-
-        impl RenderSliverWithKeepAliveMixin for $leaf {}
-
-        impl RenderSliverMultiBoxAdaptor for $leaf {
-            crate::render_sliver_multi_box_adaptor_accessors!();
-
-            fn paint_extent_of(self: RenderHandle<Self>, app: &App, child: AnyRenderBox) -> f64 {
-                RenderSliverFixedExtentBoxAdaptor::paint_extent_of(self, app, child)
+            fn remove_all(self: $crate::RenderHandle<Self>, app: &mut ::waft_foundation::App) {
+                $crate::RenderSliverMultiBoxAdaptor::remove_all(self, app)
             }
         }
 
-        impl RenderObject for $leaf {
-            crate::render_object_accessors!();
+        impl $crate::RenderSliverHelpers for $leaf {}
 
-            fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
-                RenderSliverMultiBoxAdaptor::setup_parent_data(self, app, child);
-                RenderSliverWithKeepAliveMixin::setup_parent_data(self, app, child);
+        impl $crate::RenderSliverWithKeepAliveMixin for $leaf {}
+
+        impl $crate::RenderSliverMultiBoxAdaptor for $leaf {
+            $crate::render_sliver_multi_box_adaptor_accessors!();
+
+            fn paint_extent_of(
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+                child: $crate::AnyRenderBox,
+            ) -> f64 {
+                $crate::RenderSliverFixedExtentBoxAdaptor::paint_extent_of(self, app, child)
+            }
+        }
+
+        impl $crate::RenderObject for $leaf {
+            $crate::render_object_accessors!();
+
+            fn setup_parent_data(
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                child: $crate::AnyRenderObject,
+            ) {
+                $crate::RenderSliverMultiBoxAdaptor::setup_parent_data(self, app, child);
+                $crate::RenderSliverWithKeepAliveMixin::setup_parent_data(self, app, child);
             }
 
             fn visit_children(
-                self: RenderHandle<Self>,
-                app: &App,
-                visitor: &mut dyn FnMut(AnyRenderObject),
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+                visitor: &mut dyn FnMut($crate::AnyRenderObject),
             ) {
-                RenderSliverMultiBoxAdaptor::visit_children(self, app, visitor)
+                $crate::RenderSliverMultiBoxAdaptor::visit_children(self, app, visitor)
             }
 
-            fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
-                RenderSliverMultiBoxAdaptor::did_attach(self, app, owner)
+            fn did_attach(
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                owner: ::waft_foundation::Handle<$crate::PipelineOwner>,
+            ) {
+                $crate::RenderSliverMultiBoxAdaptor::did_attach(self, app, owner)
             }
 
-            fn did_detach(self: RenderHandle<Self>, app: &mut App) {
-                RenderSliverMultiBoxAdaptor::did_detach(self, app)
+            fn did_detach(self: $crate::RenderHandle<Self>, app: &mut ::waft_foundation::App) {
+                $crate::RenderSliverMultiBoxAdaptor::did_detach(self, app)
             }
 
-            fn redepth_children(self: RenderHandle<Self>, app: &mut App) {
-                RenderSliverMultiBoxAdaptor::redepth_children(self, app)
+            fn redepth_children(
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+            ) {
+                $crate::RenderSliverMultiBoxAdaptor::redepth_children(self, app)
             }
 
             fn apply_paint_transform(
-                self: RenderHandle<Self>,
-                app: &App,
-                child: AnyRenderObject,
-                transform: &mut Matrix4,
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+                child: $crate::AnyRenderObject,
+                transform: &mut ::waft_embedder::Matrix4,
             ) {
-                RenderSliverMultiBoxAdaptor::apply_paint_transform(self, app, child, transform)
+                $crate::RenderSliverMultiBoxAdaptor::apply_paint_transform(
+                    self, app, child, transform,
+                )
             }
 
-            fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
-                RenderSliverMultiBoxAdaptor::paints_child(self, app, child)
+            fn paints_child(
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+                child: $crate::AnyRenderObject,
+            ) -> bool {
+                $crate::RenderSliverMultiBoxAdaptor::paints_child(self, app, child)
             }
 
             fn paint(
-                self: RenderHandle<Self>,
-                app: &mut App,
-                context: &mut PaintingContext,
-                offset: Offset,
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                context: &mut $crate::PaintingContext,
+                offset: ::waft_embedder::Offset,
             ) {
-                RenderSliverMultiBoxAdaptor::paint(self, app, context, offset)
+                $crate::RenderSliverMultiBoxAdaptor::paint(self, app, context, offset)
             }
 
-            fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
-                RenderSliverFixedExtentBoxAdaptor::perform_layout(self, app)
+            fn perform_layout(self: $crate::RenderHandle<Self>, app: &mut ::waft_foundation::App) {
+                $crate::RenderSliverFixedExtentBoxAdaptor::perform_layout(self, app)
             }
         }
 
-        impl RenderSliver for $leaf {
-            crate::render_sliver_accessors!();
+        impl $crate::RenderSliver for $leaf {
+            $crate::render_sliver_accessors!();
 
             fn hit_test_children(
-                self: RenderHandle<Self>,
-                app: &mut App,
-                result: &mut SliverHitTestResult<'_>,
+                self: $crate::RenderHandle<Self>,
+                app: &mut ::waft_foundation::App,
+                result: &mut $crate::SliverHitTestResult<'_>,
                 main_axis_position: f64,
                 cross_axis_position: f64,
             ) -> bool {
-                RenderSliverMultiBoxAdaptor::hit_test_children(
+                $crate::RenderSliverMultiBoxAdaptor::hit_test_children(
                     self,
                     app,
                     result,
@@ -639,25 +658,25 @@ macro_rules! fixed_extent_box_adaptor_leaf {
             }
 
             fn child_main_axis_position(
-                self: RenderHandle<Self>,
-                app: &App,
-                child: AnyRenderObject,
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+                child: $crate::AnyRenderObject,
             ) -> f64 {
-                RenderSliverMultiBoxAdaptor::child_main_axis_position(self, app, child)
+                $crate::RenderSliverMultiBoxAdaptor::child_main_axis_position(self, app, child)
             }
 
             fn child_scroll_offset(
-                self: RenderHandle<Self>,
-                app: &App,
-                child: AnyRenderObject,
+                self: $crate::RenderHandle<Self>,
+                app: &::waft_foundation::App,
+                child: $crate::AnyRenderObject,
             ) -> Option<f64> {
-                RenderSliverMultiBoxAdaptor::child_scroll_offset(self, app, child)
+                $crate::RenderSliverMultiBoxAdaptor::child_scroll_offset(self, app, child)
             }
         }
     };
 }
 
-pub(crate) use fixed_extent_box_adaptor_leaf;
+pub use fixed_extent_box_adaptor_leaf;
 
 /// A sliver that places multiple box children with the same main axis extent in a linear array.
 ///
@@ -786,6 +805,8 @@ mod tests {
     use waft_gestures::HitTestResult;
 
     use super::*;
+    use crate::object::ContainerRenderObjectMixin;
+    use crate::sliver::SliverHitTestResult;
     use crate::sliver_multi_box_adaptor::test_support::TestChildManager;
     use crate::sliver_multi_box_adaptor::viewport_test_support::ScrollHarness;
 

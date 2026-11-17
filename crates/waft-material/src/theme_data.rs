@@ -28,11 +28,13 @@ use crate::bottom_sheet_theme::BottomSheetThemeData;
 use crate::button_bar_theme::ButtonBarThemeData;
 use crate::button_theme::ButtonThemeData;
 use crate::card_theme::CardThemeData;
+use crate::carousel_theme::CarouselViewThemeData;
 use crate::checkbox_theme::CheckboxThemeData;
 use crate::chip_theme::ChipThemeData;
 use crate::color_scheme::ColorScheme;
 use crate::colors::{Colors, MaterialColor};
 use crate::constants::{K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR};
+use crate::data_table_theme::DataTableThemeData;
 use crate::date_picker_theme::DatePickerThemeData;
 use crate::dialog_theme::DialogThemeData;
 use crate::divider_theme::DividerThemeData;
@@ -66,6 +68,8 @@ use crate::popup_menu_theme::PopupMenuThemeData;
 use crate::progress_indicator_theme::ProgressIndicatorThemeData;
 use crate::radio_theme::RadioThemeData;
 use crate::scrollbar_theme::ScrollbarThemeData;
+use crate::search_bar_theme::SearchBarThemeData;
+use crate::search_view_theme::SearchViewThemeData;
 use crate::segmented_button_theme::SegmentedButtonThemeData;
 use crate::slider_theme::SliderThemeData;
 use crate::snack_bar_theme::SnackBarThemeData;
@@ -633,12 +637,19 @@ pub struct ThemeData {
     ///
     /// This is the value returned from `CardTheme::of`.
     pub card_theme: CardThemeData,
+
+    /// A theme for customizing the visual properties of [`CarouselView`](crate::CarouselView).
+    pub carousel_view_theme: CarouselViewThemeData,
     /// A theme for customizing the appearance and layout of `Checkbox` widgets.
     pub checkbox_theme: CheckboxThemeData,
     /// A theme for customizing the appearance and layout of `Chip` widgets.
     ///
     /// This is the value returned from `ChipTheme::of`.
     pub chip_theme: ChipThemeData,
+    /// A theme for customizing the appearance and layout of `DataTable` widgets.
+    ///
+    /// This is the value returned from `DataTableTheme::of`.
+    pub data_table_theme: DataTableThemeData,
     /// A theme for customizing the appearance and layout of [`DatePickerDialog`](crate::DatePickerDialog) widgets.
     ///
     /// This is the value returned from `DatePickerTheme::of`.
@@ -697,6 +708,11 @@ pub struct ThemeData {
     pub progress_indicator_theme: ProgressIndicatorThemeData,
     /// A theme for customizing the appearance and layout of `Radio` widgets.
     pub radio_theme: RadioThemeData,
+    /// A theme for customizing the appearance and layout of `SearchBar` widgets.
+    pub search_bar_theme: SearchBarThemeData,
+    /// A theme for customizing the appearance and layout of search views created by
+    /// `SearchAnchor` widgets.
+    pub search_view_theme: SearchViewThemeData,
     /// A theme for customizing the appearance and layout of `SegmentedButton` widgets.
     pub segmented_button_theme: SegmentedButtonThemeData,
     /// The colors and shapes used to render `Slider`.
@@ -1157,6 +1173,11 @@ impl ThemeData {
                 b.button_theme.clone()
             },
             card_theme: CardThemeData::lerp(Some(&a.card_theme), Some(&b.card_theme), t),
+            carousel_view_theme: CarouselViewThemeData::lerp(
+                Some(&a.carousel_view_theme),
+                Some(&b.carousel_view_theme),
+                t,
+            ),
             checkbox_theme: CheckboxThemeData::lerp(
                 Some(&a.checkbox_theme),
                 Some(&b.checkbox_theme),
@@ -1164,6 +1185,7 @@ impl ThemeData {
             ),
             chip_theme: ChipThemeData::lerp(Some(&a.chip_theme), Some(&b.chip_theme), t)
                 .expect("both sides"),
+            data_table_theme: DataTableThemeData::lerp(&a.data_table_theme, &b.data_table_theme, t),
             date_picker_theme: DatePickerThemeData::lerp(
                 Some(&a.date_picker_theme),
                 Some(&b.date_picker_theme),
@@ -1269,6 +1291,18 @@ impl ThemeData {
             )
             .expect("both sides"),
             radio_theme: RadioThemeData::lerp(Some(&a.radio_theme), Some(&b.radio_theme), t),
+            search_bar_theme: SearchBarThemeData::lerp(
+                Some(&a.search_bar_theme),
+                Some(&b.search_bar_theme),
+                t,
+            )
+            .expect("both sides"),
+            search_view_theme: SearchViewThemeData::lerp(
+                Some(&a.search_view_theme),
+                Some(&b.search_view_theme),
+                t,
+            )
+            .expect("both sides"),
             segmented_button_theme: SegmentedButtonThemeData::lerp(
                 Some(&a.segmented_button_theme),
                 Some(&b.segmented_button_theme),
@@ -1383,8 +1417,10 @@ impl PartialEq for ThemeData {
             && other.button_bar_theme == self.button_bar_theme
             && other.button_theme == self.button_theme
             && other.card_theme == self.card_theme
+            && other.carousel_view_theme == self.carousel_view_theme
             && other.checkbox_theme == self.checkbox_theme
             && other.chip_theme == self.chip_theme
+            && other.data_table_theme == self.data_table_theme
             && other.date_picker_theme == self.date_picker_theme
             && other.dialog_theme == self.dialog_theme
             && other.divider_theme == self.divider_theme
@@ -1406,6 +1442,8 @@ impl PartialEq for ThemeData {
             && other.popup_menu_theme == self.popup_menu_theme
             && other.progress_indicator_theme == self.progress_indicator_theme
             && other.radio_theme == self.radio_theme
+            && other.search_bar_theme == self.search_bar_theme
+            && other.search_view_theme == self.search_view_theme
             && other.segmented_button_theme == self.segmented_button_theme
             && other.slider_theme == self.slider_theme
             && other.snack_bar_theme == self.snack_bar_theme
@@ -1488,8 +1526,10 @@ pub struct ThemeDataBuilder {
     button_bar_theme: Option<Box<ButtonBarThemeData>>,
     button_theme: Option<Box<ButtonThemeData>>,
     card_theme: Option<Box<CardThemeData>>,
+    carousel_view_theme: Option<Box<CarouselViewThemeData>>,
     checkbox_theme: Option<Box<CheckboxThemeData>>,
     chip_theme: Option<Box<ChipThemeData>>,
+    data_table_theme: Option<Box<DataTableThemeData>>,
     date_picker_theme: Option<Box<DatePickerThemeData>>,
     dialog_theme: Option<Box<DialogThemeData>>,
     divider_theme: Option<Box<DividerThemeData>>,
@@ -1511,6 +1551,8 @@ pub struct ThemeDataBuilder {
     popup_menu_theme: Option<Box<PopupMenuThemeData>>,
     progress_indicator_theme: Option<Box<ProgressIndicatorThemeData>>,
     radio_theme: Option<Box<RadioThemeData>>,
+    search_bar_theme: Option<Box<SearchBarThemeData>>,
+    search_view_theme: Option<Box<SearchViewThemeData>>,
     segmented_button_theme: Option<Box<SegmentedButtonThemeData>>,
     slider_theme: Option<Box<SliderThemeData>>,
     snack_bar_theme: Option<Box<SnackBarThemeData>>,
@@ -1856,6 +1898,15 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(carouselViewTheme:)`.
+    pub fn carousel_view_theme(
+        mut self,
+        carousel_view_theme: CarouselViewThemeData,
+    ) -> ThemeDataBuilder {
+        self.carousel_view_theme = Some(Box::new(carousel_view_theme));
+        self
+    }
+
     /// Dart `ThemeData(checkboxTheme:)`.
     pub fn checkbox_theme(mut self, checkbox_theme: CheckboxThemeData) -> ThemeDataBuilder {
         self.checkbox_theme = Some(Box::new(checkbox_theme));
@@ -1865,6 +1916,12 @@ impl ThemeDataBuilder {
     /// Dart `ThemeData(chipTheme:)`.
     pub fn chip_theme(mut self, chip_theme: ChipThemeData) -> ThemeDataBuilder {
         self.chip_theme = Some(Box::new(chip_theme));
+        self
+    }
+
+    /// Dart `ThemeData(dataTableTheme:)`.
+    pub fn data_table_theme(mut self, data_table_theme: DataTableThemeData) -> ThemeDataBuilder {
+        self.data_table_theme = Some(Box::new(data_table_theme));
         self
     }
 
@@ -2024,6 +2081,18 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(searchBarTheme:)`.
+    pub fn search_bar_theme(mut self, search_bar_theme: SearchBarThemeData) -> ThemeDataBuilder {
+        self.search_bar_theme = Some(Box::new(search_bar_theme));
+        self
+    }
+
+    /// Dart `ThemeData(searchViewTheme:)`.
+    pub fn search_view_theme(mut self, search_view_theme: SearchViewThemeData) -> ThemeDataBuilder {
+        self.search_view_theme = Some(Box::new(search_view_theme));
+        self
+    }
+
     /// Dart `ThemeData(segmentedButtonTheme:)`.
     pub fn segmented_button_theme(
         mut self,
@@ -2166,8 +2235,10 @@ impl ThemeDataBuilder {
             button_bar_theme,
             button_theme,
             card_theme,
+            carousel_view_theme,
             checkbox_theme,
             chip_theme,
+            data_table_theme,
             date_picker_theme,
             dialog_theme,
             divider_theme,
@@ -2189,6 +2260,8 @@ impl ThemeDataBuilder {
             popup_menu_theme,
             progress_indicator_theme,
             radio_theme,
+            search_bar_theme,
+            search_view_theme,
             segmented_button_theme,
             slider_theme,
             snack_bar_theme,
@@ -2586,8 +2659,10 @@ impl ThemeDataBuilder {
             button_bar_theme,
             button_theme,
             card_theme: unboxed_or_default(card_theme),
+            carousel_view_theme: unboxed_or_default(carousel_view_theme),
             checkbox_theme: unboxed_or_default(checkbox_theme),
             chip_theme: unboxed_or_default(chip_theme),
+            data_table_theme: unboxed_or_default(data_table_theme),
             date_picker_theme: unboxed_or_default(date_picker_theme),
             dialog_theme: unboxed_or_default(dialog_theme),
             divider_theme: unboxed_or_default(divider_theme),
@@ -2609,6 +2684,8 @@ impl ThemeDataBuilder {
             popup_menu_theme: unboxed_or_default(popup_menu_theme),
             progress_indicator_theme: unboxed_or_default(progress_indicator_theme),
             radio_theme: unboxed_or_default(radio_theme),
+            search_bar_theme: unboxed_or_default(search_bar_theme),
+            search_view_theme: unboxed_or_default(search_view_theme),
             segmented_button_theme: unboxed_or_default(segmented_button_theme),
             slider_theme: unboxed_or_default(slider_theme),
             snack_bar_theme: unboxed_or_default(snack_bar_theme),
@@ -2998,6 +3075,14 @@ impl ThemeDataCopyWith {
         self
     }
 
+    pub fn carousel_view_theme(
+        mut self,
+        carousel_view_theme: CarouselViewThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.carousel_view_theme = carousel_view_theme;
+        self
+    }
+
     /// Dart `copyWith(checkboxTheme:)`.
     pub fn checkbox_theme(mut self, checkbox_theme: CheckboxThemeData) -> ThemeDataCopyWith {
         self.theme.checkbox_theme = checkbox_theme;
@@ -3007,6 +3092,12 @@ impl ThemeDataCopyWith {
     /// Dart `copyWith(chipTheme:)`.
     pub fn chip_theme(mut self, chip_theme: ChipThemeData) -> ThemeDataCopyWith {
         self.theme.chip_theme = chip_theme;
+        self
+    }
+
+    /// Dart `copyWith(dataTableTheme:)`.
+    pub fn data_table_theme(mut self, data_table_theme: DataTableThemeData) -> ThemeDataCopyWith {
+        self.theme.data_table_theme = data_table_theme;
         self
     }
 
@@ -3172,6 +3263,21 @@ impl ThemeDataCopyWith {
     /// Dart `copyWith(radioTheme:)`.
     pub fn radio_theme(mut self, radio_theme: RadioThemeData) -> ThemeDataCopyWith {
         self.theme.radio_theme = radio_theme;
+        self
+    }
+
+    /// Dart `copyWith(searchBarTheme:)`.
+    pub fn search_bar_theme(mut self, search_bar_theme: SearchBarThemeData) -> ThemeDataCopyWith {
+        self.theme.search_bar_theme = search_bar_theme;
+        self
+    }
+
+    /// Dart `copyWith(searchViewTheme:)`.
+    pub fn search_view_theme(
+        mut self,
+        search_view_theme: SearchViewThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.search_view_theme = search_view_theme;
         self
     }
 
@@ -5074,6 +5180,7 @@ mod tests {
             button_bar_theme: ButtonBarThemeData::new().with_alignment(MainAxisAlignment::Center),
             button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::dark()),
             card_theme: CardThemeData::new().elevation(1.0),
+            carousel_view_theme: CarouselViewThemeData::new(),
             checkbox_theme: CheckboxThemeData::new(),
             chip_theme: ChipThemeData::from_defaults(
                 None,
@@ -5081,6 +5188,7 @@ mod tests {
                 Colors::WHITE,
                 TextStyle::new().color(Colors::BLACK),
             ),
+            data_table_theme: DataTableThemeData::new(),
             date_picker_theme: DatePickerThemeData::new(),
             dialog_theme: DialogThemeData::new().background_color(Colors::BLACK),
             divider_theme: DividerThemeData::new().color(Colors::BLACK),
@@ -5129,6 +5237,8 @@ mod tests {
             popup_menu_theme: PopupMenuThemeData::new().color(Colors::BLACK),
             progress_indicator_theme: ProgressIndicatorThemeData::new(),
             radio_theme: RadioThemeData::new(),
+            search_bar_theme: SearchBarThemeData::new(),
+            search_view_theme: SearchViewThemeData::new(),
             segmented_button_theme: SegmentedButtonThemeData::new(),
             slider_theme: SliderThemeData::from_primary_colors(
                 Colors::BLACK,
@@ -5218,6 +5328,7 @@ mod tests {
             button_bar_theme: ButtonBarThemeData::new().with_alignment(MainAxisAlignment::End),
             button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::light()),
             card_theme: CardThemeData::new().elevation(2.0),
+            carousel_view_theme: CarouselViewThemeData::new().elevation(2.0),
             checkbox_theme: CheckboxThemeData::new(),
             chip_theme: ChipThemeData::from_defaults(
                 None,
@@ -5225,6 +5336,7 @@ mod tests {
                 Colors::BLACK,
                 TextStyle::new().color(Colors::WHITE),
             ),
+            data_table_theme: DataTableThemeData::new().divider_thickness(7.0),
             date_picker_theme: DatePickerThemeData::new().background_color(Colors::AMBER.primary()),
             dialog_theme: DialogThemeData::new().background_color(Colors::WHITE),
             divider_theme: DividerThemeData::new().color(Colors::WHITE),
@@ -5257,6 +5369,8 @@ mod tests {
             popup_menu_theme: PopupMenuThemeData::new().color(Colors::WHITE),
             progress_indicator_theme: ProgressIndicatorThemeData::new(),
             radio_theme: RadioThemeData::new(),
+            search_bar_theme: SearchBarThemeData::new(),
+            search_view_theme: SearchViewThemeData::new().elevation(3.0),
             segmented_button_theme: SegmentedButtonThemeData::new(),
             slider_theme: SliderThemeData::from_primary_colors(
                 Colors::WHITE,
@@ -5334,8 +5448,10 @@ mod tests {
             .button_bar_theme(other_theme.button_bar_theme.clone())
             .button_theme(other_theme.button_theme.clone())
             .card_theme(other_theme.card_theme.clone())
+            .carousel_view_theme(other_theme.carousel_view_theme.clone())
             .checkbox_theme(other_theme.checkbox_theme.clone())
             .chip_theme(other_theme.chip_theme.clone())
+            .data_table_theme(other_theme.data_table_theme.clone())
             .date_picker_theme(other_theme.date_picker_theme.clone())
             .dialog_theme(other_theme.dialog_theme.clone())
             .divider_theme(other_theme.divider_theme.clone())
@@ -5357,6 +5473,8 @@ mod tests {
             .popup_menu_theme(other_theme.popup_menu_theme.clone())
             .progress_indicator_theme(other_theme.progress_indicator_theme.clone())
             .radio_theme(other_theme.radio_theme.clone())
+            .search_bar_theme(other_theme.search_bar_theme.clone())
+            .search_view_theme(other_theme.search_view_theme.clone())
             .segmented_button_theme(other_theme.segmented_button_theme.clone())
             .slider_theme(other_theme.slider_theme.clone())
             .snack_bar_theme(other_theme.snack_bar_theme.clone())
@@ -5488,8 +5606,16 @@ mod tests {
             );
             assert_eq!(theme_data_copy.button_theme, other_theme.button_theme);
             assert_eq!(theme_data_copy.card_theme, other_theme.card_theme);
+            assert_eq!(
+                theme_data_copy.carousel_view_theme,
+                other_theme.carousel_view_theme
+            );
             assert_eq!(theme_data_copy.checkbox_theme, other_theme.checkbox_theme);
             assert_eq!(theme_data_copy.chip_theme, other_theme.chip_theme);
+            assert_eq!(
+                theme_data_copy.data_table_theme,
+                other_theme.data_table_theme
+            );
             assert_eq!(
                 theme_data_copy.date_picker_theme,
                 other_theme.date_picker_theme
@@ -5553,6 +5679,14 @@ mod tests {
                 other_theme.progress_indicator_theme
             );
             assert_eq!(theme_data_copy.radio_theme, other_theme.radio_theme);
+            assert_eq!(
+                theme_data_copy.search_bar_theme,
+                other_theme.search_bar_theme
+            );
+            assert_eq!(
+                theme_data_copy.search_view_theme,
+                other_theme.search_view_theme
+            );
             assert_eq!(
                 theme_data_copy.segmented_button_theme,
                 other_theme.segmented_button_theme

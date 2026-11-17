@@ -582,9 +582,8 @@ mod tests {
     use crate::test_support::local_date;
     use std::cell::Cell;
 
-    use waft_embedder::{TargetPlatform, TextAffinity};
-    use waft_services::TextInputClient;
-    use waft_widgets::{EditableText, EditableTextState, FocusNode, Form, FormState, GlobalKey};
+    use waft_embedder::TargetPlatform;
+    use waft_widgets::{FocusNode, Form, FormState, GlobalKey};
 
     use waft_widgets::testing::{WidgetTester, expect, find, finds_one_widget, test_widgets};
 
@@ -677,25 +676,6 @@ mod tests {
             field.controller.clone().expect("a controller")
         });
         controller.set_text(&mut tester.cell.borrow_mut(), text.to_owned());
-        tester.cell.checkpoint();
-    }
-
-    /// Dart's `tester.enterText(find.byType(TextField), text)`.
-    fn enter_text(tester: &mut WidgetTester, text: &str) {
-        let editable = tester.element(find::by_type::<EditableText>().at(0));
-        let state = editable
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        let length = text.encode_utf16().count() as i32;
-        TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            TextEditingValue::new()
-                .text(text)
-                .selection(TextSelection::collapsed(length, TextAffinity::Downstream)),
-        );
         tester.cell.checkpoint();
     }
 
@@ -808,7 +788,7 @@ mod tests {
             );
             // Default errorFormat text
             assert!(!has_text(tester, "Invalid format."));
-            enter_text(tester, "foobar");
+            tester.enter_text(find::by_type::<TextField>(), "foobar");
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
@@ -853,13 +833,13 @@ mod tests {
             // Default errorInvalid text
             assert!(!has_text(tester, "Out of range."));
             // Before first date
-            enter_text(tester, "02/21/1950");
+            tester.enter_text(find::by_type::<TextField>(), "02/21/1950");
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
             expect(tester, &find::text("Out of range."), finds_one_widget());
             // After last date
-            enter_text(tester, "02/23/2050");
+            tester.enter_text(find::by_type::<TextField>(), "02/23/2050");
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
@@ -905,13 +885,13 @@ mod tests {
             // Default errorInvalid text
             assert!(!has_text(tester, "Out of range."));
             // Odd day shouldn't be valid
-            enter_text(tester, "02/21/1966");
+            tester.enter_text(find::by_type::<TextField>(), "02/21/1966");
             assert!(!form_validate(tester, &form_key));
             tester.pump_and_settle();
             assert_eq!(input_date.get(), None);
             expect(tester, &find::text("Out of range."), finds_one_widget());
             // Even day is valid
-            enter_text(tester, "02/24/2030");
+            tester.enter_text(find::by_type::<TextField>(), "02/24/2030");
             assert!(form_validate(tester, &form_key));
             form_save(tester, &form_key);
             tester.pump_and_settle();
@@ -934,7 +914,7 @@ mod tests {
                     ..FieldOptions::default()
                 },
             );
-            enter_text(tester, "");
+            tester.enter_text(find::by_type::<TextField>(), "");
             tester.pump_and_settle();
             form_validate(tester, &form_key);
             tester.pump_and_settle();
@@ -954,7 +934,7 @@ mod tests {
                     ..FieldOptions::default()
                 },
             );
-            enter_text(tester, "");
+            tester.enter_text(find::by_type::<TextField>(), "");
             tester.pump_and_settle();
             form_validate(tester, &form_key);
             tester.pump_and_settle();
@@ -1066,7 +1046,7 @@ mod tests {
             tester.pump_and_settle();
             assert!(!has_text(tester, "mm/dd/yyyy"));
             assert_eq!(text_opacity(tester, "Enter some date"), 1.0);
-            enter_text(tester, "foobar");
+            tester.enter_text(find::by_type::<TextField>(), "foobar");
             tester.pump_and_settle();
             assert_eq!(text_opacity(tester, "Enter some date"), 0.0);
         });
@@ -1293,30 +1273,20 @@ mod tests {
             ));
 
             assert_eq!(controller_text(tester), "2025..2..26");
-            enter_text(tester, "2025..3..10");
-            receive_done(tester);
+            tester.enter_text(find::by_type::<TextField>(), "2025..3..10");
+            tester
+                .test_text_input()
+                .receive_action(waft_services::TextInputAction::Done);
             tester.pump_and_settle();
             assert_eq!(selected_date.get(), Some(local_date(2025, 3, 10)));
             assert_eq!(controller_text(tester), "2025..3..10");
 
-            enter_text(tester, "2025..4..21");
-            receive_done(tester);
+            tester.enter_text(find::by_type::<TextField>(), "2025..4..21");
+            tester
+                .test_text_input()
+                .receive_action(waft_services::TextInputAction::Done);
             tester.pump_and_settle();
             assert_eq!(selected_date.get(), Some(local_date(2025, 4, 21)));
         });
-    }
-
-    /// Dart's `testTextInput.receiveAction(TextInputAction.done)`.
-    fn receive_done(tester: &mut WidgetTester) {
-        let editable = tester.element(find::by_type::<EditableText>().at(0));
-        let state = editable
-            .state_handle::<EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        TextInputClient::perform_action(
-            state,
-            &mut tester.cell.borrow_mut(),
-            waft_services::TextInputAction::Done,
-        );
-        tester.cell.checkpoint();
     }
 }

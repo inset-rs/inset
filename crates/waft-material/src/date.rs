@@ -451,7 +451,7 @@ pub(crate) fn is_day_before(app: &App, a: &DateTime, b: &DateTime) -> bool {
 /// Initial display mode of the date picker dialog.
 ///
 /// Date picker UI mode for either showing a list of available years or a monthly calendar
-/// initially in the dialog shown by calling [`showDatePicker`](crate::show_date_picker).
+/// initially in the dialog shown by calling [`showDatePicker`](crate::ShowDatePicker).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DatePickerEntryMode {
     /// User picks a date from calendar grid. Can switch to [`Input`](Self::Input) by pressing

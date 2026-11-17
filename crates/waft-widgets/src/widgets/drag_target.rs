@@ -438,23 +438,18 @@ pub trait DraggableWidget: StatefulWidget<State = DraggableState<Self>> + Clone 
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> RecognizerRef {
+    ) -> MultiDragRecognizerRef {
         let draggable = self.draggable();
-        macro_rules! create {
-            ($ty:ty) => {{
-                let recognizer = <$ty>::new(app);
-                if let Some(filter) = draggable.allowed_buttons_filter.clone() {
-                    recognizer.set_allowed_buttons_filter(app, filter);
-                }
-                recognizer.set_on_start(app, Some(on_start));
-                recognizer.into_erased()
-            }};
+        let recognizer: MultiDragRecognizerRef = match draggable.affinity {
+            Some(Axis::Horizontal) => HorizontalMultiDragGestureRecognizer::new(app).into_erased(),
+            Some(Axis::Vertical) => VerticalMultiDragGestureRecognizer::new(app).into_erased(),
+            None => ImmediateMultiDragGestureRecognizer::new(app).into_erased(),
+        };
+        if let Some(filter) = draggable.allowed_buttons_filter.clone() {
+            recognizer.set_allowed_buttons_filter(app, filter);
         }
-        match draggable.affinity {
-            Some(Axis::Horizontal) => create!(HorizontalMultiDragGestureRecognizer),
-            Some(Axis::Vertical) => create!(VerticalMultiDragGestureRecognizer),
-            None => create!(ImmediateMultiDragGestureRecognizer),
-        }
+        recognizer.set_on_start(app, Some(on_start));
+        recognizer
     }
 }
 
@@ -644,9 +639,10 @@ impl<T: 'static> DraggableWidget for LongPressDraggable<T> {
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> RecognizerRef {
+    ) -> MultiDragRecognizerRef {
         let recognizer = DelayedMultiDragGestureRecognizer::new(app);
         recognizer.set_delay(app, self.delay);
+        let recognizer: MultiDragRecognizerRef = recognizer.into_erased();
         if let Some(filter) = self.draggable.allowed_buttons_filter.clone() {
             recognizer.set_allowed_buttons_filter(app, filter);
         }
@@ -661,7 +657,7 @@ impl<T: 'static> DraggableWidget for LongPressDraggable<T> {
                 result
             })),
         );
-        recognizer.into_erased()
+        recognizer
     }
 }
 
@@ -683,7 +679,7 @@ pub struct DraggableState<W: DraggableWidget> {
     state: StateData<W>,
 
     /// Stays alive after unmount until every drag listening to pointer events has ended.
-    recognizer: Option<RecognizerRef>,
+    recognizer: Option<MultiDragRecognizerRef>,
 
     /// Number of active drag avatars retaining this state and recognizer.
     active_count: usize,

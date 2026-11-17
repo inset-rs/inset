@@ -37,6 +37,8 @@ name = "material-gallery"
 path = "src/main.rs"
 
 [dev-dependencies]
+# `K_LONG_PRESS_TIMEOUT`, which a long-press drag waits out.
+waft-gestures.workspace = true
 waft-test.workspace = true
 waft-widgets = { workspace = true, features = ["test-support"] }
 waft-rendering = { workspace = true, features = ["test-support"] }

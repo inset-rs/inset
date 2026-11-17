@@ -670,7 +670,7 @@ mod tests {
     use crate::theme_data::ThemeData;
     use crate::time::TimeOfDay;
     use crate::time_picker::tests::{dial_label_styles, dial_paint};
-    use crate::time_picker::{TimePickerEntryMode, show_time_picker};
+    use crate::time_picker::{ShowTimePicker, TimePickerEntryMode};
     use crate::tooltip::tests::{m2, m3};
     use crate::typography::Typography;
     use waft_rendering::testing::{PaintCall, assert_paints};
@@ -841,29 +841,11 @@ mod tests {
             .child(Center::new().child(Builder::new(move |_app, context| {
                 ElevatedButton::new(
                     Some(Listener::new(move |app| {
-                        drop(show_time_picker(
-                            app,
-                            context,
-                            TimeOfDay::new(7, 15),
-                            None,
-                            true,
-                            None,
-                            None,
-                            true,
-                            entry_mode,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            false,
-                        ));
+                        drop({
+                            let mut show = ShowTimePicker::new(TimeOfDay::new(7, 15));
+                            show = show.initial_entry_mode(entry_mode);
+                            show.show(app, context)
+                        });
                     })),
                     Some(Text::new("X")),
                 )
@@ -1647,20 +1629,7 @@ mod tests {
     }
 
     fn enter_invalid_hour_and_tap_ok(tester: &mut WidgetTester) {
-        let editable = tester.element(find::by_type::<waft_widgets::EditableText>().at(0));
-        let state = editable
-            .state_handle::<waft_widgets::EditableTextState>(&tester.cell.borrow())
-            .expect("an EditableText state");
-        state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump();
-        waft_services::TextInputClient::update_editing_value(
-            state,
-            &mut tester.cell.borrow_mut(),
-            waft_embedder::TextEditingValue::new().text("AB").selection(
-                waft_embedder::TextSelection::collapsed(2, waft_embedder::TextAffinity::Downstream),
-            ),
-        );
-        tester.cell.checkpoint();
+        tester.enter_text(find::by_type::<waft_widgets::EditableText>().at(0), "AB");
         let ok = text_element(tester, "OK");
         let center = tester.get_center(ok);
         tester.tap_at(center, 1);

@@ -130,6 +130,14 @@ Ported against: 34b89b2086d4
 - button_theme.rs → button_theme.dart
 - dropdown_menu_form_field.rs → dropdown_menu_form_field.dart
 
+## show_* functions → their .dart files
+- Change: `show_date_picker`, `show_date_range_picker`, `show_dialog`, `show_adaptive_dialog`, `show_time_picker`, `show_search`, `show_modal_bottom_sheet`, `show_bottom_sheet` and `show_menu` are builders — `ShowDatePicker::new(first_date, last_date)` and its siblings, `ShowMenu<T>` keeping the type parameter, with a setter per optional Dart argument — whose `show(app, context)` runs the body the free function ran.
+  Reason: language — Rust has no named optional arguments, so the required arguments stay in `new` and every optional one is a fluent setter.
+  Affect: a call site writes `ShowDatePicker::new(first, last).help_text("Start date").show(app, context)` where Dart writes named arguments, and the free functions no longer exist.
+- Change: `ShowSearch::query` takes `Option<String>`, Dart's `query` as it is: `Some("")` when unset, `Some(value)` for a query, and `None` to keep the delegate's current query.
+  Reason: language — both of Dart's values mean something here, so the setter carries the `Option` rather than the plain value the other optional arguments' setters take.
+  Affect: `ShowSearch::new(delegate)` starts from the empty string, `.query(Some("x".into()))` sets it, and `.query(None)` reuses the delegate's current query.
+
 ## colors.rs → colors.dart
 - Change: `MaterialColor` and `MaterialAccentColor` are colour extensions of their own that deref to painting's `ColorSwatch<i32>`; each `Colors` swatch is one of them, and it becomes a `Color` through `primary()` or an `AnyColor` through `into_any()`.
   Reason: language — dart:ui `Color` is a value here and cannot be subclassed, so `MaterialColor extends ColorSwatch<int> extends Color` cannot be one type (waft-painting's colors.rs entry).
@@ -541,7 +549,7 @@ Ported against: 34b89b2086d4
   Affect: `Dialog::fullscreen().elevation(8.0)` and `AlertDialog::new().scroll_controller(c)` compile and change nothing, and `Dialog::fullscreen().inset_padding(p)` pads by `p`, where Dart rejects all three; and an `AlertDialog::adaptive()` is found by a lookup of type `AlertDialog`, where Dart's is a private subclass that `find.byType(AlertDialog)` misses.
 - Change: `DialogRoute::new` reads `MaterialLocalizations::modal_barrier_dismiss_label` for its default barrier label whether or not `barrier_label` is set after it.
   Reason: language — the route's optional arguments are setters called after it is made, so its constructor cannot see whether a label will be given, where Dart's `barrierLabel ?? …` sees every argument at once.
-  Affect: a `DialogRoute` made where no `MaterialLocalizations` is found panics even when it is then given a barrier label; `show_dialog` checks for them first, as Dart's does.
+  Affect: a `DialogRoute` made where no `MaterialLocalizations` is found panics even when it is then given a barrier label; `ShowDialog::show` checks for them first, as Dart's does.
 
 ## popup_menu.rs → popup_menu.dart
 - Change: a menu's entries are `PopupMenuEntryRef<T>`s, each erasing an entry widget with its `height` and `represents`, and `PopupMenuDivider` is a `PopupMenuEntry<T>` of every `T`.
@@ -602,7 +610,57 @@ Ported against: 34b89b2086d4
   Reason: language — a fluent widget has no deprecated, ignored setter to keep.
   Affect: code ported from Dart drops the argument.
 
+## autocomplete.rs → autocomplete.dart
+- Change: `Autocomplete` keys each option of its default options list with a global key that is equal for equal options, so an option type must hash and print itself for that key.
+  Reason: language — Dart's object key compares the option by identity, which a Rust value does not have.
+  Affect: two equal options in one list are a duplicate global key, which the framework reports, where Dart's distinct objects with equal values are not.
+- Change: `Autocomplete`'s first constructor shows an option by its `Display` form, and a second constructor takes the function that turns an option into text.
+  Reason: language — every Dart object has the `toString` Dart's default calls, and a Rust type has a `Display` form only when it implements one.
+  Affect: an option type without a `Display` form is built with the second constructor.
+
+## carousel.rs → carousel.dart
+- Change: `CarouselView` compares its flex weights by value when the widget is updated, where Dart compares the two lists by identity.
+  Reason: language — a Rust vector has no identity.
+  Affect: rebuilding with a new list of the same weights leaves the carousel as it is, where Dart lays it out again and notifies the controller's listeners.
+
+## reorderable_list.rs → reorderable_list.dart
+- Change: `ReorderableListView`'s list constructor takes the children by value and builds each item from a clone of them.
+  Reason: language — Dart's item builder reads the caller's list, which the caller can go on changing, and a moved list has no second owner.
+  Affect: a caller that reorders its own children sees the new order only once it builds a new list view from them, as a state's build does.
+
+## search_anchor.rs → search_anchor.dart
+- Change: `SearchAnchor`'s bar constructor returns a builder of its own, which becomes a plain `SearchAnchor` when it is turned into a widget.
+  Reason: language — Dart's factory returns a private subclass, and a Rust struct cannot extend another.
+  Affect: the tree holds a `SearchAnchor` where Dart's holds the private subclass, so a lookup by exact type finds the anchor here and not in Dart.
+- Change: `SearchAnchor`'s suggestions builder returns a task, and a builder with its suggestions at hand returns a ready one.
+  Reason: language — Rust has no union of a value and a future, as Dart's `FutureOr` is.
+  Affect: every suggestions builder is written as returning a task, and its suggestions reach the view at the next checkpoint either way, as Dart's await delivers even a plain value in a microtask.
+
+## search_anchor.rs → search_anchor.dart, search_view_theme.rs → search_view_theme.dart (view side)
+- Change: the view side of `SearchAnchor` and of `SearchViewThemeData` holds an erased border side, and the theme's lerp gives a plain one.
+  Reason: language — a Dart border side field can hold the state-dependent subclass, which a plain Rust border side cannot.
+  Affect: a caller passes a plain side or a state-dependent one in its erased form, and the anchor paints the plain value the state-dependent side carries, as Dart does.
+
+## data_table.rs → data_table.dart, paginated_data_table.rs → paginated_data_table.dart, data_table_theme.rs → data_table_theme.dart
+- Change: the deprecated row height setter of `DataTable`, `PaginatedDataTable` and `DataTableThemeData` sets both the minimum and the maximum row height, and Dart's asserts that it is not given with either, and that the theme's maximum is not below its minimum, are not kept.
+  Reason: language — a fluent chain has no call that sees every argument at once.
+  Affect: giving both keeps the later setter's value, and a theme whose maximum is below its minimum is built, where Dart fails in a debug build.
+
+## data_table.rs, data_table_theme.rs, paginated_data_table.rs, search_anchor.rs, search_bar_theme.rs, carousel_theme.rs → their .dart files (state-dependent fields)
+- Change: the state-dependent colours, sides and elevations of these types take a property of an optional value, so a property of the plain value cannot be given to them as it is.
+  Reason: language — Rust generics are invariant, where Dart's property of a colour is also a property of an optional colour.
+  Affect: a caller resolves to an optional value where Dart passes the property itself.
+
 ## Deferred
+- reorderable_list.rs: reorderable_list_test 'Vertical drag in progress golden image' and 'Horizontal drag in progress golden image'. Trigger: golden comparison in waft-test.
+- reorderable_list.rs: reorderable_list_test "Doesn't hide accessibility when a child declares its own semantics" (reads the semantics tree of a `SwitchListTile` item). Trigger: the semantics tree.
+- autocomplete.rs: autocomplete_test's 'autocomplete options have button semantics'; the options' semantics are ported. Trigger: the semantics tree.
+- search_anchor.rs: search_anchor_test's pass-through cases (text capitalization, keyboard type and text input action, each for SearchBar, SearchAnchor and SearchAnchor.bar; the two scrollPadding cases; contextMenuBuilder; 'iOS uses the system context menu by default if supported'; 'readOnly disallows SystemContextMenu'; 'smartDashesType and smartQuotesType are properly forwarded to inner text fields'), 'Block entering text on disabled widget with SearchAnchor.bar' and 'suggestionsBuilder with Future is not called twice on layout resize'. Trigger: none, portable now.
+- search_anchor.rs, search.rs: the semantics cases (search_anchor_test's two semantics-node cases, three labeledTapTargetGuideline cases and 'SearchAnchor with enableTapHandling provides tap semantics for passive child'; search_test's four routeName cases). Trigger: the semantics tree.
+- data_table.rs: data_table_test's 'DataTable overflow test - header with spaces', 'Material3 - DataRow renders custom colors when pressed', 'DataTable can render inside an AlertDialog' and 'DataTable dataRowMinHeight smaller or equal dataRowMaxHeight validation'. Trigger: none, portable now.
+- data_table.rs: data_table_test's three semantics cases. Trigger: the semantics tree.
+- paginated_data_table.rs: paginated_data_table_test's 'PaginatedDataTable with large text' and the two 'PaginatedDataTable custom horizontal padding' cases. Trigger: none, portable now.
+- carousel.rs: carousel_test's 'CarouselView.weighted respect itemSnapping when fling', 'The item that currently occupies max weight stays when the flexWeights is updated', 'Updating CarouselView does not cause exception', 'CarouselView with enableSplash false - container is clickable without triggering children onTap', 'CarouselView should not crash when using PageStorageKey' and the four item clipBehavior cases of the weighted view and the theme. Trigger: none, portable now.
 - input_decorator.rs: the 13 cases Dart runs on a `TextField`, the 16 Material 2 cases and the `customLabel` twins listed in the step 11 review. Trigger: none, portable now.
 - text_form_field.rs: the ~38 text_form_field_test cases not ported. Trigger: none, portable now.
 - switch.rs: switch_test 'Material2/3 - Switch does not get distorted upon changing constraints with parent' (golden-only). Trigger: golden comparison in waft-test.
@@ -661,14 +719,14 @@ Ported against: 34b89b2086d4
 - icon_button_theme.rs: `icon_button_theme_test.dart` 'IconButton in an InputDecorator suffix icon uses the inherited variant'. Trigger: the next edit of icon_button_theme.rs (`TextField` exists).
 - theme_data.rs: `ThemeData.appBarTheme` is `Object?` in Dart with a TODO to retype it to `AppBarThemeData`; here its setters take `impl Into<AppBarThemeData>`. Trigger: Flutter retyping it.
 - flexible_space_bar.rs: `_FlexibleSpaceHeaderOpacity`'s `alwaysIncludeSemantics`. Trigger: the semantics tree.
-- action_icons_theme.rs, card_theme.rs, badge_theme.rs, expansion_tile_theme.rs, checkbox_theme.rs, switch_theme.rs, radio_theme.rs, slider_theme.rs, progress_indicator_theme.rs, elevated_button_theme.rs, filled_button_theme.rs, outlined_button_theme.rs, text_button_theme.rs, icon_button_theme.rs, app_bar_theme.rs, banner_theme.rs, snack_bar_theme.rs, bottom_sheet_theme.rs, floating_action_button_theme.rs, drawer_theme.rs, divider_theme.rs, list_tile_theme.rs, navigation_bar_theme.rs, navigation_rail_theme.rs, navigation_drawer_theme.rs, bottom_navigation_bar_theme.rs, dialog_theme.rs, popup_menu_theme.rs, menu_theme.rs, menu_bar_theme.rs, menu_button_theme.rs, dropdown_menu_theme.rs, button_theme.rs: each theme data's `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
+- action_icons_theme.rs, card_theme.rs, badge_theme.rs, expansion_tile_theme.rs, checkbox_theme.rs, switch_theme.rs, radio_theme.rs, slider_theme.rs, progress_indicator_theme.rs, elevated_button_theme.rs, filled_button_theme.rs, outlined_button_theme.rs, text_button_theme.rs, icon_button_theme.rs, app_bar_theme.rs, banner_theme.rs, snack_bar_theme.rs, bottom_sheet_theme.rs, floating_action_button_theme.rs, drawer_theme.rs, divider_theme.rs, list_tile_theme.rs, navigation_bar_theme.rs, navigation_rail_theme.rs, navigation_drawer_theme.rs, bottom_navigation_bar_theme.rs, dialog_theme.rs, popup_menu_theme.rs, menu_theme.rs, menu_bar_theme.rs, menu_button_theme.rs, dropdown_menu_theme.rs, carousel_theme.rs, data_table_theme.rs, search_bar_theme.rs, search_view_theme.rs, button_theme.rs: each theme data's `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
 - material.rs: `assert(vsync == renderObject.vsync)` in `_MaterialState`. Trigger: an identity hook on `TickerProvider`.
 - button_style.rs, menu_style.rs: `ButtonStyle`'s and `MenuStyle`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
 - tooltip_theme.rs: `TooltipThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `TooltipThemeData`.
 - ink_well.rs: `InkResponse(onDoubleTap:)` reaching the gesture detector (the field and `handleDoubleTap` exist; a double tap never fires). Trigger: `DoubleTapGestureRecognizer` (waft-widgets gesture_detector deferral).
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
-- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, carousel_view_theme (`carousel_theme.dart`), data_table_theme, search_bar_theme, search_view_theme. Trigger: each one's `*_theme.dart`, with its component.
+- theme_data.rs: the component theme field bottom_app_bar_theme, with its factory and `copyWith` argument and its `lerp` and `==` branches. Trigger: `bottom_app_bar_theme.dart`, with its component.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
 - `ColorScheme.fromImageProvider` with `_extractColorsFromImageProvider`, `_imageProviderToScaled` and `_getArgbFromAbgr`. Trigger: reading an image's pixels back (`Image.toByteData`, deferred in waft-embedder) and `Picture.toImage`.
@@ -736,9 +794,6 @@ Ported against: 34b89b2086d4
 - input_decorator.rs tests: 'Widget height stays at hint height by default' keeps its explicit line break: text layout does not break an unbreakable word at the line end as Dart's does. Trigger: waft-painting text layout breaking a long word.
 - list_tile.rs tests: list_tile_test's Material 2 'selected, enabled ListTile default icon color, light and dark themes' keeps a tester per frame: on one tester the dark frame shows the light primary first, as an `AnimatedTheme` at t=0 would, where Dart shows the dark primary at once. Trigger: finding why Dart's differs.
 - text_field.rs, selectable_text.rs tests: the cases that assert FlutterTest glyph metrics (the audit's 658 and 665), still unported: roughly 380 of text_field_test's 413 cases and 105 of selectable_text_test's 138 have no Rust port. Trigger: none, needs its own step (porting them against the one tester).
-- user_accounts_drawer_header.rs tests: the three semantics cases ('UserAccountsDrawerHeader provides semantics', '… with missing properties', and 'alternative account selectors have sufficient tap targets') and the mid-animation 'speedy' case, whose only new check is that an animation is running; the visible start, half turn and return are ported. Trigger: the semantics tree; a running-animation count in the tester.
-- refresh_indicator.rs tests: the semantics case ('RefreshIndicator') and the paint-only 'disallows indicator - glow/stretch' and 'manipulates value color opacity correctly' cases; the status, programmatic-show, no-spinner, adaptive, color default and zero-area cases are ported. Trigger: the semantics tree; paint inspection of the glow indicator.
-- button_bar_theme.rs tests: the two debug-properties cases, which print diagnostics; the lerp, null-field, default, copy, and `of` fallback/override cases are ported. Trigger: diagnostics.
 - material_button.rs tests: the hover and focus paint/elevation cases, the accessibility-contrast case and the density cases, which read the ink feature render object or depend on the platform's text metrics; the structural defaults, elevation and color precedence, sizes, shape, disabled elevation, clip, callbacks and zero-area cases are ported. Trigger: the ink-feature paint inspection; FlutterTest font metrics.
 
 ## mergeable_material.rs → mergeable_material.dart
@@ -766,3 +821,4 @@ Ported against: 34b89b2086d4
   Reason: language — the two values arrive in separate setter calls, where the constructor takes them together.
   Affect: a mismatched pair panics on the first build rather than at the call that made it.
 - stepper.rs tests: the exact pixel heights of the expansion and horizontal-size cases, the focus-traversal cases and the semantics cases, which depend on FlutterTest text metrics, on the focus tree or on the semantics tree; the tap, disabled, index, error, icon size, custom controls, step style, icon builder, nested-stepper and zero-area cases are ported. Trigger: FlutterTest text metrics; the focus tree; the semantics tree.
+- paginated_data_table.rs tests: the RenderFlex overflow exception Dart expects in 'PaginatedDataTable control test' (the test forces a 600-pixel column); Waft reports none, having no `tester.takeException`. Trigger: `FlutterError.reportError`.

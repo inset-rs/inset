@@ -6255,32 +6255,6 @@ mod tests {
         tester.send_key_event(physical_of(logical), logical);
     }
 
-    /// Dart's `tester.sendKeyDownEvent(key)` and `sendKeyUpEvent(key)`.
-    fn send_key_change(
-        tester: &mut WidgetTester,
-        event_type: waft_embedder::KeyEventType,
-        logical: LogicalKeyboardKey,
-        character: Option<&str>,
-    ) {
-        use waft_embedder::{KeyData, KeyEventDeviceType};
-        let mut app = tester.cell.borrow_mut();
-        waft_services::KeyEventManager::instance(&mut app).handle_key_data(
-            &mut app,
-            KeyData {
-                time_stamp: Duration::ZERO,
-                event_type,
-                device_type: KeyEventDeviceType::Keyboard,
-                physical: physical_of(logical).usb_hid_usage,
-                logical: logical.key_id,
-                character: character.map(str::to_owned),
-                synthesized: false,
-            },
-        );
-        app.drain_microtasks();
-        drop(app);
-        tester.cell.checkpoint();
-    }
-
     /// The physical key flutter_test's key simulator sends with `logical`.
     fn physical_of(logical: LogicalKeyboardKey) -> PhysicalKeyboardKey {
         match logical {
@@ -7606,11 +7580,9 @@ mod tests {
                 pump(tester);
                 submenu(tester, "Menu 0");
 
-                send_key_change(
-                    tester,
-                    waft_embedder::KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::SHIFT_LEFT),
                     LogicalKeyboardKey::SHIFT_LEFT,
-                    None,
                 );
                 send_key(tester, LogicalKeyboardKey::TAB);
                 pump(tester);
@@ -7621,11 +7593,9 @@ mod tests {
                 send_key(tester, LogicalKeyboardKey::TAB);
                 pump(tester);
                 submenu(tester, "Menu 0");
-                send_key_change(
-                    tester,
-                    waft_embedder::KeyEventType::Up,
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::SHIFT_LEFT),
                     LogicalKeyboardKey::SHIFT_LEFT,
-                    None,
                 );
                 log.clear();
 
@@ -7969,11 +7939,9 @@ mod tests {
                 pump(tester);
                 item(tester, "start");
 
-                send_key_change(
-                    tester,
-                    waft_embedder::KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::SHIFT_LEFT),
                     LogicalKeyboardKey::SHIFT_LEFT,
-                    None,
                 );
                 send_key(tester, LogicalKeyboardKey::TAB);
                 pump(tester);
@@ -7987,11 +7955,9 @@ mod tests {
                 pump(tester);
                 submenu(tester, "Menu 0");
 
-                send_key_change(
-                    tester,
-                    waft_embedder::KeyEventType::Up,
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::SHIFT_LEFT),
                     LogicalKeyboardKey::SHIFT_LEFT,
-                    None,
                 );
                 log.clear();
 
@@ -8960,7 +8926,6 @@ mod tests {
         use std::cell::Cell;
         use std::panic::{AssertUnwindSafe, catch_unwind};
 
-        use waft_embedder::KeyEventType;
         use waft_widgets::{Center, SizedBox};
 
         use super::*;
@@ -8986,48 +8951,14 @@ mod tests {
 
         const APPLE_PLATFORMS: [TargetPlatform; 2] = [TargetPlatform::IOS, TargetPlatform::MacOS];
 
-        /// The kit's `physical_of`, with the right Alt key.
-        fn physical(logical: LogicalKeyboardKey) -> PhysicalKeyboardKey {
-            match logical {
-                LogicalKeyboardKey::ALT_RIGHT => PhysicalKeyboardKey::ALT_RIGHT,
-                _ => physical_of(logical),
-            }
-        }
-
-        /// Dart's `tester.sendKeyDownEvent(key)` and `sendKeyUpEvent(key)`, for keys the kit's
-        /// `send_key_change` has no physical key for.
-        fn send_key_change_of(
-            tester: &mut WidgetTester,
-            event_type: KeyEventType,
-            logical: LogicalKeyboardKey,
-        ) {
-            use waft_embedder::{KeyData, KeyEventDeviceType};
-            let mut app = tester.cell.borrow_mut();
-            waft_services::KeyEventManager::instance(&mut app).handle_key_data(
-                &mut app,
-                KeyData {
-                    time_stamp: Duration::ZERO,
-                    event_type,
-                    device_type: KeyEventDeviceType::Keyboard,
-                    physical: physical(logical).usb_hid_usage,
-                    logical: logical.key_id,
-                    character: None,
-                    synthesized: false,
-                },
-            );
-            app.drain_microtasks();
-            drop(app);
-            tester.cell.checkpoint();
-        }
-
         /// Dart's `tester.sendKeyEvent(key, character: character)`.
         fn send_key_with_character(
             tester: &mut WidgetTester,
             logical: LogicalKeyboardKey,
             character: &str,
         ) {
-            send_key_change(tester, KeyEventType::Down, logical, Some(character));
-            send_key_change(tester, KeyEventType::Up, logical, None);
+            tester.send_key_down_event_with_character(physical_of(logical), logical, character);
+            tester.send_key_up_event(physical_of(logical), logical);
         }
 
         /// Dart's `MenuBar(key: UniqueKey(), controller: controller, children: menus)`.
@@ -9128,11 +9059,9 @@ mod tests {
                     },
                 );
 
-                send_key_change(
-                    tester,
-                    KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
                     LogicalKeyboardKey::ALT_LEFT,
-                    None,
                 );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
@@ -9140,7 +9069,10 @@ mod tests {
                 // Makes sure that identical accelerators in parent menu items don't
                 // shadow the ones in the children.
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
-                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
+                    LogicalKeyboardKey::ALT_LEFT,
+                );
                 pump(tester);
 
                 assert_eq!(log.opened(), [TestMenu::MainMenu0], "{platform:?}");
@@ -9151,14 +9083,20 @@ mod tests {
                 log.clear();
 
                 // Invoking several levels deep.
-                send_key_change_of(tester, KeyEventType::Down, LogicalKeyboardKey::ALT_RIGHT);
+                tester.send_key_down_event(
+                    PhysicalKeyboardKey::ALT_RIGHT,
+                    LogicalKeyboardKey::ALT_RIGHT,
+                );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "e");
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
-                send_key_change_of(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_RIGHT);
+                tester.send_key_up_event(
+                    PhysicalKeyboardKey::ALT_RIGHT,
+                    LogicalKeyboardKey::ALT_RIGHT,
+                );
                 pump(tester);
 
                 assert_eq!(
@@ -9193,18 +9131,19 @@ mod tests {
                 );
 
                 // Combining accelerators and regular keyboard navigation works.
-                send_key_change(
-                    tester,
-                    KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
                     LogicalKeyboardKey::ALT_LEFT,
-                    None,
                 );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "e");
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
                 pump(tester);
-                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
+                    LogicalKeyboardKey::ALT_LEFT,
+                );
                 pump(tester);
                 send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
                 pump(tester);
@@ -9243,18 +9182,19 @@ mod tests {
                 );
 
                 // Combining accelerators and regular keyboard navigation works.
-                send_key_change(
-                    tester,
-                    KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
                     LogicalKeyboardKey::ALT_LEFT,
-                    None,
                 );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "e");
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "1");
                 pump(tester);
-                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
+                    LogicalKeyboardKey::ALT_LEFT,
+                );
                 pump(tester);
                 tester.tap(find::text(&TestMenu::SubSubMenu112.label()));
                 pump(tester);
@@ -9290,16 +9230,17 @@ mod tests {
                     },
                 );
 
-                send_key_change(
-                    tester,
-                    KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
                     LogicalKeyboardKey::ALT_LEFT,
-                    None,
                 );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "5");
                 pump(tester);
-                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
+                    LogicalKeyboardKey::ALT_LEFT,
+                );
                 pump(tester);
 
                 assert!(log.opened().is_empty(), "{platform:?}");
@@ -9327,17 +9268,18 @@ mod tests {
                     },
                 );
 
-                send_key_change(
-                    tester,
-                    KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
                     LogicalKeyboardKey::ALT_LEFT,
-                    None,
                 );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "m");
-                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
+                    LogicalKeyboardKey::ALT_LEFT,
+                );
                 pump(tester);
 
                 assert!(log.opened().is_empty(), "{platform:?}");
@@ -9345,17 +9287,18 @@ mod tests {
                 assert!(log.selected().is_empty(), "{platform:?}");
 
                 // Or with the option key equivalents.
-                send_key_change(
-                    tester,
-                    KeyEventType::Down,
+                tester.send_key_down_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
                     LogicalKeyboardKey::ALT_LEFT,
-                    None,
                 );
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "µ");
                 pump(tester);
                 send_key_with_character(tester, LogicalKeyboardKey::KEY_M, "µ");
-                send_key_change(tester, KeyEventType::Up, LogicalKeyboardKey::ALT_LEFT, None);
+                tester.send_key_up_event(
+                    physical_of(LogicalKeyboardKey::ALT_LEFT),
+                    LogicalKeyboardKey::ALT_LEFT,
+                );
                 pump(tester);
 
                 assert!(log.opened().is_empty(), "{platform:?}");
@@ -11863,7 +11806,7 @@ mod tests {
         use waft_widgets::{Center, Column, SizedBox};
 
         use super::*;
-        use crate::dialog::{AlertDialog, show_dialog};
+        use crate::dialog::{AlertDialog, ShowDialog};
         use crate::scaffold::Scaffold;
 
         fn new_controller(tester: &WidgetTester) -> MenuControllerRef {
@@ -13233,10 +13176,7 @@ mod tests {
                                                 )
                                                 .into_widget()
                                         });
-                                    drop(show_dialog(
-                                        app, context, builder, true, None, None, true, true, None,
-                                        None, false, None, None,
-                                    ));
+                                    drop(ShowDialog::new(builder).show(app, context));
                                 })),
                                 Some(Text::new("Show Dialog")),
                             )

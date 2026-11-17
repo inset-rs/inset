@@ -148,22 +148,60 @@ impl WidgetTester {
         physical: waft_services::PhysicalKeyboardKey,
         logical: waft_services::LogicalKeyboardKey,
     ) {
-        use waft_embedder::{KeyData, KeyEventDeviceType, KeyEventType};
+        use waft_embedder::KeyEventType;
         let mut app = self.cell.borrow_mut();
         for event_type in [KeyEventType::Down, KeyEventType::Up] {
-            waft_services::KeyEventManager::instance(&mut app).handle_key_data(
-                &mut app,
-                KeyData {
-                    time_stamp: Duration::ZERO,
-                    event_type,
-                    device_type: KeyEventDeviceType::Keyboard,
-                    physical: physical.usb_hid_usage,
-                    logical: logical.key_id,
-                    character: None,
-                    synthesized: false,
-                },
-            );
+            handle_key_event(&mut app, event_type, physical, logical, None);
         }
+        app.drain_microtasks();
+        drop(app);
+        self.cell.checkpoint();
+    }
+
+    /// Dart's `tester.sendKeyDownEvent(key)`: a key down of `physical` and `logical`.
+    pub fn send_key_down_event(
+        &mut self,
+        physical: waft_services::PhysicalKeyboardKey,
+        logical: waft_services::LogicalKeyboardKey,
+    ) {
+        self.send_key_event_of(waft_embedder::KeyEventType::Down, physical, logical, None);
+    }
+
+    /// Dart's `tester.sendKeyDownEvent(key, character: character)`: a key down that carries
+    /// the character the platform typed.
+    pub fn send_key_down_event_with_character(
+        &mut self,
+        physical: waft_services::PhysicalKeyboardKey,
+        logical: waft_services::LogicalKeyboardKey,
+        character: &str,
+    ) {
+        self.send_key_event_of(
+            waft_embedder::KeyEventType::Down,
+            physical,
+            logical,
+            Some(character),
+        );
+    }
+
+    /// Dart's `tester.sendKeyUpEvent(key)`: a key up of `physical` and `logical`.
+    pub fn send_key_up_event(
+        &mut self,
+        physical: waft_services::PhysicalKeyboardKey,
+        logical: waft_services::LogicalKeyboardKey,
+    ) {
+        self.send_key_event_of(waft_embedder::KeyEventType::Up, physical, logical, None);
+    }
+
+    /// One key event, then the microtasks it scheduled and the checkpoint after them.
+    fn send_key_event_of(
+        &mut self,
+        event_type: waft_embedder::KeyEventType,
+        physical: waft_services::PhysicalKeyboardKey,
+        logical: waft_services::LogicalKeyboardKey,
+        character: Option<&str>,
+    ) {
+        let mut app = self.cell.borrow_mut();
+        handle_key_event(&mut app, event_type, physical, logical, character);
         app.drain_microtasks();
         drop(app);
         self.cell.checkpoint();
@@ -434,4 +472,27 @@ fn dart_sign(value: f64) -> f64 {
     } else {
         value
     }
+}
+
+/// Hands one key event to the framework, as the shell hands one a platform reports.
+fn handle_key_event(
+    app: &mut waft_foundation::App,
+    event_type: waft_embedder::KeyEventType,
+    physical: waft_services::PhysicalKeyboardKey,
+    logical: waft_services::LogicalKeyboardKey,
+    character: Option<&str>,
+) {
+    use waft_embedder::{KeyData, KeyEventDeviceType};
+    waft_services::KeyEventManager::instance(app).handle_key_data(
+        app,
+        KeyData {
+            time_stamp: std::time::Duration::ZERO,
+            event_type,
+            device_type: KeyEventDeviceType::Keyboard,
+            physical: physical.usb_hid_usage,
+            logical: logical.key_id,
+            character: character.map(str::to_owned),
+            synthesized: false,
+        },
+    );
 }
