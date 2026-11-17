@@ -746,3 +746,14 @@ Ported against: 34b89b2086d4
   Reason: language — Rust has no subclassing, so Dart's abstract class and its two subclasses become one closed enum.
   Affect: a children list names the variant, and a `MaterialSlice` or `MaterialGap` is not accepted by itself.
 - mergeable_material.rs tests: the two shadow paint cases, which read the display list's shadow with `debugDisableShadows` off; the empty, gap merge, divider, slice color and zero-area cases are ported. Trigger: a tester that records shadows.
+
+## expansion_panel.rs → expansion_panel.dart
+
+- Change: `ExpansionPanelRadio` holds its `ExpansionPanel`, and `ExpansionPanelList` is generic over the radio value type (`ExpansionPanelList<T>`), where Dart's radio subclasses the panel and stores an `Object`.
+  Reason: language — Rust has no subclassing, and no `Object` whose `==` works across values boxed as `Any`.
+  Affect: a radio list names its value type, and a radio is made with `ExpansionPanelRadio::new(value, header, body)`; the panel's settings are setters on the radio.
+
+- Change: `ExpansionPanelList` has no `ExpansionPanelList.radio` initializer overload; it is the associated function `ExpansionPanelList::radio(children)`.
+  Reason: language — Rust has no constructor overloading.
+  Affect: a radio list is named as the constructor's path, as elsewhere in the port.
+- expansion_panel.rs tests: the semantics cases and the pixel-metric header-padding cases, which read the semantics tree or an exact text width; the reported callback, radio one-open-at-a-time, initial value and header-tap cases are ported. Trigger: the semantics tree; FlutterTest font metrics.
