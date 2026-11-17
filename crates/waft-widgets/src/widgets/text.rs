@@ -6,10 +6,12 @@
 //! `Locale`, `StrutStyle`, and `Semantics` wait, and so does [`RichText`]'s
 //! `SelectionRegistrar`.
 
-use waft_embedder::{FontWeight, TextAlign, TextDirection, TextHeightBehavior};
+use waft_embedder::{Color, FontWeight, TextAlign, TextDirection, TextHeightBehavior};
 use waft_foundation::App;
 use waft_painting::{InlineSpanRef, TextOverflow, TextScaler, TextSpan, TextStyle, TextWidthBasis};
-use waft_rendering::{AnyRenderObject, RenderBox, RenderHandle, RenderParagraph};
+use waft_rendering::{
+    AnyRenderObject, AnySelectionRegistrar, RenderBox, RenderHandle, RenderParagraph,
+};
 
 use crate::framework::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectWidget,
@@ -954,6 +956,10 @@ pub struct RichText {
     pub text_width_basis: TextWidthBasis,
     /// Defines how to apply `TextStyle.height` over and under text.
     pub text_height_behavior: Option<TextHeightBehavior>,
+    /// A callback that is invoked to notify the selection registrar of the paragraph.
+    pub selection_registrar: Option<AnySelectionRegistrar>,
+    /// The color to use when painting the selection.
+    pub selection_color: Option<Color>,
 }
 
 impl RichText {
@@ -977,6 +983,8 @@ impl RichText {
             max_lines: None,
             text_width_basis: TextWidthBasis::Parent,
             text_height_behavior: None,
+            selection_registrar: None,
+            selection_color: None,
         }
     }
 
@@ -1036,6 +1044,18 @@ impl RichText {
         self
     }
 
+    /// Dart `RichText(selectionRegistrar:)`.
+    pub fn selection_registrar(mut self, registrar: AnySelectionRegistrar) -> RichText {
+        self.selection_registrar = Some(registrar);
+        self
+    }
+
+    /// Dart `RichText(selectionColor:)`.
+    pub fn selection_color(mut self, color: Color) -> RichText {
+        self.selection_color = Some(color);
+        self
+    }
+
     /// Dart's `_getDevicePixelRatio`.
     fn device_pixel_ratio(app: &mut App, context: BuildContext) -> f64 {
         MediaQuery::maybe_device_pixel_ratio_of(app, context)
@@ -1065,6 +1085,8 @@ impl RenderObjectWidget for RichText {
         render_object.set_text_width_basis(app, self.text_width_basis);
         render_object.set_text_height_behavior(app, self.text_height_behavior);
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
+        render_object.set_registrar(app, self.selection_registrar);
+        render_object.set_selection_color(app, self.selection_color);
         render_object.as_object()
     }
 
@@ -1088,6 +1110,8 @@ impl RenderObjectWidget for RichText {
         render_object.set_text_height_behavior(app, self.text_height_behavior);
         let device_pixel_ratio = Self::device_pixel_ratio(app, context);
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
+        render_object.set_registrar(app, self.selection_registrar);
+        render_object.set_selection_color(app, self.selection_color);
     }
 }
 
