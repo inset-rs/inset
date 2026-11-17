@@ -3,7 +3,7 @@
 //! The selection is resolved only while a `TableView` holds it: the table gives it the number of rows, whether its mode allows selection, and how a row maps to an item. Every change of the selected row notifies, and nothing else does, for the table binds the selection while it builds and a listener above the table may rebuild; the table raises `SelectionChanged` from the item reported last, and each row listens for its own index. A later editor who changes the model without notifying leaves rows showing the old selection.
 
 use super::super::items_view::selection_model::SelectionModel;
-use super::source::ViewChange;
+use super::source::{TableViewSource, ViewChange};
 use super::*;
 use std::fmt;
 use std::rc::Rc;
@@ -11,6 +11,45 @@ use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, HandleId,
 
 /// The index in the source's items of a row of the view.
 pub(crate) type ItemOfRow = Rc<dyn Fn(&App, usize) -> Option<usize>>;
+
+/// Adds a listener to an items source.
+type AddSourceListener = Rc<dyn Fn(&mut App, Listener)>;
+/// Removes a listener from an items source.
+type RemoveSourceListener = Rc<dyn Fn(&mut App, &Listener)>;
+/// Reads the changes an items source last made.
+type ReadSourceChanges = Rc<dyn Fn(&App) -> Vec<ViewChange>>;
+/// Reads the number of rows in an items source's view.
+type ReadSourceRowCount = Rc<dyn Fn(&App) -> usize>;
+
+/// The items source a selection follows, erased from the source's item type: how to listen to it,
+/// and how to read the changes it last made and the number of rows in its view.
+#[derive(Clone)]
+pub(crate) struct SelectionSource {
+    id: HandleId,
+    add_listener: AddSourceListener,
+    remove_listener: RemoveSourceListener,
+    changes: ReadSourceChanges,
+    row_count: ReadSourceRowCount,
+}
+
+impl SelectionSource {
+    /// The subscription a selection makes to `source`.
+    pub(crate) fn new<T: 'static>(source: &Ref<TableViewSource<T>>) -> SelectionSource {
+        let for_adding = source.clone();
+        let for_removing = source.clone();
+        let for_changes = source.clone();
+        let for_rows = source.clone();
+        SelectionSource {
+            id: source.handle().id(),
+            add_listener: Rc::new(move |app, listener| for_adding.add_listener(app, listener)),
+            remove_listener: Rc::new(move |app, listener| {
+                for_removing.remove_listener(app, listener)
+            }),
+            changes: Rc::new(move |app| for_changes.changes(app).to_vec()),
+            row_count: Rc::new(move |app| for_rows.view(app).len()),
+        }
+    }
+}
 
 /// What the table holding a selection tells it.
 struct SelectionBinding {
@@ -29,6 +68,11 @@ pub struct TableViewSelection {
     notifier: ChangeNotifierData,
     model: SelectionModel,
     binding: Option<SelectionBinding>,
+    /// The items source the selection follows, kept across tables and heard from whether or not a
+    /// table holds the selection; a table adopting it again changes nothing.
+    source: Option<SelectionSource>,
+    /// The listener the selection has on its source.
+    source_listener: Option<Listener>,
     /// `m_lastRaisedSelectedItem`: the item `SelectionChanged` last reported.
     last_raised_item: Option<usize>,
 }
@@ -42,12 +86,16 @@ impl TableViewSelection {
             notifier: ChangeNotifierData::new(),
             model,
             binding: None,
+            source: None,
+            source_listener: None,
             last_raised_item: None,
         })
     }
 
-    /// Releases the listeners; the selection is not used after.
+    /// Releases the listeners, including the one on the source it follows; the selection is not
+    /// used after.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
+        self.stop_following_source(app);
         ChangeNotifierData::dispose(app, self);
     }
 
@@ -95,32 +143,70 @@ impl TableViewSelection {
 // MARK: The holding table's view of the selection
 
 impl TableViewSelection {
-    /// The table `owner` holds the selection; a selection new to it starts over on its rows, as `SelectionModel::Source` clears.
+    /// The table `owner` holds the selection over `source`; a selection set to a different source starts over on its rows, as `SelectionModel::Source` clears. Adopting the same source again keeps the selection. Answers whether the selected row was cleared, which the table defers to its listener until after the frame.
     pub(crate) fn bind(
         self: Handle<Self>,
         app: &mut App,
         owner: HandleId,
         can_select: bool,
         row_count: usize,
+        source: SelectionSource,
         item_of_row: ItemOfRow,
-    ) {
-        let new_owner = app
+    ) -> bool {
+        let source_changed = app
             .get(self)
-            .binding
+            .source
             .as_ref()
-            .is_none_or(|binding| binding.owner != owner);
+            .is_none_or(|bound| bound.id != source.id);
+        if source_changed {
+            // The selection follows its source itself, as WinUI's model does, so rows that change
+            // while no table holds the selection still move it.
+            self.stop_following_source(app);
+            let listener = Listener::handle_method(self, Self::source_heard);
+            (source.add_listener)(app, listener.clone());
+            let selection = app.get_mut(self);
+            selection.source = Some(source);
+            selection.source_listener = Some(listener);
+        }
         app.get_mut(self).binding = Some(SelectionBinding {
             owner,
             can_select,
             item_of_row,
         });
-        if new_owner {
-            self.set_source(app, row_count);
-        }
+        let cleared = if source_changed {
+            app.get_mut(self).start_over(row_count)
+        } else {
+            false
+        };
         if !can_select {
             // `OnSelectionModePropertyChanged`: turning selection off clears it.
             self.apply(app, None);
         }
+        cleared
+    }
+
+    /// Stops listening to the source the selection follows, if any.
+    fn stop_following_source(self: Handle<Self>, app: &mut App) {
+        let (source, listener) = {
+            let selection = app.get_mut(self);
+            (selection.source.take(), selection.source_listener.take())
+        };
+        if let (Some(source), Some(listener)) = (source, listener) {
+            (source.remove_listener)(app, &listener);
+        }
+    }
+
+    /// The source the selection follows changed its view: `SelectionNode::OnSourceListChanged`,
+    /// which the model hears whether or not a table is attached.
+    fn source_heard(self: Handle<Self>, app: &mut App) {
+        let (changes, row_count) = {
+            let selection = app.get(self);
+            let Some(source) = &selection.source else {
+                return;
+            };
+            ((source.changes)(app), (source.row_count)(app))
+        };
+        self.source_changed(app, &changes, row_count);
     }
 
     /// The table `owner` lets the selection go.
@@ -132,13 +218,6 @@ impl TableViewSelection {
             .is_some_and(|binding| binding.owner == owner)
         {
             selection.binding = None;
-        }
-    }
-
-    /// `UpdateSelectionModelSource`: the rows were reshaped, which clears the selection (`SelectionNode::OnSourceListChanged`, `Reset`).
-    pub(crate) fn set_source(self: Handle<Self>, app: &mut App, row_count: usize) {
-        if app.get_mut(self).start_over(row_count) {
-            self.notify_listeners(app);
         }
     }
 
@@ -310,7 +389,18 @@ impl<T: 'static> TableViewState<T> {
                 }
                 self.source_handle(app).view(app).get(row).copied()
             });
-            selection.bind(app, id, can_select, count, item_of_row);
+            let source = SelectionSource::new(&self.widget(app).items_source);
+            // A replaced source clears the selected row while the table builds; its listener hears
+            // of it once the frame is over, as a rebuild of the table during build must not dirty
+            // a widget above it.
+            if selection.bind(app, id, can_select, count, source, item_of_row) {
+                let selection = selection.clone();
+                self.after_frame(app, move |app| {
+                    if app.contains(selection.handle()) {
+                        selection.handle().notify_listeners(app);
+                    }
+                });
+            }
         }
     }
 
@@ -354,6 +444,16 @@ mod tests {
     use waft_foundation::AppCell;
 
     fn bound(app: &mut App, rows: usize, can_select: bool) -> Ref<TableViewSelection> {
+        let source = TableViewSource::from(app, vec![0u8; rows]);
+        bound_to(app, rows, can_select, &source)
+    }
+
+    fn bound_to(
+        app: &mut App,
+        rows: usize,
+        can_select: bool,
+        source: &Ref<TableViewSource<u8>>,
+    ) -> Ref<TableViewSelection> {
         let selection = TableViewSelection::new(app);
         let owner = app.create(0u8);
         selection.bind(
@@ -361,6 +461,7 @@ mod tests {
             owner.handle().id(),
             can_select,
             rows,
+            SelectionSource::new(source),
             Rc::new(|_, row| Some(row + 10)),
         );
         selection
@@ -410,8 +511,82 @@ mod tests {
         selection.select(&mut app, 0);
         assert_eq!(selection.take_change(&mut app), Some((None, Some(10))));
         assert_eq!(selection.take_change(&mut app), None);
-        selection.set_source(&mut app, 3);
+        // A replaced source clears the row and the clear is reported from the item last raised.
+        let owner = app.create(0u8);
+        let other_source = TableViewSource::from(&mut app, vec![0u8; 3]);
+        assert!(selection.bind(
+            &mut app,
+            owner.handle().id(),
+            true,
+            3,
+            SelectionSource::new(&other_source),
+            Rc::new(|_, row| Some(row)),
+        ));
         assert_eq!(selection.take_change(&mut app), Some((Some(10), None)));
+    }
+
+    /// A table adopting the same source again changes nothing: the selected row stays and no
+    /// listener hears of it.
+    #[test]
+    fn rebinding_the_same_source_keeps_the_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = TableViewSource::from(&mut app, vec![0u8; 3]);
+        let selection = bound_to(&mut app, 3, true, &source);
+        selection.select(&mut app, 1);
+        assert_eq!(selection.selected_index(&app), Some(1));
+
+        let heard = Rc::new(std::cell::Cell::new(0));
+        let heard_here = Rc::clone(&heard);
+        selection.add_listener(
+            &mut app,
+            Listener::new(move |_app| heard_here.set(heard_here.get() + 1)),
+        );
+
+        let owner = app.create(0u8);
+        let cleared = selection.bind(
+            &mut app,
+            owner.handle().id(),
+            true,
+            3,
+            SelectionSource::new(&source),
+            Rc::new(|_, row| Some(row)),
+        );
+        assert!(!cleared);
+        assert_eq!(selection.selected_index(&app), Some(1));
+        assert_eq!(heard.get(), 0);
+    }
+
+    /// The selection follows its source with no table holding it, as WinUI's model does: a row
+    /// inserted above moves the selected row down, and removing the selected row clears it.
+    #[test]
+    fn the_selection_follows_its_source_with_no_table_holding_it() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = TableViewSource::from(&mut app, vec![10u8, 20, 30, 40]);
+        let owner = app.create(0u8);
+        let selection = TableViewSelection::new(&mut app);
+        let rows_of = source.clone();
+        selection.bind(
+            &mut app,
+            owner.handle().id(),
+            true,
+            4,
+            SelectionSource::new(&source),
+            Rc::new(move |app, row| rows_of.view(app).get(row).copied()),
+        );
+        selection.select(&mut app, 2);
+        assert_eq!(selection.selected_index(&app), Some(2));
+
+        // The table goes away; the source inserts a row above the selected one.
+        selection.unbind(&mut app, owner.handle().id());
+        source.insert(&mut app, 0, 5);
+        assert_eq!(selection.selected_index(&app), Some(3));
+
+        // Rows leave from the end down to the selected row, which clears it.
+        source.remove(&mut app, 4);
+        source.remove(&mut app, 3);
+        assert_eq!(selection.selected_index(&app), None);
     }
 
     // A row the source moved keeps its selection; one moved across it shifts it.
