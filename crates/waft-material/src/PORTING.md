@@ -739,3 +739,10 @@ Ported against: 34b89b2086d4
 - refresh_indicator.rs tests: the semantics case ('RefreshIndicator') and the paint-only 'disallows indicator - glow/stretch' and 'manipulates value color opacity correctly' cases; the status, programmatic-show, no-spinner, adaptive, color default and zero-area cases are ported. Trigger: the semantics tree; paint inspection of the glow indicator.
 - button_bar_theme.rs tests: the two debug-properties cases, which print diagnostics; the lerp, null-field, default, copy, and `of` fallback/override cases are ported. Trigger: diagnostics.
 - material_button.rs tests: the hover and focus paint/elevation cases, the accessibility-contrast case and the density cases, which read the ink feature render object or depend on the platform's text metrics; the structural defaults, elevation and color precedence, sizes, shape, disabled elevation, clip, callbacks and zero-area cases are ported. Trigger: the ink-feature paint inspection; FlutterTest font metrics.
+
+## mergeable_material.rs → mergeable_material.dart
+
+- Change: `MergeableMaterialItem` is an enum whose `Slice` and `Gap` variants wrap `MaterialSlice` and `MaterialGap`; `MergeableMaterial::children` takes those variants.
+  Reason: language — Rust has no subclassing, so Dart's abstract class and its two subclasses become one closed enum.
+  Affect: a children list names the variant, and a `MaterialSlice` or `MaterialGap` is not accepted by itself.
+- mergeable_material.rs tests: the two shadow paint cases, which read the display list's shadow with `debugDisableShadows` off; the empty, gap merge, divider, slice color and zero-area cases are ported. Trigger: a tester that records shadows.
