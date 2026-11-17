@@ -96,6 +96,7 @@ impl ThreePaneSceneStrategy {
         }
 
         Some(ThreePaneScaffoldScene {
+            directive: self.directive.clone(),
             entries: start..end,
             value,
             previous_value,
@@ -156,6 +157,8 @@ impl ThreePaneSceneStrategy {
 /// The trailing back-stack entries one page shows together, and what back does to them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThreePaneScaffoldScene {
+    /// The directive the scene was computed with.
+    pub directive: PaneScaffoldDirective,
     /// The back-stack indices the scene covers.
     pub entries: Range<usize>,
     /// The panes the scene shows.
