@@ -2335,8 +2335,9 @@ mod tests {
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
     use waft_widgets::{
-        AnyElement, AnyFocusNode, Builder, Center, Column, FocusScope, IntoWidget, MediaQueryData,
-        Opacity, Overlay, OverlayEntry, SizedBox, Text, TextEditingController, WidgetStates,
+        AnyElement, AnyFocusNode, Builder, Center, Column, FocusScope, GestureDetector, IntoWidget,
+        MediaQueryData, Opacity, Overlay, OverlayEntry, SizedBox, Text, TextEditingController,
+        WidgetStates,
     };
 
     use waft_rendering::testing::{
@@ -7553,6 +7554,54 @@ mod tests {
             let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
             let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             mouse_drag(tester, &mut pointer, e, g);
+            let selection_now = selection(tester, controller.handle());
+            assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
+            assert_eq!(selection_now.extent_offset, text.find('g').unwrap() as i32);
+        });
+    }
+
+    #[test]
+    fn can_select_text_with_a_mouse_when_wrapped_in_a_gesture_detector_with_tap_and_double_tap_callbacks()
+     {
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                GestureDetector::new()
+                    .on_tap(Listener::new(|_app| {}))
+                    .on_double_tap(Listener::new(|_app| {}))
+                    .child(
+                        TextField::new()
+                            .drag_start_behavior(DragStartBehavior::Down)
+                            .controller(controller.erase()),
+                    ),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(find::by_type::<TextField>(), "abc def ghi");
+            skip_past_scrolling_animation(tester);
+            let text = "abc def ghi";
+            let e = text_offset_to_position(tester, text.find('e').unwrap() as i32);
+            let g = text_offset_to_position(tester, text.find('g').unwrap() as i32);
+
+            let mut pointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            tester.down(&mut pointer, e);
+            tester.pump();
+            tester.up(&pointer);
+            // This is to allow the GestureArena to decide a winner between
+            // TapGestureRecognizer, DoubleTapGestureRecognizer, and
+            // BaseTapAndDragGestureRecognizer.
+            tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
+            let selection_now = selection(tester, controller.handle());
+            assert!(selection_now.is_collapsed());
+            assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
+
+            tester.down(&mut pointer, e);
+            tester.pump();
+            tester.move_to(&mut pointer, g, true);
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump_and_settle();
+
             let selection_now = selection(tester, controller.handle());
             assert_eq!(selection_now.base_offset, text.find('e').unwrap() as i32);
             assert_eq!(selection_now.extent_offset, text.find('g').unwrap() as i32);

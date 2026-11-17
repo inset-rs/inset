@@ -6867,7 +6867,29 @@ pub(crate) mod tests {
 
     fn tap_element(tester: &mut WidgetTester, element: AnyElement) {
         let center = tester.get_center(element);
-        tester.tap_at(center, 1);
+        let pointer = tester.next_pointer();
+        tester.tap_at(center, pointer);
+    }
+
+    #[test]
+    fn can_double_tap_hours_when_selected_to_enter_input_mode() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
+                let size = material_dialog_default_size();
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
+                let hour_finder = ink_well_of_text(tester, "7");
+
+                assert_eq!(text_field_count(tester), 0);
+
+                // Double tap the hour.
+                tap_element(tester, hour_finder);
+                tester.pump_by(Duration::from_millis(100));
+                tap_element(tester, hour_finder);
+                tester.pump_and_settle();
+
+                assert!(text_field_count(tester) > 0);
+            });
+        }
     }
 
     #[test]
@@ -6892,6 +6914,31 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
 
                 assert_eq!(text_field_count(tester), 0);
+            });
+        }
+    }
+
+    #[test]
+    fn can_double_tap_minutes_when_selected_to_enter_input_mode() {
+        for material_type in pickers() {
+            test_widgets(|tester| {
+                let size = material_dialog_default_size();
+                media_query_boilerplate(tester, size, Boilerplate::new(material_type));
+                let minute_finder = ink_well_of_text(tester, "00");
+
+                assert_eq!(text_field_count(tester), 0);
+
+                // Switch to minutes mode.
+                tap_element(tester, minute_finder);
+                tester.pump_and_settle();
+
+                // Double tap the minutes.
+                tap_element(tester, minute_finder);
+                tester.pump_by(Duration::from_millis(100));
+                tap_element(tester, minute_finder);
+                tester.pump_and_settle();
+
+                assert!(text_field_count(tester) > 0);
             });
         }
     }
