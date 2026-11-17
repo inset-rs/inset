@@ -363,23 +363,35 @@ impl RefreshIndicatorState {
             .expect("set in did_change_dependencies")
     }
 
-    fn set_status(self: Handle<Self>, app: &mut App, status: Option<RefreshIndicatorStatus>) {
-        self.set_state(app, |state| state.status = status);
+    /// Dart's `widget.onStatusChange?.call(_status)`.
+    fn notify_status_change(self: Handle<Self>, app: &mut App) {
         let on_status_change = self.widget(app).on_status_change.clone();
         if let Some(on_status_change) = on_status_change {
+            let status = app.get(self).status;
             on_status_change(app, status);
         }
     }
 
+    #[expect(
+        deprecated,
+        reason = "Dart's `_setupColorTween` reads the deprecated `Color.alpha`"
+    )]
     fn setup_color_tween(self: Handle<Self>, app: &mut App) {
+        // Reset the current value color.
         let context = self.context(app);
         let theme = crate::theme::Theme::of(app, context);
         let color = self.widget(app).color.unwrap_or(theme.color_scheme.primary);
         app.get_mut(self).effective_value_color = Some(color);
-        let value_color: AnimationRef<Option<Color>> = if color.a == 0.0 {
+        let value_color: AnimationRef<Option<Color>> = if color.alpha() == 0x00 {
+            // Set an always stopped animation instead of a driven tween.
             app.create(AlwaysStoppedAnimation::new(Some(color))).erase()
         } else {
-            let color_tween = ColorTween::new(app, Some(color.with_alpha(0)), Some(color));
+            // Respect the alpha of the given color.
+            let color_tween = ColorTween::new(
+                app,
+                Some(color.with_alpha(0)),
+                Some(color.with_alpha(color.alpha())),
+            );
             let curve_tween = CurveTween::new(
                 app,
                 Rc::new(Interval::new(
@@ -430,7 +442,10 @@ impl RefreshIndicatorState {
             return false;
         }
         if self.should_start(app, notification) {
-            self.set_status(app, Some(RefreshIndicatorStatus::Drag));
+            self.set_state(app, |state| {
+                state.status = Some(RefreshIndicatorStatus::Drag);
+            });
+            self.notify_status_change(app);
             return false;
         }
 
@@ -468,6 +483,9 @@ impl RefreshIndicatorState {
             if app.get(self).status == Some(RefreshIndicatorStatus::Armed)
                 && update.drag_details.is_none()
             {
+                // On iOS start the refresh when the scrollable bounces back from the
+                // overscroll (scroll notifications indicating this have no drag details because
+                // the scroll activity is not directly triggered by a drag).
                 self.show_indicator(app);
             }
         } else if let Some(overscroll) = notification
@@ -530,12 +548,9 @@ impl RefreshIndicatorState {
     }
 
     fn start(self: Handle<Self>, app: &mut App, direction: AxisDirection) -> bool {
-        if app.get(self).status.is_some()
-            || app.get(self).is_indicator_at_top.is_some()
-            || app.get(self).drag_offset.is_some()
-        {
-            return false;
-        }
+        debug_assert!(app.get(self).status.is_none());
+        debug_assert!(app.get(self).is_indicator_at_top.is_none());
+        debug_assert!(app.get(self).drag_offset.is_none());
         match direction {
             AxisDirection::Down | AxisDirection::Up => {
                 app.get_mut(self).is_indicator_at_top = Some(true);
@@ -552,6 +567,10 @@ impl RefreshIndicatorState {
         true
     }
 
+    #[expect(
+        deprecated,
+        reason = "Dart's `_checkDragOffset` compares the deprecated `Color.alpha`"
+    )]
     fn check_drag_offset(self: Handle<Self>, app: &mut App, container_extent: f64) {
         let status = app.get(self).status;
         debug_assert!(
@@ -563,46 +582,61 @@ impl RefreshIndicatorState {
         if status == Some(RefreshIndicatorStatus::Armed) {
             new_value = new_value.max(1.0 / K_DRAG_SIZE_FACTOR_LIMIT);
         }
+        // This triggers various rebuilds.
         self.position_controller(app)
             .set_value(app, new_value.clamp(0.0, 1.0));
-        let effective_alpha = self.effective_value_color(app).a;
-        let value_alpha = self.value_color(app).value(app).map(|color| color.a);
         if app.get(self).status == Some(RefreshIndicatorStatus::Drag)
-            && value_alpha == Some(effective_alpha)
+            && self.value_color_alpha(app) == self.effective_value_color(app).alpha()
         {
-            self.set_status(app, Some(RefreshIndicatorStatus::Armed));
+            app.get_mut(self).status = Some(RefreshIndicatorStatus::Armed);
+            self.notify_status_change(app);
         }
+    }
+
+    /// Dart's `_valueColor.value!.alpha`.
+    #[expect(deprecated, reason = "Dart reads the deprecated `Color.alpha`")]
+    fn value_color_alpha(self: Handle<Self>, app: &App) -> i32 {
+        self.value_color(app)
+            .value(app)
+            .expect("the value color is never null")
+            .alpha()
     }
 
     /// Stops showing the refresh indicator. Dart awaits a completed future first, so the
     /// state change happens on the microtask queue and not during a scroll notification's
     /// layout.
     fn dismiss(self: Handle<Self>, app: &mut App, new_mode: RefreshIndicatorStatus) {
-        debug_assert!(
-            new_mode == RefreshIndicatorStatus::Canceled
-                || new_mode == RefreshIndicatorStatus::Done
-        );
         app.schedule_microtask(Listener::new(move |app| {
+            // This can only be called from `show_indicator` when refreshing and
+            // `handle_scroll_notification` in response to a scroll end notification or a
+            // direction change.
+            debug_assert!(
+                new_mode == RefreshIndicatorStatus::Canceled
+                    || new_mode == RefreshIndicatorStatus::Done
+            );
             if !self.mounted(app) {
                 return;
             }
-            self.set_status(app, Some(new_mode));
-            let controller = match new_mode {
-                RefreshIndicatorStatus::Done => self.scale_controller(app),
-                RefreshIndicatorStatus::Canceled => self.position_controller(app),
-                _ => return,
+            self.set_state(app, |state| state.status = Some(new_mode));
+            self.notify_status_change(app);
+            let animated = match new_mode {
+                RefreshIndicatorStatus::Done => self.scale_controller(app).animate_to(
+                    app,
+                    1.0,
+                    Some(K_INDICATOR_SCALE_DURATION),
+                    Curves::linear(),
+                ),
+                RefreshIndicatorStatus::Canceled => self.position_controller(app).animate_to(
+                    app,
+                    0.0,
+                    Some(K_INDICATOR_SCALE_DURATION),
+                    Curves::linear(),
+                ),
+                RefreshIndicatorStatus::Armed
+                | RefreshIndicatorStatus::Drag
+                | RefreshIndicatorStatus::Refresh
+                | RefreshIndicatorStatus::Snap => unreachable!("asserted above"),
             };
-            let target = if new_mode == RefreshIndicatorStatus::Done {
-                1.0
-            } else {
-                0.0
-            };
-            let animated = controller.animate_to(
-                app,
-                target,
-                Some(K_INDICATOR_SCALE_DURATION),
-                Curves::linear(),
-            );
             drop(app.spawn(async move |cx| {
                 animated.await;
                 cx.update(|app| {
@@ -612,45 +646,44 @@ impl RefreshIndicatorState {
                     let state = app.get_mut(self);
                     state.drag_offset = None;
                     state.is_indicator_at_top = None;
-                    self.set_status(app, None);
+                    self.set_state(app, |state| state.status = None);
                 });
             }));
         }));
     }
 
+    /// Dart's `_show`.
     fn show_indicator(self: Handle<Self>, app: &mut App) {
-        let status = app.get(self).status;
-        if status == Some(RefreshIndicatorStatus::Refresh)
-            || status == Some(RefreshIndicatorStatus::Snap)
-        {
-            return;
-        }
+        debug_assert!(app.get(self).status != Some(RefreshIndicatorStatus::Refresh));
+        debug_assert!(app.get(self).status != Some(RefreshIndicatorStatus::Snap));
         let completer = Completer::<()>::new();
         app.get_mut(self).pending_refresh = Some(completer);
-        self.set_status(app, Some(RefreshIndicatorStatus::Snap));
+        app.get_mut(self).status = Some(RefreshIndicatorStatus::Snap);
+        self.notify_status_change(app);
 
-        let controller = self.position_controller(app);
-        let animated = controller.animate_to(
+        let animated = self.position_controller(app).animate_to(
             app,
             1.0 / K_DRAG_SIZE_FACTOR_LIMIT,
             Some(K_INDICATOR_SNAP_DURATION),
             Curves::linear(),
         );
-        let on_refresh = self.widget(app).on_refresh.clone();
         drop(app.spawn(async move |cx| {
             animated.await;
-            let ready = cx.update(|app| {
+            let refresh = cx.update(|app| {
                 if !self.mounted(app) || app.get(self).status != Some(RefreshIndicatorStatus::Snap)
                 {
-                    return false;
+                    return None;
                 }
-                self.set_status(app, Some(RefreshIndicatorStatus::Refresh));
-                true
+                // Show the indeterminate progress indicator.
+                self.set_state(app, |state| {
+                    state.status = Some(RefreshIndicatorStatus::Refresh);
+                });
+                let on_refresh = self.widget(app).on_refresh.clone();
+                Some(on_refresh(app))
             });
-            if !ready {
+            let Some(refresh) = refresh else {
                 return;
-            }
-            let refresh = cx.update(|app| on_refresh(app));
+            };
             refresh.await;
             cx.update(|app| {
                 if !self.mounted(app)
@@ -782,29 +815,34 @@ impl State for RefreshIndicatorState {
         debug_assert!(crate::debug::debug_check_has_material_localizations(
             app, context
         ));
-
-        let this = self;
         let inner = NotificationListener::<OverscrollIndicatorNotification>::new(
             self.widget(app).child.clone(),
         )
         .on_notification(move |app, notification| {
-            this.handle_indicator_notification(app, notification)
+            self.handle_indicator_notification(app, notification)
         })
         .into_widget();
         let child = NotificationListener::<dyn ScrollNotification>::new(inner)
             .on_notification(move |app, notification| {
-                this.handle_scroll_notification(app, notification)
+                self.handle_scroll_notification(app, notification)
             })
             .into_widget();
+        if cfg!(debug_assertions) {
+            let state = app.get(self);
+            if state.status.is_none() {
+                assert!(state.drag_offset.is_none());
+                assert!(state.is_indicator_at_top.is_none());
+            } else {
+                assert!(state.drag_offset.is_some());
+                assert!(state.is_indicator_at_top.is_some());
+            }
+        }
 
         let status = app.get(self).status;
         let mut children = vec![child];
         if let Some(status) = status {
             let widget = self.widget(app);
-            let at_top = app
-                .get(self)
-                .is_indicator_at_top
-                .expect("the indicator has a side while it shows");
+            let at_top = app.get(self).is_indicator_at_top.expect("asserted above");
             let displacement = widget.displacement;
             let edge_offset = widget.edge_offset;
             let semantics_label = widget.semantics_label.clone();
@@ -849,18 +887,17 @@ impl State for RefreshIndicatorState {
                                     AnimatedBuilder::new(
                                         Rc::new(position_animation),
                                         move |app, context, _child| {
-                                            let localizations =
-                                                <dyn crate::material_localizations::MaterialLocalizations>::of(
-                                                    app, context,
-                                                );
+                                            let semantics_label = semantics_label
+                                                .clone()
+                                                .unwrap_or_else(|| {
+                                                    <dyn crate::material_localizations::MaterialLocalizations>::of(
+                                                        app, context,
+                                                    )
+                                                    .refresh_indicator_semantic_label()
+                                                });
                                             let material_indicator =
                                                 RefreshProgressIndicator::new()
-                                                    .semantics_label(
-                                                        semantics_label.clone().unwrap_or_else(|| {
-                                                            localizations
-                                                                .refresh_indicator_semantic_label()
-                                                        }),
-                                                    )
+                                                    .semantics_label(semantics_label)
                                                     .value_color(value_color.clone())
                                                     .stroke_width(stroke_width)
                                                     .elevation(elevation);
@@ -940,29 +977,35 @@ impl State for RefreshIndicatorState {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use waft_animation::{
         AnimationBehavior, AnimationController, ColorTween, CurveTween, Curves, Drive, Interval,
     };
     use waft_embedder::{Offset, Size, TargetPlatform};
+    use waft_painting::Axis;
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestVSync, WidgetTester, find, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, TestVSync, WidgetTester, delayed, find, test_widgets,
+        test_widgets_variant,
     };
     use waft_widgets::{
-        AlwaysScrollableScrollPhysics, Builder, Center, GlowingOverscrollIndicator, IntoWidget,
-        ListView, Notification, NotificationListener, OverscrollIndicatorNotification,
-        OverscrollNotification, ScrollNotification, SizedBox, StatefulElement,
-        StretchingOverscrollIndicator, Text,
+        AlwaysScrollableScrollPhysics, BouncingScrollPhysics, Builder, Center,
+        GlowingOverscrollIndicator, IntoWidget, LayoutBuilder, ListView, Notification,
+        NotificationListener, OverscrollIndicatorNotification, OverscrollNotification,
+        ScrollController, ScrollControllerLeaf, ScrollNotification, SingleChildScrollView,
+        SizedBox, StateSetter, StatefulBuilder, StatefulElement, StretchingOverscrollIndicator,
+        Text,
     };
 
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
+    use crate::constants::K_TOOLBAR_HEIGHT;
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
+    /// Dart's `refresh`: records the call and completes at once.
     fn refresh_called() -> (RefreshCallback, Rc<Cell<bool>>) {
         let called = Rc::new(Cell::new(false));
         let seen = Rc::clone(&called);
@@ -989,27 +1032,61 @@ mod tests {
         (callback, called)
     }
 
-    fn list() -> ListView {
+    /// A list under `AlwaysScrollableScrollPhysics` of `items`, each 200 tall.
+    fn list_of(items: &[&'static str]) -> ListView {
         ListView::new()
             .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
             .children(
-                ["A", "B", "C", "D", "E", "F"]
-                    .into_iter()
+                items
+                    .iter()
                     .map(|text| {
                         SizedBox::new()
                             .height(200.0)
-                            .child(Text::new(text))
+                            .child(Text::new(*text))
                             .into_widget()
                     })
                     .collect::<Vec<_>>(),
             )
     }
 
-    fn pump(tester: &mut WidgetTester, refresh: RefreshCallback, theme: ThemeData) {
-        tester.pump_widget(material_app(
-            theme,
-            RefreshIndicator::new(refresh, list()).into_widget(),
-        ));
+    /// Dart's six-item list, `A` to `F`.
+    fn list() -> ListView {
+        list_of(&["A", "B", "C", "D", "E", "F"])
+    }
+
+    /// Dart's one-item list, `X`.
+    fn x_list() -> ListView {
+        list_of(&["X"])
+    }
+
+    /// Dart's `X` at 200 tall over a `Y` at 800, scrolled by `controller`.
+    fn x_y_list(controller: &Ref<ScrollController>) -> ListView {
+        ListView::new()
+            .controller(controller.erase())
+            .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+            .children(vec![
+                SizedBox::new()
+                    .height(200.0)
+                    .child(Text::new("X"))
+                    .into_widget(),
+                SizedBox::new()
+                    .height(800.0)
+                    .child(Text::new("Y"))
+                    .into_widget(),
+            ])
+    }
+
+    /// Dart's `pumpWidget(MaterialApp(home: indicator))`.
+    fn pump(tester: &mut WidgetTester, indicator: RefreshIndicator) {
+        let theme = ThemeData::builder().build(&tester.cell.borrow());
+        tester.pump_widget(material_app(theme, indicator.into_widget()));
+    }
+
+    /// Three one-second pumps: the scroll, the indicator's settle and its hide.
+    fn pump_three_seconds(tester: &mut WidgetTester) {
+        tester.pump_by(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
+        tester.pump_by(Duration::from_secs(1));
     }
 
     fn state(tester: &WidgetTester) -> Handle<RefreshIndicatorState> {
@@ -1021,263 +1098,705 @@ mod tests {
             .state(&app)
     }
 
+    /// Dart's `show().then((_) => completed = true)`.
+    fn show(tester: &mut WidgetTester) -> Rc<Cell<bool>> {
+        let completed = Rc::new(Cell::new(false));
+        let seen = Rc::clone(&completed);
+        let future = state(tester).show(&mut tester.cell.borrow_mut(), true);
+        future.then(&mut tester.cell.borrow_mut(), move |_app, ()| {
+            seen.set(true);
+        });
+        completed
+    }
+
+    fn progress_indicator_count(tester: &WidgetTester) -> usize {
+        find::by_type::<RefreshProgressIndicator>()
+            .evaluate(tester)
+            .len()
+    }
+
+    fn value_color_of_indicator(tester: &WidgetTester) -> Option<Color> {
+        let value_color = tester
+            .widget(
+                find::by_type::<RefreshProgressIndicator>(),
+                |indicator: &RefreshProgressIndicator| {
+                    indicator
+                        .circular_progress_indicator
+                        .progress_indicator
+                        .value_color
+                        .clone()
+                },
+            )
+            .expect("the indicator has a value color");
+        value_color.value(&tester.cell.borrow())
+    }
+
+    fn elevation_of_indicator(tester: &WidgetTester) -> f64 {
+        tester.widget(
+            find::by_type::<RefreshProgressIndicator>(),
+            |indicator: &RefreshProgressIndicator| indicator.elevation,
+        )
+    }
+
+    /// Dart's `ScrollController.dispose`.
+    fn dispose(tester: &mut WidgetTester, controller: Ref<ScrollController>) {
+        controller.dispose(&mut tester.cell.borrow_mut());
+    }
+
     #[test]
-    fn a_drag_down_runs_the_refresh_callback() {
+    fn refresh_indicator() {
         test_widgets(|tester| {
             let (refresh, called) = refresh_called();
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            pump(tester, refresh, theme);
+            pump(tester, RefreshIndicator::new(refresh, list()));
 
             tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
             tester.pump();
-            assert_eq!(
-                find::by_type::<RefreshProgressIndicator>()
-                    .evaluate(tester)
-                    .len(),
-                1,
-                "the indicator came in"
-            );
+            assert_eq!(progress_indicator_count(tester), 1, "the indicator came in");
 
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
+            pump_three_seconds(tester);
             assert!(called.get(), "the refresh ran");
         });
     }
 
     #[test]
-    fn show_runs_the_refresh_and_completes_after_it() {
+    fn refresh_indicator_nested() {
         test_widgets(|tester| {
             let (refresh, called) = refresh_called();
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            pump(tester, refresh, theme);
+            pump(
+                tester,
+                RefreshIndicator::new(
+                    refresh,
+                    SingleChildScrollView::new()
+                        .scroll_direction(Axis::Horizontal)
+                        .child(SizedBox::new().width(600.0).child(list())),
+                )
+                .notification_predicate(Rc::new(
+                    |notification: &dyn ScrollNotification| notification.depth() == 1,
+                )),
+            );
 
-            let completed = Rc::new(Cell::new(false));
-            let seen = Rc::clone(&completed);
-            let future = state(tester).show(&mut tester.cell.borrow_mut(), true);
-            future.then(&mut tester.cell.borrow_mut(), move |_app, ()| {
-                seen.set(true);
-            });
+            // A horizontal fling.
+            tester.fling(find::text("A"), Offset::new(300.0, 0.0), 1000.0);
             tester.pump();
-            assert!(!completed.get());
+            pump_three_seconds(tester);
+            assert!(!called.get());
 
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            assert!(called.get());
-            assert!(completed.get(), "the future completed after the refresh");
-        });
-    }
-
-    #[test]
-    fn show_waits_for_a_refresh_that_never_completes() {
-        test_widgets(|tester| {
-            let (refresh, called) = hold_refresh();
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            pump(tester, refresh, theme);
-
-            let completed = Rc::new(Cell::new(false));
-            let seen = Rc::clone(&completed);
-            let future = state(tester).show(&mut tester.cell.borrow_mut(), true);
-            future.then(&mut tester.cell.borrow_mut(), move |_app, ()| {
-                seen.set(true);
-            });
-            tester.pump();
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            assert!(called.get());
-            assert!(!completed.get(), "the refresh never completed");
-
-            called.set(false);
-            let again = state(tester).show(&mut tester.cell.borrow_mut(), true);
-            drop(again);
-            tester.pump();
-            tester.pump_by(Duration::from_secs(1));
-            assert!(!called.get(), "a second show while refreshing does nothing");
-        });
-    }
-
-    #[test]
-    fn no_spinner_never_builds_a_progress_indicator() {
-        test_widgets(|tester| {
-            let (refresh, called) = refresh_called();
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                RefreshIndicator::no_spinner(refresh, list()).into_widget(),
-            ));
+            // A vertical fling.
             tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
             tester.pump();
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
+            pump_three_seconds(tester);
             assert!(called.get());
-            assert!(
-                find::by_type::<RefreshProgressIndicator>()
-                    .evaluate(tester)
-                    .is_empty()
-            );
         });
     }
 
     #[test]
-    fn adaptive_shows_a_cupertino_indicator_on_ios() {
-        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
-            let (refresh, _called) = hold_refresh();
-            let theme = ThemeData::builder()
-                .platform(TargetPlatform::IOS)
-                .build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                RefreshIndicator::adaptive(refresh, list()).into_widget(),
-            ));
-            drop(state(tester).show(&mut tester.cell.borrow_mut(), true));
-            tester.pump();
-            assert_eq!(
-                find::by_type::<waft_cupertino::CupertinoActivityIndicator>()
-                    .evaluate(tester)
-                    .len(),
-                1
-            );
-            assert!(
-                find::by_type::<RefreshProgressIndicator>()
-                    .evaluate(tester)
-                    .is_empty()
-            );
-        });
-    }
-
-    #[test]
-    fn the_value_color_defaults_to_the_color_scheme_primary() {
+    fn refresh_indicator_reverse() {
         test_widgets(|tester| {
-            let primary = Color::new(0xFF4CAF50);
-            let mut scheme = ColorScheme::light();
-            scheme.primary = primary;
-            let theme = ThemeData::builder()
-                .color_scheme(scheme)
-                .build(&tester.cell.borrow());
+            let (refresh, called) = refresh_called();
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, x_list().reverse(true)),
+            );
+
+            tester.fling(find::text("X"), Offset::new(0.0, 600.0), 1000.0);
+            tester.pump();
+            pump_three_seconds(tester);
+            assert!(called.get());
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_top_position() {
+        test_widgets(|tester| {
             let (refresh, _called) = hold_refresh();
+            pump(tester, RefreshIndicator::new(refresh, x_list()));
+
+            tester.fling(find::text("X"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            let center = tester.get_center(find::by_type::<RefreshProgressIndicator>());
+            assert!(center.dy() < 300.0, "{center:?}");
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_reverse_position() {
+        test_widgets(|tester| {
+            let (refresh, _called) = hold_refresh();
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, x_list().reverse(true)),
+            );
+
+            tester.fling(find::text("X"), Offset::new(0.0, 600.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            let center = tester.get_center(find::by_type::<RefreshProgressIndicator>());
+            assert!(center.dy() < 300.0, "{center:?}");
+        });
+    }
+
+    /// Dart's `RefreshIndicator - no movement`, `- not enough` and `- just enough`: a fling of
+    /// `offset` on a one-item list.
+    fn refresh_after_fling(offset: Offset) -> bool {
+        let mut refreshed = false;
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            pump(tester, RefreshIndicator::new(refresh, x_list()));
+
+            tester.fling(find::text("X"), offset, 1000.0);
+            tester.pump();
+            pump_three_seconds(tester);
+            refreshed = called.get();
+        });
+        refreshed
+    }
+
+    #[test]
+    fn refresh_indicator_no_movement() {
+        // This fling is horizontal, not up or down.
+        assert!(!refresh_after_fling(Offset::new(1.0, 0.0)));
+    }
+
+    #[test]
+    fn refresh_indicator_not_enough() {
+        assert!(!refresh_after_fling(Offset::new(0.0, 50.0)));
+    }
+
+    #[test]
+    fn refresh_indicator_just_enough() {
+        assert!(refresh_after_fling(Offset::new(0.0, 200.0)));
+    }
+
+    /// Dart's `RefreshIndicator - drag back …`: a drag of 175 down that comes back to
+    /// `drag_back_to` before it lifts.
+    fn refresh_after_dragging_back_to(drag_back_to: f64) -> bool {
+        let mut refreshed = false;
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            let list = ListView::new()
+                .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                .children(vec![
+                    SizedBox::new()
+                        .height(200.0)
+                        .child(Text::new("X"))
+                        .into_widget(),
+                    SizedBox::new().height(1000.0).into_widget(),
+                ]);
+            pump(tester, RefreshIndicator::new(refresh, list));
+
+            let start_location = tester.get_center(find::text("X"));
+            let mut pointer = TestPointer::touch(tester.next_pointer());
+            tester.down(&mut pointer, start_location);
+            tester.move_to(&mut pointer, start_location + Offset::new(0.0, 175.0), true);
+            tester.pump();
+            tester.move_to(
+                &mut pointer,
+                start_location + Offset::new(0.0, drag_back_to),
+                true,
+            );
+            tester.pump();
+            tester.up(&pointer);
+            tester.pump();
+            pump_three_seconds(tester);
+            refreshed = called.get();
+        });
+        refreshed
+    }
+
+    #[test]
+    fn refresh_indicator_drag_back_not_far_enough_to_cancel() {
+        assert!(refresh_after_dragging_back_to(150.0));
+    }
+
+    #[test]
+    fn refresh_indicator_drag_back_far_enough_to_cancel() {
+        assert!(!refresh_after_dragging_back_to(149.0));
+    }
+
+    #[test]
+    fn refresh_indicator_show_slow() {
+        test_widgets(|tester| {
+            // This one never returns.
+            let (refresh, called) = hold_refresh();
+            pump(tester, RefreshIndicator::new(refresh, x_list()));
+
+            let completed = show(tester);
+            tester.pump();
+            assert!(!completed.get());
+            pump_three_seconds(tester);
+            assert!(called.get());
+            assert!(!completed.get());
+
+            called.set(false);
+            let completed = show(tester);
+            tester.pump();
+            assert!(!completed.get());
+            pump_three_seconds(tester);
+            assert!(!called.get());
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_show_fast() {
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            pump(tester, RefreshIndicator::new(refresh, x_list()));
+
+            let completed = show(tester);
+            tester.pump();
+            assert!(!completed.get());
+            pump_three_seconds(tester);
+            assert!(called.get());
+            assert!(completed.get());
+
+            called.set(false);
+            let completed = show(tester);
+            tester.pump();
+            assert!(!completed.get());
+            pump_three_seconds(tester);
+            assert!(called.get());
+            assert!(completed.get());
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_show_fast_twice() {
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            pump(tester, RefreshIndicator::new(refresh, x_list()));
+
+            let completed1 = show(tester);
+            let completed2 = show(tester);
+            tester.pump();
+            assert!(!completed1.get());
+            assert!(!completed2.get());
+            pump_three_seconds(tester);
+            assert!(called.get());
+            assert!(completed1.get());
+            assert!(completed2.get());
+        });
+    }
+
+    #[test]
+    fn refresh_starts_while_scroll_view_moves_back_to_zero_after_overscroll() {
+        test_widgets_variant(
+            TargetPlatformVariant::new([TargetPlatform::IOS, TargetPlatform::MacOS]),
+            |tester| {
+                let (refresh, called) = refresh_called();
+                let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+                pump(
+                    tester,
+                    RefreshIndicator::new(refresh, list().controller(controller.erase())),
+                );
+
+                if tester.target_platform() == TargetPlatform::MacOS {
+                    tester.fling(find::text("A"), Offset::new(0.0, 1500.0), 10000.0);
+                } else {
+                    tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+                }
+                tester.pump_by(Duration::from_millis(100));
+                let last_scroll_offset = controller.offset(&tester.cell.borrow());
+                assert!(last_scroll_offset < 0.0, "{last_scroll_offset}");
+                assert!(!called.get());
+
+                tester.pump_by(Duration::from_millis(400));
+                let offset = controller.offset(&tester.cell.borrow());
+                assert!(
+                    offset > last_scroll_offset,
+                    "{offset} > {last_scroll_offset}"
+                );
+                assert!(offset < 0.0, "{offset}");
+                assert!(called.get());
+
+                dispose(tester, controller);
+            },
+        );
+    }
+
+    #[test]
+    fn refresh_indicator_does_not_force_child_to_relayout() {
+        test_widgets(|tester| {
+            let (refresh, _called) = refresh_called();
+            let layout_count = Rc::new(Cell::new(0));
+            let counted = Rc::clone(&layout_count);
+            let layout_callback = LayoutBuilder::new(move |_app, _context, _constraints| {
+                counted.set(counted.get() + 1);
+                list().into_widget()
+            });
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, layout_callback.into_widget()),
+            );
+
+            // Trigger a refresh.
+            tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            pump_three_seconds(tester);
+
+            assert_eq!(layout_count.get(), 1);
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_appears_at_edge_offset() {
+        test_widgets(|tester| {
+            let refresh: RefreshCallback = Rc::new(|app| delayed(app, Duration::from_secs(1), ()));
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, list())
+                    .edge_offset(K_TOOLBAR_HEIGHT)
+                    .displacement(K_TOOLBAR_HEIGHT),
+            );
+
+            tester.fling(
+                find::by_type::<ListView>(),
+                Offset::new(0.0, 2.0 * K_TOOLBAR_HEIGHT),
+                1000.0,
+            );
+            tester.pump_by(Duration::from_secs(2));
+
+            let top = tester
+                .get_top_left(find::by_type::<RefreshProgressIndicator>())
+                .dy();
+            assert!(top >= 2.0 * K_TOOLBAR_HEIGHT, "{top}");
+        });
+    }
+
+    #[test]
+    fn top_refresh_indicator_anywhere_mode_should_be_shown_when_dragging_from_non_zero_scroll_position()
+     {
+        test_widgets(|tester| {
+            let (refresh, _called) = hold_refresh();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, x_y_list(&controller))
+                    .trigger_mode(RefreshIndicatorTriggerMode::Anywhere),
+            );
+
+            controller.jump_to(&mut tester.cell.borrow_mut(), 50.0);
+
+            tester.fling(find::text("X"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            let center = tester.get_center(find::by_type::<RefreshProgressIndicator>());
+            assert!(center.dy() < 300.0, "{center:?}");
+
+            dispose(tester, controller);
+        });
+    }
+
+    #[test]
+    fn reverse_refresh_indicator_anywhere_mode_should_be_shown_when_dragging_from_non_zero_scroll_position()
+     {
+        test_widgets(|tester| {
+            let (refresh, _called) = hold_refresh();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, x_y_list(&controller).reverse(true))
+                    .trigger_mode(RefreshIndicatorTriggerMode::Anywhere),
+            );
+
+            controller.jump_to(&mut tester.cell.borrow_mut(), 50.0);
+
+            tester.fling(find::text("X"), Offset::new(0.0, 600.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            let center = tester.get_center(find::by_type::<RefreshProgressIndicator>());
+            assert!(center.dy() < 300.0, "{center:?}");
+
+            dispose(tester, controller);
+        });
+    }
+
+    // Regression test for https://github.com/flutter/flutter/issues/71936
+    #[test]
+    fn refresh_indicator_anywhere_mode_should_not_be_shown_when_overscroll_occurs_due_to_inertia() {
+        test_widgets(|tester| {
+            let (refresh, _called) = hold_refresh();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let list = ListView::new()
+                .controller(controller.erase())
+                .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                .children(vec![
+                    SizedBox::new()
+                        .height(200.0)
+                        .child(Text::new("X"))
+                        .into_widget(),
+                    SizedBox::new()
+                        .height(2000.0)
+                        .child(Text::new("Y"))
+                        .into_widget(),
+                ]);
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, list)
+                    .trigger_mode(RefreshIndicatorTriggerMode::Anywhere),
+            );
+
+            controller.jump_to(&mut tester.cell.borrow_mut(), 100.0);
+
+            // Release finger before reach the edge.
+            tester.fling(find::text("X"), Offset::new(0.0, 99.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(progress_indicator_count(tester), 0);
+
+            dispose(tester, controller);
+        });
+    }
+
+    #[test]
+    fn top_refresh_indicator_on_edge_mode_should_not_be_shown_when_dragging_from_non_zero_scroll_position()
+     {
+        test_widgets(|tester| {
+            let (refresh, _called) = hold_refresh();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, x_y_list(&controller)),
+            );
+
+            controller.jump_to(&mut tester.cell.borrow_mut(), 50.0);
+
+            tester.fling(find::text("X"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(progress_indicator_count(tester), 0);
+
+            dispose(tester, controller);
+        });
+    }
+
+    #[test]
+    fn reverse_refresh_indicator_on_edge_mode_should_be_shown_when_dragging_from_non_zero_scroll_position()
+     {
+        test_widgets(|tester| {
+            let (refresh, _called) = hold_refresh();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            pump(
+                tester,
+                RefreshIndicator::new(refresh, x_y_list(&controller).reverse(true)),
+            );
+
+            controller.jump_to(&mut tester.cell.borrow_mut(), 50.0);
+
+            tester.fling(find::text("X"), Offset::new(0.0, -300.0), 1000.0);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(progress_indicator_count(tester), 0);
+
+            dispose(tester, controller);
+        });
+    }
+
+    #[test]
+    fn scroll_controller_jump_to_should_not_trigger_the_refresh_indicator() {
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            let controller =
+                ScrollController::new(&mut tester.cell.borrow_mut(), 500.0, true, None, None, None);
+            let list = ListView::new()
+                .controller(controller.erase())
+                .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                .children(vec![
+                    SizedBox::new()
+                        .height(800.0)
+                        .child(Text::new("X"))
+                        .into_widget(),
+                    SizedBox::new()
+                        .height(800.0)
+                        .child(Text::new("Y"))
+                        .into_widget(),
+                ]);
+            pump(tester, RefreshIndicator::new(refresh, list));
+
+            controller.jump_to(&mut tester.cell.borrow_mut(), 0.0);
+            tester.pump_by(Duration::from_secs(1));
+            tester.pump_by(Duration::from_secs(1));
+
+            assert!(!called.get());
+
+            dispose(tester, controller);
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_adaptive() {
+        test_widgets(|tester| {
+            let build_frame = |tester: &mut WidgetTester, platform: TargetPlatform| {
+                let (refresh, _called) = refresh_called();
+                let theme = ThemeData::builder()
+                    .platform(platform)
+                    .build(&tester.cell.borrow());
+                tester.pump_widget(material_app(
+                    theme,
+                    RefreshIndicator::adaptive(refresh, list()).into_widget(),
+                ));
+            };
+
+            for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
+                build_frame(tester, platform);
+                // Finish the theme change animation.
+                tester.pump_and_settle();
+                tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+                tester.pump();
+
+                assert_eq!(
+                    find::by_type::<waft_cupertino::CupertinoActivityIndicator>()
+                        .evaluate(tester)
+                        .len(),
+                    1,
+                    "{platform:?}"
+                );
+                assert_eq!(progress_indicator_count(tester), 0, "{platform:?}");
+            }
+
+            for platform in [
+                TargetPlatform::Android,
+                TargetPlatform::Fuchsia,
+                TargetPlatform::Linux,
+                TargetPlatform::Windows,
+            ] {
+                build_frame(tester, platform);
+                // Finish the theme change animation.
+                tester.pump_and_settle();
+                tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+                tester.pump();
+
+                // Dart checks the indicator's semantics label; the semantics tree is deferred.
+                assert_eq!(progress_indicator_count(tester), 1, "{platform:?}");
+                assert!(
+                    find::by_type::<waft_cupertino::CupertinoActivityIndicator>()
+                        .evaluate(tester)
+                        .is_empty(),
+                    "{platform:?}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_color_defaults_to_color_scheme_primary() {
+        test_widgets(|tester| {
+            let primary_color = Color::new(0xff4caf50);
+            let mut color_scheme = ColorScheme::light();
+            color_scheme.primary = primary_color;
+            let theme = ThemeData::from(color_scheme).build(&tester.cell.borrow());
+            let (refresh, _called) = hold_refresh();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
             tester.pump_widget(material_app(
                 theme,
-                RefreshIndicator::new(refresh, list())
+                RefreshIndicator::new(refresh, x_y_list(&controller).reverse(true))
                     .trigger_mode(RefreshIndicatorTriggerMode::Anywhere)
                     .into_widget(),
             ));
 
-            tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+            tester.fling(find::text("X"), Offset::new(0.0, 600.0), 1000.0);
             tester.pump();
-            let value_color = tester
-                .widget(
-                    find::by_type::<RefreshProgressIndicator>(),
-                    |indicator: &RefreshProgressIndicator| {
-                        indicator
-                            .circular_progress_indicator
-                            .progress_indicator
-                            .value_color
-                            .clone()
-                    },
-                )
-                .expect("the indicator has a value color");
-            let app = tester.cell.borrow();
-            assert_eq!(value_color.value(&app), Some(primary));
+            assert_eq!(value_color_of_indicator(tester), Some(primary_color));
+
+            dispose(tester, controller);
         });
     }
 
     #[test]
-    fn the_status_callback_reports_each_stage() {
+    #[expect(
+        deprecated,
+        reason = "Dart's case compares against `Color.withOpacity`"
+    )]
+    fn refresh_indicator_color_can_be_updated_at_runtime() {
+        test_widgets(|tester| {
+            let refresh_indicator_color = Rc::new(Cell::new(Colors::GREEN.primary()));
+            let red = Colors::RED.primary();
+            let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::new(RefCell::new(None));
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+
+            let builder = {
+                let refresh_indicator_color = Rc::clone(&refresh_indicator_color);
+                let set_state = Rc::clone(&set_state);
+                let controller = controller.clone();
+                StatefulBuilder::new(move |_app, _context, state_setter| {
+                    *set_state.borrow_mut() = Some(state_setter);
+                    let (refresh, _called) = hold_refresh();
+                    RefreshIndicator::new(refresh, x_y_list(&controller).reverse(true))
+                        .trigger_mode(RefreshIndicatorTriggerMode::Anywhere)
+                        .color(refresh_indicator_color.get())
+                        .into_widget()
+                })
+            };
+            let theme = ThemeData::builder().build(&tester.cell.borrow());
+            tester.pump_widget(material_app(theme, builder.into_widget()));
+
+            tester.fling(find::text("X"), Offset::new(0.0, 600.0), 1000.0);
+            tester.pump();
+            assert_eq!(
+                value_color_of_indicator(tester),
+                Some(refresh_indicator_color.get().with_opacity(1.0))
+            );
+
+            let state_setter = set_state.borrow().clone().expect("the builder ran");
+            state_setter(&mut tester.cell.borrow_mut(), &mut |_app| {
+                refresh_indicator_color.set(red);
+            });
+            tester.pump();
+            assert_eq!(
+                value_color_of_indicator(tester),
+                Some(red.with_opacity(1.0))
+            );
+
+            dispose(tester, controller);
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_reverse_bouncing_scroll_physics() {
         test_widgets(|tester| {
             let (refresh, called) = refresh_called();
-            let drag = Rc::new(Cell::new(false));
-            let armed = Rc::new(Cell::new(false));
-            let snap = Rc::new(Cell::new(false));
-            let done = Rc::new(Cell::new(false));
-            let (d, a, s2, dn) = (
-                Rc::clone(&drag),
-                Rc::clone(&armed),
-                Rc::clone(&snap),
-                Rc::clone(&done),
-            );
-            let statuses = Rc::new(
-                move |_app: &mut App, status: Option<RefreshIndicatorStatus>| match status {
-                    Some(RefreshIndicatorStatus::Drag) => d.set(true),
-                    Some(RefreshIndicatorStatus::Armed) => a.set(true),
-                    Some(RefreshIndicatorStatus::Snap) => s2.set(true),
-                    Some(RefreshIndicatorStatus::Done) => dn.set(true),
-                    _ => {}
-                },
-            );
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                RefreshIndicator::no_spinner(refresh, list())
-                    .on_status_change(statuses)
-                    .into_widget(),
-            ));
-            tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+            let list = ListView::new()
+                .reverse(true)
+                .physics(Rc::new(BouncingScrollPhysics::new()))
+                .children(
+                    (0..4)
+                        .map(|i| {
+                            SizedBox::new()
+                                .height(200.0)
+                                .child(Text::new(format!("X - {i}")))
+                                .into_widget()
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            pump(tester, RefreshIndicator::new(refresh, list));
+
+            // Scroll to top.
+            tester.fling(find::text("X - 0"), Offset::new(0.0, 800.0), 1000.0);
+            tester.pump_and_settle();
+
+            // Fling down to show the refresh indicator.
+            tester.fling(find::text("X - 3"), Offset::new(0.0, 250.0), 1000.0);
             tester.pump();
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
+            pump_three_seconds(tester);
             assert!(called.get());
-            assert!(drag.get(), "drag");
-            assert!(armed.get(), "armed");
-            assert!(snap.get(), "snap");
-            assert!(done.get(), "done");
         });
-    }
-
-    #[test]
-    fn the_indicator_does_not_crash_at_zero_area() {
-        test_widgets(|tester| {
-            let (refresh, _called) = refresh_called();
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            tester.pump_widget(material_app(
-                theme,
-                Center::new()
-                    .child(
-                        SizedBox::shrink()
-                            .child(RefreshIndicator::new(refresh, SizedBox::shrink())),
-                    )
-                    .into_widget(),
-            ));
-            assert_eq!(
-                tester.get_size(find::by_type::<RefreshIndicator>()),
-                Size::ZERO
-            );
-        });
-    }
-
-    /// A six-step list, each step 200 tall, under `AlwaysScrollableScrollPhysics`.
-    fn tall_list() -> ListView {
-        ListView::new()
-            .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
-            .children(
-                ["A", "B", "C", "D", "E", "F"]
-                    .into_iter()
-                    .map(|text| {
-                        SizedBox::new()
-                            .height(200.0)
-                            .child(Text::new(text))
-                            .into_widget()
-                    })
-                    .collect::<Vec<_>>(),
-            )
     }
 
     /// Dart's `NotificationListener<ScrollNotification>` around the list: the first overscroll
     /// dispatches an `OverscrollIndicatorNotification` and records whether it was accepted.
-    fn overscroll_probe(
-        list: ListView,
-        accepted: Rc<Cell<bool>>,
-    ) -> impl Fn(&mut App, BuildContext) -> WidgetRef {
+    fn overscroll_probe(accepted: Rc<Cell<bool>>) -> impl Fn(&mut App, BuildContext) -> WidgetRef {
         let last_was_overscroll = Rc::new(Cell::new(false));
-        let list: WidgetRef = list.into_widget();
         move |_app: &mut App, context: BuildContext| {
             let accepted = Rc::clone(&accepted);
             let last_was_overscroll = Rc::clone(&last_was_overscroll);
-            let list = list.clone();
-            NotificationListener::<dyn ScrollNotification>::new(list)
+            NotificationListener::<dyn ScrollNotification>::new(list())
                 .on_notification(move |app, notification| {
                     let is_overscroll = notification.as_any().is::<OverscrollNotification>();
                     if is_overscroll && !last_was_overscroll.get() {
@@ -1293,14 +1812,14 @@ mod tests {
     }
 
     #[test]
-    fn the_indicator_disallows_the_glow_while_dragging() {
+    fn refresh_indicator_disallows_indicator_glow() {
         test_widgets(|tester| {
             let (refresh, called) = refresh_called();
             let glow_accepted = Rc::new(Cell::new(true));
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .build(&tester.cell.borrow());
-            let probe = overscroll_probe(tall_list(), Rc::clone(&glow_accepted));
+            let probe = overscroll_probe(Rc::clone(&glow_accepted));
             let indicator = RefreshIndicator::new(refresh, Builder::new(probe));
             tester.pump_widget(material_app(theme, indicator.into_widget()));
 
@@ -1318,23 +1837,19 @@ mod tests {
 
             tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
             tester.pump();
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
+            pump_three_seconds(tester);
             assert!(called.get());
             assert!(!glow_accepted.get());
         });
     }
 
     #[test]
-    fn the_indicator_disallows_the_stretch_while_dragging() {
+    fn refresh_indicator_disallows_indicator_stretch() {
         test_widgets(|tester| {
             let (refresh, called) = refresh_called();
             let stretch_accepted = Rc::new(Cell::new(true));
-            let theme = ThemeData::builder().build(&tester.cell.borrow());
-            let probe = overscroll_probe(tall_list(), Rc::clone(&stretch_accepted));
-            let indicator = RefreshIndicator::new(refresh, Builder::new(probe));
-            tester.pump_widget(material_app(theme, indicator.into_widget()));
+            let probe = overscroll_probe(Rc::clone(&stretch_accepted));
+            pump(tester, RefreshIndicator::new(refresh, Builder::new(probe)));
 
             assert_eq!(
                 find::by_type::<StretchingOverscrollIndicator>()
@@ -1350,18 +1865,59 @@ mod tests {
 
             tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
             tester.pump();
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
-            tester.pump_by(Duration::from_secs(1));
+            pump_three_seconds(tester);
             assert!(called.get());
             assert!(!stretch_accepted.get());
         });
     }
 
-    /// The refresh indicator's value colour fades in over the first 1/1.5 of the drag, from
-    /// the colour's alpha 0 to its own alpha.
     #[test]
-    fn the_value_color_fades_in_with_the_drag() {
+    fn no_spinner_on_status_change_and_on_refresh_trigger() {
+        test_widgets(|tester| {
+            let (refresh, called) = refresh_called();
+            let statuses = Rc::new(RefCell::new(Vec::new()));
+            let seen = Rc::clone(&statuses);
+            pump(
+                tester,
+                RefreshIndicator::no_spinner(refresh, list()).on_status_change(Rc::new(
+                    move |_app: &mut App, status: Option<RefreshIndicatorStatus>| {
+                        seen.borrow_mut().push(status);
+                    },
+                )),
+            );
+
+            tester.fling(find::text("A"), Offset::new(0.0, 300.0), 1000.0);
+            tester.pump();
+            pump_three_seconds(tester);
+
+            assert!(called.get());
+            let statuses = statuses.borrow();
+            for status in [
+                RefreshIndicatorStatus::Snap,
+                RefreshIndicatorStatus::Drag,
+                RefreshIndicatorStatus::Armed,
+                RefreshIndicatorStatus::Done,
+            ] {
+                assert!(
+                    statuses.contains(&Some(status)),
+                    "{status:?} in {statuses:?}"
+                );
+            }
+            assert!(
+                find::by_type::<RefreshProgressIndicator>()
+                    .evaluate(tester)
+                    .is_empty(),
+                "no spinner"
+            );
+        });
+    }
+
+    #[test]
+    #[expect(
+        deprecated,
+        reason = "Dart's case compares the deprecated `Color.alpha`"
+    )]
+    fn refresh_indicator_manipulates_value_color_opacity_correctly() {
         const POSITIONS: [f64; 3] = [50.0, 100.0, 150.0];
         let colors = [
             Colors::BLACK,
@@ -1373,11 +1929,11 @@ mod tests {
         for color in colors {
             test_widgets(|tester| {
                 let (refresh, _called) = refresh_called();
-                let (controller, expected) = {
+                let (position_controller, value_color_animation) = {
                     let mut app = tester.cell.borrow_mut();
-                    let controller = AnimationController::new(
+                    let position_controller = AnimationController::new(
                         &mut app,
-                        Some(0.0),
+                        None,
                         None,
                         None,
                         0.0,
@@ -1385,69 +1941,112 @@ mod tests {
                         AnimationBehavior::Normal,
                         TestVSync,
                     );
-                    let tween = ColorTween::new(&mut app, Some(color.with_alpha(0)), Some(color));
+                    // Corresponds to `setup_color_tween`.
+                    let tween = ColorTween::new(
+                        &mut app,
+                        Some(color.with_alpha(0)),
+                        Some(color.with_alpha(color.alpha())),
+                    );
+                    // Corresponds to `K_DRAG_SIZE_FACTOR_LIMIT`.
                     let curve = CurveTween::new(
                         &mut app,
-                        Rc::new(Interval::new(
-                            0.0,
-                            1.0 / K_DRAG_SIZE_FACTOR_LIMIT,
-                            Curves::linear(),
-                        )),
+                        Rc::new(Interval::new(0.0, 1.0 / 1.5, Curves::linear())),
                     );
-                    let expected = controller.drive(&mut app, tween.chain(curve));
-                    (controller, expected)
+                    let value_color_animation =
+                        position_controller.drive(&mut app, tween.chain(curve));
+                    (position_controller, value_color_animation)
                 };
 
-                let item = SizedBox::new()
-                    .height(200.0)
-                    .child(Text::new("X"))
-                    .into_widget();
                 let list = ListView::new()
                     .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
-                    .children(vec![item]);
-                let theme = ThemeData::builder().build(&tester.cell.borrow());
-                tester.pump_widget(material_app(
-                    theme,
-                    RefreshIndicator::new(refresh, list)
-                        .color(color)
-                        .into_widget(),
-                ));
+                    .children(vec![Text::new("X").into_widget()]);
+                pump(tester, RefreshIndicator::new(refresh, list).color(color));
 
+                // Corresponds to `K_DRAG_CONTAINER_EXTENT_PERCENTAGE`.
                 let metrics = waft_embedder::View::metrics(&**tester.view());
-                let max_position = metrics.physical_size[1] / metrics.device_pixel_ratio
-                    * K_DRAG_CONTAINER_EXTENT_PERCENTAGE;
+                let max_position = metrics.physical_size[1] / metrics.device_pixel_ratio * 0.25;
                 for position in POSITIONS {
                     tester.fling(find::text("X"), Offset::new(0.0, position), 1.0);
                     tester.pump();
-                    {
-                        let mut app = tester.cell.borrow_mut();
-                        controller.set_value(&mut app, position / max_position);
-                    }
-                    let value_color = tester
-                        .widget(
-                            find::by_type::<RefreshProgressIndicator>(),
-                            |indicator: &RefreshProgressIndicator| {
-                                indicator
-                                    .circular_progress_indicator
-                                    .progress_indicator
-                                    .value_color
-                                    .clone()
-                            },
-                        )
-                        .expect("the indicator has a value color");
-                    let actual = {
-                        let app = tester.cell.borrow();
-                        value_color.value(&app).expect("the value color resolves").a
-                    };
-                    let expected_alpha = {
-                        let app = tester.cell.borrow();
-                        expected.value(&app).expect("the tween resolves").a
-                    };
-                    assert_eq!(actual, expected_alpha, "at a drag of {position}");
+                    position_controller
+                        .set_value(&mut tester.cell.borrow_mut(), position / max_position);
+                    let actual = value_color_of_indicator(tester)
+                        .expect("the value color resolves")
+                        .alpha();
+                    let expected = value_color_animation
+                        .value(&tester.cell.borrow())
+                        .expect("the tween resolves")
+                        .alpha();
+                    assert_eq!(actual, expected, "{color:?} at a drag of {position}");
+                    // Wait until the fling finishes before starting the next fling.
                     tester.pump_and_settle();
                 }
-                controller.dispose(&mut tester.cell.borrow_mut());
+                position_controller.dispose(&mut tester.cell.borrow_mut());
             });
         }
+    }
+
+    #[test]
+    fn refresh_indicator_passes_the_default_elevation_through_correctly() {
+        test_widgets(|tester| {
+            let (refresh, _called) = refresh_called();
+            let list = ListView::new()
+                .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                .children(vec![Text::new("X").into_widget()]);
+            pump(tester, RefreshIndicator::new(refresh, list));
+
+            tester.fling(find::text("X"), Offset::new(0.0, 50.0), 1.0);
+            tester.pump();
+            assert_eq!(elevation_of_indicator(tester), 2.0);
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_passes_custom_elevation_values_through_correctly() {
+        test_widgets(|tester| {
+            for elevation in [0.0, 2.0] {
+                let (refresh, _called) = refresh_called();
+                let list = ListView::new()
+                    .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                    .children(vec![Text::new("X").into_widget()]);
+                pump(
+                    tester,
+                    RefreshIndicator::new(refresh, list).elevation(elevation),
+                );
+
+                tester.fling(find::text("X"), Offset::new(0.0, 50.0), 1.0);
+                tester.pump();
+                assert_eq!(elevation_of_indicator(tester), elevation);
+                tester.pump_and_settle();
+            }
+        });
+    }
+
+    #[test]
+    fn refresh_indicator_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            let (refresh, _called) = refresh_called();
+            let list = ListView::new()
+                .physics(Rc::new(AlwaysScrollableScrollPhysics::new()))
+                .children(vec![Text::new("X").into_widget()]);
+            let theme = ThemeData::builder().build(&tester.cell.borrow());
+            tester.pump_widget(material_app(
+                theme,
+                Center::new()
+                    .child(SizedBox::shrink().child(RefreshIndicator::new(refresh, list)))
+                    .into_widget(),
+            ));
+            assert_eq!(
+                tester.get_size(find::by_type::<RefreshIndicator>()),
+                Size::ZERO
+            );
+            let mut gesture = TestPointer::touch(tester.next_pointer());
+            let center = tester.get_center(find::by_type::<Center>());
+            tester.down(&mut gesture, center);
+            tester.move_by(&mut gesture, Offset::new(0.0, 20.0), true);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+        });
     }
 }
