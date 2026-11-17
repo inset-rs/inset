@@ -18,7 +18,7 @@ waft-scheduler.workspace = true
 waft-services.workspace = true
 
 [features]
-# flutter_test's fonts and the seams a test of a crate above needs.
+# flutter_test's fonts (`PaintingBinding::install_flutter_test_fonts`), for the tests of a crate above this one.
 test-support = ["waft-embedder/test-support"]
 
 [dev-dependencies]
