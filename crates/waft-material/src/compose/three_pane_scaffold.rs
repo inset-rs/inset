@@ -1,92 +1,34 @@
-//! The pane scaffold: up to three panes laid out and animated from a directive and a value.
+//! The pane scaffold: up to three panes laid out from a directive and a value, moving on
+//! Compose's pane spring when the value changes.
 
-use std::time::Duration;
+use std::rc::Rc;
 
-use waft_embedder::{Rect, Size, TextDirection};
-use waft_foundation::App;
-use waft_widgets::SizedBox;
+use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation};
+use waft_embedder::{Clip, Offset, Rect, Size};
+use waft_foundation::{App, Handle, Listenable, MergingListenable, Ref, ValueKey};
+use waft_painting::AlignmentGeometry;
+use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
-    AnimatedOpacity, AnimatedPositioned, BuildContext, Curves, Directionality, IgnorePointer,
-    IntoWidget, KeyRef, MediaQuery, Stack, StackFit, StatelessWidget, WidgetRef,
+    BuildContext, ClipRect, Directionality, IgnorePointer, IntoWidget, KeyRef, LayoutBuilder,
+    ListenableBuilder, Offstage, OverflowBox, Positioned, Stack, State, StateData, StatefulWidget,
+    TickerProviderStateMixin, TickerProviderStateMixinData, Transform, WidgetRef,
 };
 
+use crate::compose::pane_motion::{
+    PaneFrame, PaneMotion, PaneMotionData, PaneMotionDefaults, PaneMotionType,
+    ThreePaneScaffoldMotionData, calculate_pane_motion,
+};
 use crate::compose::{
-    Pane, PaneAdaptedValue, PaneScaffoldDirective, ThreePaneScaffoldRole, ThreePaneScaffoldValue,
+    Pane, PaneAdaptedValue, PaneScaffoldDirective, ThreePaneScaffoldHorizontalOrder,
+    ThreePaneScaffoldRole, ThreePaneScaffoldValue,
 };
 
-/// The length of a pane's bounds animation.
-const PANE_MOTION_DURATION: Duration = Duration::from_millis(300);
-
-/// Left to right, in left-to-right text; mirrored for right-to-left.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ThreePaneScaffoldHorizontalOrder {
-    first: ThreePaneScaffoldRole,
-    second: ThreePaneScaffoldRole,
-    third: ThreePaneScaffoldRole,
-}
-
-impl ThreePaneScaffoldHorizontalOrder {
-    /// The list-detail order: list, detail, extra.
-    pub const LIST_DETAIL: ThreePaneScaffoldHorizontalOrder = ThreePaneScaffoldHorizontalOrder {
-        first: ThreePaneScaffoldRole::Secondary,
-        second: ThreePaneScaffoldRole::Primary,
-        third: ThreePaneScaffoldRole::Tertiary,
-    };
-
-    /// The supporting-pane order: main, supporting, extra.
-    pub const SUPPORTING: ThreePaneScaffoldHorizontalOrder = ThreePaneScaffoldHorizontalOrder {
-        first: ThreePaneScaffoldRole::Primary,
-        second: ThreePaneScaffoldRole::Secondary,
-        third: ThreePaneScaffoldRole::Tertiary,
-    };
-
-    /// Creates an order; panics unless the three roles differ.
-    pub fn new(
-        first: ThreePaneScaffoldRole,
-        second: ThreePaneScaffoldRole,
-        third: ThreePaneScaffoldRole,
-    ) -> ThreePaneScaffoldHorizontalOrder {
-        assert!(
-            first != second && second != third && first != third,
-            "invalid ThreePaneScaffoldHorizontalOrder({first:?}, {second:?}, {third:?}) - panes \
-             must be unique"
-        );
-        ThreePaneScaffoldHorizontalOrder {
-            first,
-            second,
-            third,
-        }
-    }
-
-    /// The roles from start to end.
-    pub fn roles(self) -> [ThreePaneScaffoldRole; 3] {
-        [self.first, self.second, self.third]
-    }
-
-    /// The role at `index`, from the start.
-    pub fn get(self, index: usize) -> ThreePaneScaffoldRole {
-        self.roles()[index]
-    }
-
-    /// The index of `role` from the start, or `None` when it is not in the order.
-    pub fn index_of(self, role: ThreePaneScaffoldRole) -> Option<usize> {
-        self.roles().iter().position(|candidate| *candidate == role)
-    }
-
-    /// This order in left-to-right text: mirrored for a right-to-left direction.
-    pub fn to_ltr(self, text_direction: TextDirection) -> ThreePaneScaffoldHorizontalOrder {
-        if text_direction == TextDirection::Rtl {
-            ThreePaneScaffoldHorizontalOrder::new(self.third, self.second, self.first)
-        } else {
-            self
-        }
-    }
-}
-
-/// One widget lays out and animates the three panes.
+/// Up to three panes laid out from a directive and a value.
 ///
-/// `list_detail` and `supporting` differ only in pane order and slot names. A hidden pane stays
-/// mounted off-screen, so a list keeps its scroll position while the detail covers it.
+/// `list_detail` and `supporting` differ only in pane order and slot names. When the value
+/// changes, the panes move as Compose's do: shown panes move to their new bounds, and panes
+/// that appear or disappear slide in or out from the free side. A hidden pane stays mounted
+/// offstage, so a list keeps its scroll position while the detail covers it.
 #[derive(Debug)]
 pub struct ThreePaneScaffold {
     /// The scaffold's key.
@@ -106,7 +48,7 @@ pub struct ThreePaneScaffold {
 }
 
 impl ThreePaneScaffold {
-    /// Creates a pane scaffold; `new` takes the three panes' content and order explicitly.
+    /// Creates a pane scaffold with the panes in `pane_order`.
     pub fn new(
         directive: PaneScaffoldDirective,
         value: ThreePaneScaffoldValue,
@@ -178,145 +120,386 @@ impl ThreePaneScaffold {
     }
 }
 
-impl StatelessWidget for ThreePaneScaffold {
+impl StatefulWidget for ThreePaneScaffold {
+    type State = ThreePaneScaffoldState;
+
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
     }
 
-    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let size = MediaQuery::size_of(app, context);
-        let order = self.pane_order.to_ltr(Directionality::of(app, context));
-        let rects = layout_panes(self, size, order);
-
-        let mut children = Vec::with_capacity(3);
-        for (index, role) in order.roles().into_iter().enumerate() {
-            let Some(pane) = self.pane(role) else {
-                continue;
-            };
-            let shown = self.value.get(role) != PaneAdaptedValue::Hidden;
-            let rect = rects[index];
-            let opacity = if shown { 1.0 } else { 0.0 };
-            children.push(
-                AnimatedPositioned::from_rect(
-                    IgnorePointer::new()
-                        .ignoring(!shown)
-                        .child(
-                            AnimatedOpacity::new(opacity, PANE_MOTION_DURATION)
-                                .child(pane.child.clone()),
-                        )
-                        .into_widget(),
-                    rect,
-                    PANE_MOTION_DURATION,
-                )
-                .curve(Curves::fast_out_slow_in())
-                .into_widget(),
-            );
+    fn create_state(&self) -> ThreePaneScaffoldState {
+        ThreePaneScaffoldState {
+            state: StateData::new(),
+            ticker_provider: TickerProviderStateMixinData::new(),
+            motion: None,
+            delayed_motion: None,
+            motions: [PaneMotion::NoMotion; 3],
+            origins: [None; 3],
+            bounds: [None; 3],
+            scaffold_width: 0.0,
         }
-
-        SizedBox::expand()
-            .child(Stack::new().fit(StackFit::Expand).children(children))
-            .into_widget()
     }
 }
 
-/// The target rectangle of each pane in `order`, hidden panes off-screen.
-fn layout_panes(
+/// The springs a [`ThreePaneScaffold`] moves its panes on, and each pane's motion.
+///
+/// The arrays are indexed by role. `bounds` and `scaffold_width` are written on every layout:
+/// the bounds each pane was last laid out at, which a hidden pane keeps. A change of value reads
+/// them to start the next motion from where the panes are drawn.
+pub struct ThreePaneScaffoldState {
+    state: StateData<ThreePaneScaffold>,
+    ticker_provider: TickerProviderStateMixinData,
+    motion: Option<Ref<AnimationController>>,
+    delayed_motion: Option<Ref<AnimationController>>,
+    motions: [PaneMotion; 3],
+    origins: [Option<Rect>; 3],
+    bounds: [Option<Rect>; 3],
+    scaffold_width: f64,
+}
+
+impl ThreePaneScaffoldState {
+    fn motion(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+        app.get(self)
+            .motion
+            .as_ref()
+            .expect("created in init_state")
+            .handle()
+    }
+
+    fn delayed_motion(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+        app.get(self)
+            .delayed_motion
+            .as_ref()
+            .expect("created in init_state")
+            .handle()
+    }
+
+    /// Starts each pane's motion from where it is drawn now towards `current`.
+    fn start_motion(
+        self: Handle<Self>,
+        app: &mut App,
+        previous: &ThreePaneScaffoldValue,
+        current: &ThreePaneScaffoldValue,
+        ltr_order: ThreePaneScaffoldHorizontalOrder,
+    ) {
+        let origins = self.drawn_content_rects(app, ltr_order);
+        let motions = calculate_pane_motion(previous, current, ltr_order);
+        let state = app.get_mut(self);
+        for (index, role) in ltr_order.roles().into_iter().enumerate() {
+            state.motions[role.index()] = motions[index];
+            state.origins[role.index()] = origins[index];
+        }
+        let motion = self.motion(app);
+        let delayed_motion = self.delayed_motion(app);
+        motion.animate_with(app, Box::new(PaneMotionDefaults::simulation()));
+        delayed_motion.animate_with(app, Box::new(PaneMotionDefaults::delayed_simulation()));
+    }
+
+    /// Where each pane's content is drawn now, left to right; `None` before its first layout.
+    fn drawn_content_rects(
+        self: Handle<Self>,
+        app: &App,
+        ltr_order: ThreePaneScaffoldHorizontalOrder,
+    ) -> [Option<Rect>; 3] {
+        let scaffold_width = app.get(self).scaffold_width;
+        let motion_data = self.motion_data(app, ltr_order, scaffold_width, Rect::ZERO);
+        let (progress, delayed_progress) = self.progress(app);
+        std::array::from_fn(|index| {
+            app.get(self).bounds[ltr_order.get(index).index()].map(|_| {
+                motion_data
+                    .frame(index, progress, delayed_progress)
+                    .content_rect()
+            })
+        })
+    }
+
+    fn progress(self: Handle<Self>, app: &App) -> (f64, f64) {
+        (
+            self.motion(app).value(app),
+            self.delayed_motion(app).value(app),
+        )
+    }
+
+    /// Each pane's motion data, left to right; a pane never laid out uses `unplaced`.
+    fn motion_data(
+        self: Handle<Self>,
+        app: &App,
+        ltr_order: ThreePaneScaffoldHorizontalOrder,
+        scaffold_width: f64,
+        unplaced: Rect,
+    ) -> ThreePaneScaffoldMotionData {
+        let state = app.get(self);
+        ThreePaneScaffoldMotionData {
+            scaffold_width,
+            panes: ltr_order.roles().map(|role| {
+                let target = state.bounds[role.index()].unwrap_or(unplaced);
+                PaneMotionData {
+                    motion: state.motions[role.index()],
+                    origin: state.origins[role.index()].unwrap_or(target),
+                    target,
+                }
+            }),
+        }
+    }
+
+    /// Lays the panes out in `size` and draws each where its motion has got to.
+    fn build_panes(
+        self: Handle<Self>,
+        app: &mut App,
+        context: BuildContext,
+        size: Size,
+    ) -> WidgetRef {
+        let ltr_order = self
+            .widget(app)
+            .pane_order
+            .to_ltr(Directionality::of(app, context));
+        self.lay_out(app, size, ltr_order);
+        let unplaced = Rect::from_ltwh(0.0, 0.0, size.width(), size.height());
+        let motion_data = self.motion_data(app, ltr_order, size.width(), unplaced);
+        let (progress, delayed_progress) = self.progress(app);
+        let settled =
+            !self.motion(app).is_animating(app) && !self.delayed_motion(app).is_animating(app);
+
+        let widget = self.widget(app);
+        let mut hidden = Vec::new();
+        let mut shown = Vec::new();
+        for (index, role) in ltr_order.roles().into_iter().enumerate() {
+            let Some(pane) = widget.pane(role) else {
+                continue;
+            };
+            let is_shown = widget.value.get(role) != PaneAdaptedValue::Hidden;
+            let is_exiting =
+                motion_data.panes[index].motion.motion_type() == PaneMotionType::Exiting;
+            let drawn = drawn_pane(
+                role,
+                pane.child.clone(),
+                motion_data.frame(index, progress, delayed_progress),
+                is_shown,
+                !is_shown && (settled || !is_exiting),
+            );
+            if is_shown {
+                shown.push(drawn);
+            } else {
+                hidden.push(drawn);
+            }
+        }
+        // Panes on their way out are drawn under the shown ones, as Compose's hidden z-index.
+        hidden.extend(shown);
+        Stack::new().children(hidden).into_widget()
+    }
+
+    /// Records the bounds of the panes shown in `size`; a hidden pane keeps its last ones.
+    fn lay_out(
+        self: Handle<Self>,
+        app: &mut App,
+        size: Size,
+        ltr_order: ThreePaneScaffoldHorizontalOrder,
+    ) {
+        let targets = pane_bounds(self.widget(app), size, ltr_order);
+        let state = app.get_mut(self);
+        state.scaffold_width = size.width();
+        for (index, role) in ltr_order.roles().into_iter().enumerate() {
+            if let Some(target) = targets[index] {
+                state.bounds[role.index()] = Some(target);
+            }
+        }
+    }
+}
+
+/// One pane drawn at `frame`. Every pane keeps this shape in every frame, so its content keeps
+/// its element, and its state, through each motion.
+fn drawn_pane(
+    role: ThreePaneScaffoldRole,
+    child: WidgetRef,
+    frame: PaneFrame,
+    is_shown: bool,
+    offstage: bool,
+) -> WidgetRef {
+    let clip_behavior = if frame.clips {
+        Clip::HardEdge
+    } else {
+        Clip::None
+    };
+    let content = OverflowBox::new()
+        .alignment(AlignmentGeometry::CENTER)
+        .min_width(frame.content_width)
+        .max_width(frame.content_width)
+        .child(Transform::translate(Offset::new(frame.content_offset, 0.0)).child(child));
+    Positioned::from_rect(
+        frame.bounds,
+        Offstage::new().offstage(offstage).child(
+            IgnorePointer::new()
+                .ignoring(!is_shown)
+                .child(ClipRect::new().clip_behavior(clip_behavior).child(content)),
+        ),
+    )
+    .key(ValueKey::new(role).into())
+    .into_widget()
+}
+
+impl TickerProviderStateMixin for ThreePaneScaffoldState {
+    fn ticker_provider_data(self: Handle<Self>, app: &App) -> &TickerProviderStateMixinData {
+        &app.get(self).ticker_provider
+    }
+
+    fn ticker_provider_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut TickerProviderStateMixinData {
+        &mut app.get_mut(self).ticker_provider
+    }
+}
+
+impl TickerProviderObject for ThreePaneScaffoldState {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
+        TickerProviderStateMixin::create_ticker(self, app, on_tick)
+    }
+}
+
+impl State for ThreePaneScaffoldState {
+    type Widget = ThreePaneScaffold;
+    waft_widgets::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let motion = settled_controller(app, self);
+        let delayed_motion = settled_controller(app, self);
+        let state = app.get_mut(self);
+        state.motion = Some(motion);
+        state.delayed_motion = Some(delayed_motion);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        TickerProviderStateMixin::activate(self, app);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        self.motion(app).dispose(app);
+        self.delayed_motion(app).dispose(app);
+        TickerProviderStateMixin::dispose(self, app);
+    }
+
+    fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &ThreePaneScaffold) {
+        let widget = self.widget(app);
+        if widget.value == old_widget.value {
+            return;
+        }
+        let current = widget.value;
+        let pane_order = widget.pane_order;
+        let context = self.context(app);
+        let ltr_order = pane_order.to_ltr(Directionality::of(app, context));
+        self.start_motion(app, &old_widget.value, &current, ltr_order);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let state = app.get(self);
+        let springs: Vec<Option<Rc<dyn Listenable>>> = [&state.motion, &state.delayed_motion]
+            .into_iter()
+            .map(|controller| {
+                let controller = controller.as_ref().expect("created in init_state");
+                let animation: Rc<dyn Listenable> =
+                    Rc::new(controller.erase::<AnyAnimation<f64>>());
+                Some(animation)
+            })
+            .collect();
+        ListenableBuilder::new(
+            Rc::new(MergingListenable::new(springs)),
+            move |_app, _context, _child| {
+                LayoutBuilder::new(move |app, context, constraints| {
+                    self.build_panes(app, context, constraints.constraints().biggest())
+                })
+                .into_widget()
+            },
+        )
+        .into_widget()
+    }
+}
+
+/// A controller for the pane spring, at rest on its end; unbounded, since the spring overshoots.
+fn settled_controller(
+    app: &mut App,
+    vsync: Handle<ThreePaneScaffoldState>,
+) -> Ref<AnimationController> {
+    AnimationController::unbounded(app, 1.0, None, None, AnimationBehavior::Normal, vsync)
+}
+
+/// Compose's `ThreePaneContentMeasurePolicy` without hinges, levitated panes or pane expansion:
+/// the bounds of each shown pane, left to right.
+///
+/// Expanded panes take their preferred widths; the leftover goes to the one with the highest
+/// priority, and they all shrink in proportion when they do not fit. A reflowed pane takes the
+/// bottom of its anchor's partition, at most half.
+fn pane_bounds(
     scaffold: &ThreePaneScaffold,
     size: Size,
-    order: ThreePaneScaffoldHorizontalOrder,
-) -> [Rect; 3] {
-    let mut rects = [Rect::ZERO; 3];
-    let roles = order.roles();
-    let roles_with_panes: Vec<(usize, ThreePaneScaffoldRole)> = roles
+    ltr_order: ThreePaneScaffoldHorizontalOrder,
+) -> [Option<Rect>; 3] {
+    let mut bounds = [None; 3];
+    let directive = &scaffold.directive;
+    let panes: Vec<(usize, ThreePaneScaffoldRole, &Pane)> = ltr_order
+        .roles()
         .into_iter()
         .enumerate()
-        .filter(|(_, role)| scaffold.pane(*role).is_some())
+        .filter_map(|(index, role)| scaffold.pane(role).map(|pane| (index, role, pane)))
         .collect();
-
-    let expanded: Vec<(usize, ThreePaneScaffoldRole)> = roles_with_panes
+    let mut expanded: Vec<(usize, ThreePaneScaffoldRole, f64)> = panes
         .iter()
-        .copied()
-        .filter(|(_, role)| scaffold.value.get(*role) == PaneAdaptedValue::Expanded)
-        .collect();
-    let reflowed: Option<(ThreePaneScaffoldRole, ThreePaneScaffoldRole)> = roles_with_panes
-        .iter()
-        .find_map(|(_, role)| match scaffold.value.get(*role) {
-            PaneAdaptedValue::Reflowed { reflow_under } => Some((*role, reflow_under)),
-            _ => None,
-        });
-
-    let spacer = scaffold.directive.horizontal_partition_spacer_size;
-    let allocatable_width = size.width() - (expanded.len().saturating_sub(1)) as f64 * spacer;
-    let mut widths: Vec<f64> = expanded
-        .iter()
-        .map(|(_, role)| {
-            scaffold
-                .pane(*role)
-                .expect("the role has a pane")
-                .width_for(size, scaffold.directive.default_pane_preferred_width)
+        .filter(|(_, role, _)| scaffold.value.get(*role) == PaneAdaptedValue::Expanded)
+        .map(|(index, role, pane)| {
+            let width = pane.width_for(size, directive.default_pane_preferred_width);
+            (*index, *role, width)
         })
         .collect();
-    let total: f64 = widths.iter().sum();
-    if allocatable_width > total && !widths.is_empty() {
-        let winner = expanded
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, (_, role))| priority(*role))
-            .map(|(index, _)| index)
+    let reflowed = panes
+        .iter()
+        .find_map(|(index, role, pane)| match scaffold.value.get(*role) {
+            PaneAdaptedValue::Reflowed { reflow_under } => Some((*index, reflow_under, *pane)),
+            _ => None,
+        });
+    if expanded.is_empty() {
+        return bounds;
+    }
+
+    let spacer = directive.horizontal_partition_spacer_size;
+    let allocatable_width = size.width() - (expanded.len() - 1) as f64 * spacer;
+    let total_preferred_width: f64 = expanded.iter().map(|(_, _, width)| width).sum();
+    if allocatable_width > total_preferred_width {
+        let (_, _, width) = expanded
+            .iter_mut()
+            .max_by_key(|(_, role, _)| priority(*role))
             .expect("an expanded pane");
-        widths[winner] += allocatable_width - total;
-    } else if allocatable_width < total && total > 0.0 {
-        let scale = allocatable_width / total;
-        for width in &mut widths {
+        *width += allocatable_width - total_preferred_width;
+    } else if allocatable_width < total_preferred_width {
+        let scale = allocatable_width / total_preferred_width;
+        for (_, _, width) in &mut expanded {
             *width *= scale;
         }
     }
 
-    let vertical_spacer = scaffold.directive.vertical_partition_spacer_size;
-    let mut x = 0.0;
-    let mut expanded_index = 0;
-    for (order_index, role) in roles_with_panes {
-        match scaffold.value.get(role) {
-            PaneAdaptedValue::Expanded => {
-                let width = widths[expanded_index];
-                expanded_index += 1;
-                let mut height = size.height();
-                if let Some((reflow_role, anchor)) = reflowed
-                    && anchor == role
-                {
-                    let available = (size.height() - vertical_spacer).max(0.0);
-                    let reflow_height = scaffold
-                        .pane(reflow_role)
-                        .expect("the role has a pane")
-                        .height_for(size, scaffold.directive.default_pane_preferred_height)
-                        .min(available);
-                    height = (available - reflow_height).max(available / 2.0);
-                    rects[order.index_of(reflow_role).expect("in the order")] =
-                        Rect::from_ltwh(x, height + vertical_spacer, width, available - height);
-                }
-                rects[order_index] = Rect::from_ltwh(x, 0.0, width, height);
-                x += width + spacer;
-            }
-            PaneAdaptedValue::Hidden => {
-                let width = scaffold
-                    .pane(role)
-                    .expect("the role has a pane")
-                    .width_for(size, scaffold.directive.default_pane_preferred_width);
-                let left = if order_index == 0 {
-                    -width
-                } else if order_index + 1 == roles.len() {
-                    size.width()
-                } else {
-                    -width
-                };
-                rects[order_index] = Rect::from_ltwh(left, 0.0, width, size.height());
-            }
-            PaneAdaptedValue::Reflowed { .. } => {}
+    let vertical_spacer = directive.vertical_partition_spacer_size;
+    let mut left = 0.0;
+    for (index, role, width) in expanded {
+        let mut height = size.height();
+        if let Some((reflowed_index, reflow_under, reflowed_pane)) = reflowed
+            && reflow_under == role
+        {
+            let available_height = size.height() - vertical_spacer;
+            let preferred_height =
+                reflowed_pane.height_for(size, directive.default_pane_preferred_height);
+            height = (available_height - preferred_height).max(available_height / 2.0);
+            bounds[reflowed_index] = Some(Rect::from_ltwh(
+                left,
+                height + vertical_spacer,
+                width,
+                available_height - height,
+            ));
         }
+        bounds[index] = Some(Rect::from_ltwh(left, 0.0, width, height));
+        left += width + spacer;
     }
-    rects
+    bounds
 }
 
+/// Compose's `ThreePaneScaffoldDefaults` pane priorities.
 fn priority(role: ThreePaneScaffoldRole) -> u8 {
     match role {
         ThreePaneScaffoldRole::Primary => 10,
@@ -327,162 +510,164 @@ fn priority(role: ThreePaneScaffoldRole) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use waft_embedder::{Size, TextDirection};
     use waft_foundation::ValueKey;
+    use waft_painting::EdgeInsetsGeometry;
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
-    use waft_widgets::{Directionality, IntoWidget, MediaQuery, MediaQueryData, SizedBox};
+    use waft_widgets::{Directionality, Padding, SizedBox};
 
     use super::*;
     use crate::compose::{
-        ListDetailPaneScaffoldRole, PaneAdaptedValue, ThreePaneScaffoldValue,
+        PaneAdaptedValue, PanePreferredSize, SupportingPaneScaffoldRole, ThreePaneScaffoldValue,
         WindowHeightSizeClass, WindowSizeClass, WindowWidthSizeClass,
     };
 
-    fn size_class(width: WindowWidthSizeClass, height: WindowHeightSizeClass) -> WindowSizeClass {
-        WindowSizeClass { width, height }
+    fn directive(
+        width: WindowWidthSizeClass,
+        height: WindowHeightSizeClass,
+    ) -> PaneScaffoldDirective {
+        PaneScaffoldDirective::from_window_size_class(WindowSizeClass { width, height })
+    }
+
+    fn expanded_directive() -> PaneScaffoldDirective {
+        directive(
+            WindowWidthSizeClass::Expanded,
+            WindowHeightSizeClass::Expanded,
+        )
     }
 
     fn pane(key: i32) -> Pane {
         Pane::new(SizedBox::new().key(ValueKey::new(key).into()))
     }
 
+    fn pump_in(
+        tester: &mut WidgetTester,
+        text_direction: TextDirection,
+        width: f64,
+        height: f64,
+        scaffold: ThreePaneScaffold,
+    ) {
+        tester.set_surface_size(Some(Size::new(width, height)));
+        tester.pump_widget(Directionality::new(text_direction, scaffold).into_widget());
+    }
+
     fn pump(tester: &mut WidgetTester, width: f64, height: f64, scaffold: ThreePaneScaffold) {
-        tester.pump_widget(
-            MediaQuery::new(
-                MediaQueryData::new().size(Size::new(width, height)),
-                Directionality::new(TextDirection::Ltr, scaffold),
-            )
-            .into_widget(),
-        );
+        pump_in(tester, TextDirection::Ltr, width, height, scaffold);
     }
 
-    fn two_pane_value() -> ThreePaneScaffoldValue {
+    fn rect_of(tester: &WidgetTester, key: i32) -> Rect {
+        tester.get_rect(find::by_key(ValueKey::new(key)).skip_offstage(false))
+    }
+
+    fn value(
+        primary: PaneAdaptedValue,
+        secondary: PaneAdaptedValue,
+        tertiary: PaneAdaptedValue,
+    ) -> ThreePaneScaffoldValue {
         ThreePaneScaffoldValue {
-            primary: PaneAdaptedValue::Expanded,
-            secondary: PaneAdaptedValue::Expanded,
-            tertiary: PaneAdaptedValue::Hidden,
+            primary,
+            secondary,
+            tertiary,
         }
     }
 
-    fn one_primary_value() -> ThreePaneScaffoldValue {
-        ThreePaneScaffoldValue {
-            primary: PaneAdaptedValue::Expanded,
-            secondary: PaneAdaptedValue::Hidden,
-            tertiary: PaneAdaptedValue::Hidden,
-        }
+    fn list_and_detail() -> ThreePaneScaffoldValue {
+        value(
+            PaneAdaptedValue::Expanded,
+            PaneAdaptedValue::Expanded,
+            PaneAdaptedValue::Hidden,
+        )
+    }
+
+    fn list_and_extra() -> ThreePaneScaffoldValue {
+        value(
+            PaneAdaptedValue::Hidden,
+            PaneAdaptedValue::Expanded,
+            PaneAdaptedValue::Expanded,
+        )
+    }
+
+    fn list_detail_extra(value: ThreePaneScaffoldValue) -> ThreePaneScaffold {
+        ThreePaneScaffold::list_detail(expanded_directive(), value, pane(1), pane(2))
+            .tertiary_pane(pane(3))
     }
 
     #[test]
     fn a_wide_list_detail_places_the_list_beside_the_detail() {
         test_widgets(|tester| {
-            let directive = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Expanded,
-                WindowHeightSizeClass::Expanded,
-            ));
             pump(
                 tester,
                 1000.0,
                 600.0,
-                ThreePaneScaffold::list_detail(directive, two_pane_value(), pane(1), pane(2)),
+                ThreePaneScaffold::list_detail(
+                    expanded_directive(),
+                    list_and_detail(),
+                    pane(1),
+                    pane(2),
+                ),
             );
+            assert_eq!(rect_of(tester, 1), Rect::from_ltwh(0.0, 0.0, 360.0, 600.0));
             assert_eq!(
-                tester.get_rect(find::by_key(ValueKey::new(1))),
-                Rect::from_ltwh(0.0, 0.0, 360.0, 600.0)
-            );
-            assert_eq!(
-                tester.get_rect(find::by_key(ValueKey::new(2))),
+                rect_of(tester, 2),
                 Rect::from_ltwh(384.0, 0.0, 616.0, 600.0)
             );
         });
     }
 
     #[test]
-    fn a_phone_shows_only_the_detail_and_keeps_the_list_off_screen() {
+    fn the_panes_share_the_scaffold_s_own_width_not_the_window_s() {
         test_widgets(|tester| {
-            let directive = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Compact,
-                WindowHeightSizeClass::Medium,
-            ));
-            pump(
-                tester,
-                400.0,
-                600.0,
-                ThreePaneScaffold::list_detail(directive, one_primary_value(), pane(1), pane(2)),
+            let scaffold = ThreePaneScaffold::list_detail(
+                expanded_directive(),
+                list_and_detail(),
+                pane(1),
+                pane(2),
+            );
+            tester.set_surface_size(Some(Size::new(1000.0, 600.0)));
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Padding::new(EdgeInsetsGeometry::only(80.0, 0.0, 0.0, 0.0)).child(scaffold),
+                )
+                .into_widget(),
             );
             assert_eq!(
-                tester.get_rect(find::by_key(ValueKey::new(2))),
-                Rect::from_ltwh(0.0, 0.0, 400.0, 600.0)
+                rect_of(tester, 2),
+                Rect::from_ltwh(464.0, 0.0, 536.0, 600.0)
             );
-            assert!(tester.get_rect(find::by_key(ValueKey::new(1))).right <= 0.0);
         });
     }
 
     #[test]
     fn a_reflowed_pane_sits_under_its_anchor() {
         test_widgets(|tester| {
-            let directive = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Compact,
-                WindowHeightSizeClass::Expanded,
-            ));
-            let value = ThreePaneScaffoldValue {
-                primary: PaneAdaptedValue::Expanded,
-                secondary: PaneAdaptedValue::Reflowed {
-                    reflow_under: crate::compose::SupportingPaneScaffoldRole::MAIN,
+            let value = value(
+                PaneAdaptedValue::Expanded,
+                PaneAdaptedValue::Reflowed {
+                    reflow_under: SupportingPaneScaffoldRole::MAIN,
                 },
-                tertiary: PaneAdaptedValue::Hidden,
-            };
+                PaneAdaptedValue::Hidden,
+            );
             pump(
                 tester,
                 400.0,
                 800.0,
-                ThreePaneScaffold::supporting(directive, value, pane(1), pane(2)),
-            );
-            let main = tester.get_rect(find::by_key(ValueKey::new(1)));
-            let supporting = tester.get_rect(find::by_key(ValueKey::new(2)));
-            assert_eq!(main, Rect::from_ltwh(0.0, 0.0, 400.0, 388.0));
-            assert_eq!(supporting, Rect::from_ltwh(0.0, 412.0, 400.0, 388.0));
-        });
-    }
-
-    #[test]
-    fn a_pane_animates_from_its_old_bounds_to_its_new_ones() {
-        test_widgets(|tester| {
-            let narrow = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Compact,
-                WindowHeightSizeClass::Medium,
-            ));
-            pump(
-                tester,
-                400.0,
-                600.0,
-                ThreePaneScaffold::list_detail(
-                    narrow.clone(),
-                    one_primary_value(),
+                ThreePaneScaffold::supporting(
+                    directive(
+                        WindowWidthSizeClass::Compact,
+                        WindowHeightSizeClass::Expanded,
+                    ),
+                    value,
                     pane(1),
                     pane(2),
                 ),
             );
-            let wide = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Expanded,
-                WindowHeightSizeClass::Expanded,
-            ));
-            pump(
-                tester,
-                1000.0,
-                600.0,
-                ThreePaneScaffold::list_detail(wide, two_pane_value(), pane(1), pane(2)),
-            );
-            tester.pump_by(Duration::from_millis(150));
-            let halfway = tester.get_rect(find::by_key(ValueKey::new(2)));
-            assert!(
-                halfway.left > 0.0 && halfway.left < 384.0,
-                "the detail is on its way, at {}",
-                halfway.left
-            );
-            tester.pump_and_settle();
+            assert_eq!(rect_of(tester, 1), Rect::from_ltwh(0.0, 0.0, 400.0, 388.0));
             assert_eq!(
-                tester.get_rect(find::by_key(ValueKey::new(2))),
-                Rect::from_ltwh(384.0, 0.0, 616.0, 600.0)
+                rect_of(tester, 2),
+                Rect::from_ltwh(0.0, 412.0, 400.0, 388.0)
             );
         });
     }
@@ -490,119 +675,151 @@ mod tests {
     #[test]
     fn right_to_left_mirrors_the_panes() {
         test_widgets(|tester| {
-            let directive = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Expanded,
-                WindowHeightSizeClass::Expanded,
-            ));
-            tester.pump_widget(
-                MediaQuery::new(
-                    MediaQueryData::new().size(Size::new(1000.0, 600.0)),
-                    Directionality::new(
-                        TextDirection::Rtl,
-                        ThreePaneScaffold::list_detail(
-                            directive,
-                            two_pane_value(),
-                            pane(1),
-                            pane(2),
-                        ),
-                    ),
-                )
-                .into_widget(),
+            pump_in(
+                tester,
+                TextDirection::Rtl,
+                1000.0,
+                600.0,
+                ThreePaneScaffold::list_detail(
+                    expanded_directive(),
+                    list_and_detail(),
+                    pane(1),
+                    pane(2),
+                ),
             );
             assert_eq!(
-                tester.get_rect(find::by_key(ValueKey::new(1))),
+                rect_of(tester, 1),
                 Rect::from_ltwh(640.0, 0.0, 360.0, 600.0)
             );
-            assert_eq!(
-                tester.get_rect(find::by_key(ValueKey::new(2))),
-                Rect::from_ltwh(0.0, 0.0, 616.0, 600.0)
-            );
+            assert_eq!(rect_of(tester, 2), Rect::from_ltwh(0.0, 0.0, 616.0, 600.0));
         });
     }
 
     #[test]
     fn a_proportional_pane_takes_its_fraction_of_the_scaffold() {
         test_widgets(|tester| {
-            let directive = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Expanded,
-                WindowHeightSizeClass::Expanded,
-            ));
-            let list = pane(1).preferred_width(crate::compose::PanePreferredSize::Proportion(0.25));
+            let list = pane(1).preferred_width(PanePreferredSize::Proportion(0.25));
             pump(
                 tester,
                 1000.0,
                 600.0,
-                ThreePaneScaffold::list_detail(directive, two_pane_value(), list, pane(2)),
+                ThreePaneScaffold::list_detail(
+                    expanded_directive(),
+                    list_and_detail(),
+                    list,
+                    pane(2),
+                ),
             );
-            let list = tester.get_rect(find::by_key(ValueKey::new(1)));
-            assert_eq!(list.width(), 250.0);
-            assert_eq!(list.left, 0.0);
+            assert_eq!(rect_of(tester, 1), Rect::from_ltwh(0.0, 0.0, 250.0, 600.0));
         });
     }
 
     #[test]
     fn a_tertiary_pane_takes_the_third_partition() {
         test_widgets(|tester| {
-            let directive = PaneScaffoldDirective::from_window_size_class(size_class(
-                WindowWidthSizeClass::Large,
-                WindowHeightSizeClass::Expanded,
-            ));
-            let value = ThreePaneScaffoldValue {
-                primary: PaneAdaptedValue::Expanded,
-                secondary: PaneAdaptedValue::Expanded,
-                tertiary: PaneAdaptedValue::Expanded,
-            };
+            let all = value(
+                PaneAdaptedValue::Expanded,
+                PaneAdaptedValue::Expanded,
+                PaneAdaptedValue::Expanded,
+            );
             pump(
                 tester,
                 1400.0,
                 600.0,
-                ThreePaneScaffold::list_detail(directive, value, pane(1), pane(2))
-                    .tertiary_pane(pane(3)),
+                ThreePaneScaffold::list_detail(
+                    directive(WindowWidthSizeClass::Large, WindowHeightSizeClass::Expanded),
+                    all,
+                    pane(1),
+                    pane(2),
+                )
+                .tertiary_pane(pane(3)),
             );
-            let extra = tester.get_rect(find::by_key(ValueKey::new(3)));
-            assert_eq!(extra.left, 988.0);
-            assert_eq!(extra.width(), 412.0);
+            assert_eq!(
+                rect_of(tester, 3),
+                Rect::from_ltwh(988.0, 0.0, 412.0, 600.0)
+            );
         });
     }
 
     #[test]
-    fn a_pane_of_its_own_is_a_pane() {
-        let pane = Pane::from(SizedBox::new().into_widget());
-        assert_eq!(pane.preferred_width, None);
+    fn a_hidden_pane_stays_mounted_offstage() {
+        test_widgets(|tester| {
+            pump(tester, 1000.0, 600.0, list_detail_extra(list_and_detail()));
+            assert!(find::by_key(ValueKey::new(3)).evaluate(tester).is_empty());
+            assert_eq!(
+                find::by_key(ValueKey::new(3))
+                    .skip_offstage(false)
+                    .evaluate(tester)
+                    .len(),
+                1
+            );
+        });
     }
 
     #[test]
-    fn the_list_detail_order_is_list_then_detail() {
-        assert_eq!(
-            ThreePaneScaffoldHorizontalOrder::LIST_DETAIL.roles(),
-            [
-                ListDetailPaneScaffoldRole::LIST,
-                ListDetailPaneScaffoldRole::DETAIL,
-                ListDetailPaneScaffoldRole::EXTRA,
-            ]
-        );
-        assert_eq!(
-            ThreePaneScaffoldHorizontalOrder::LIST_DETAIL
-                .index_of(ListDetailPaneScaffoldRole::DETAIL),
-            Some(1)
-        );
-        assert_eq!(
-            ThreePaneScaffoldHorizontalOrder::LIST_DETAIL.to_ltr(TextDirection::Rtl),
-            ThreePaneScaffoldHorizontalOrder::new(
-                ListDetailPaneScaffoldRole::EXTRA,
-                ListDetailPaneScaffoldRole::DETAIL,
-                ListDetailPaneScaffoldRole::LIST,
-            )
-        );
+    fn a_pane_that_appears_slides_in_on_the_spring_and_the_one_it_replaces_slides_out() {
+        test_widgets(|tester| {
+            pump(tester, 1000.0, 600.0, list_detail_extra(list_and_detail()));
+            pump(tester, 1000.0, 600.0, list_detail_extra(list_and_extra()));
+
+            // The list, of higher priority, takes the leftover width; the detail and the extra
+            // pane are both drawn while they move.
+            let extra_bounds = Rect::from_ltwh(640.0, 0.0, 360.0, 600.0);
+            tester.pump_by(Duration::from_millis(50));
+            let extra_content = rect_of(tester, 3);
+            let detail_content = rect_of(tester, 2);
+            assert!(
+                extra_content.left > extra_bounds.left,
+                "the extra pane is still sliding in from the right, at {}",
+                extra_content.left
+            );
+            assert!(
+                detail_content.left > 384.0,
+                "the detail is sliding out to the right, at {}",
+                detail_content.left
+            );
+            assert!(!find::by_key(ValueKey::new(2)).evaluate(tester).is_empty());
+
+            tester.pump_and_settle();
+            assert_eq!(rect_of(tester, 1), Rect::from_ltwh(0.0, 0.0, 616.0, 600.0));
+            assert_eq!(rect_of(tester, 3), extra_bounds);
+            assert!(find::by_key(ValueKey::new(2)).evaluate(tester).is_empty());
+        });
     }
 
     #[test]
-    #[should_panic(expected = "panes must be unique")]
-    fn an_order_with_a_repeated_role_panics() {
-        let _ = ThreePaneScaffoldHorizontalOrder::new(
-            ListDetailPaneScaffoldRole::LIST,
-            ListDetailPaneScaffoldRole::DETAIL,
-            ListDetailPaneScaffoldRole::DETAIL,
-        );
+    fn a_shown_pane_moves_to_its_new_bounds_and_overshoots_on_the_way() {
+        test_widgets(|tester| {
+            let wide = list_and_detail();
+            let one = value(
+                PaneAdaptedValue::Expanded,
+                PaneAdaptedValue::Hidden,
+                PaneAdaptedValue::Hidden,
+            );
+            pump(
+                tester,
+                1000.0,
+                600.0,
+                ThreePaneScaffold::list_detail(expanded_directive(), wide, pane(1), pane(2)),
+            );
+            pump(
+                tester,
+                1000.0,
+                600.0,
+                ThreePaneScaffold::list_detail(expanded_directive(), one, pane(1), pane(2)),
+            );
+
+            let mut leftmost = f64::INFINITY;
+            for _ in 0..60 {
+                tester.pump_by(Duration::from_millis(16));
+                leftmost = leftmost.min(rect_of(tester, 2).left);
+            }
+            assert!(
+                leftmost < 0.0,
+                "a damping ratio of 0.8 overshoots, leftmost {leftmost}"
+            );
+            tester.pump_and_settle();
+            assert_eq!(rect_of(tester, 2), Rect::from_ltwh(0.0, 0.0, 1000.0, 600.0));
+        });
     }
 }
