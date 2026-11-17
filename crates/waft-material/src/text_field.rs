@@ -1917,6 +1917,14 @@ impl State for TextFieldState {
             }
         }
 
+        let effective_mouse_cursor = <dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(
+            &self
+                .widget(app)
+                .mouse_cursor
+                .clone()
+                .unwrap_or_else(|| WidgetStateMouseCursor::textable().into()),
+            &states,
+        );
         let widget = self.widget(app);
         let mut editable = EditableText::new(
             controller.clone(),
@@ -1926,6 +1934,7 @@ impl State for TextFieldState {
             CupertinoColors::INACTIVE_GRAY.color(),
         )
         .key(app.get(self).editable_text_key.clone().into())
+        .mouse_cursor(effective_mouse_cursor.clone())
         .read_only(widget.read_only || !self.is_enabled(app))
         .show_selection_handles(app.get(self).show_selection_handles)
         .keyboard_type(widget.effective_keyboard_type())
@@ -2092,15 +2101,6 @@ impl State for TextFieldState {
             .child(child)
             .into_widget();
         }
-        let effective_mouse_cursor = <dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(
-            &self
-                .widget(app)
-                .mouse_cursor
-                .clone()
-                .unwrap_or_else(|| WidgetStateMouseCursor::textable().into()),
-            &states,
-        );
-
         let max_length = self.widget(app).max_length;
         let semantics_max_value_length = match max_length {
             Some(max_length)
@@ -2330,16 +2330,19 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
-    use waft_embedder::{TextAffinity, TextPosition, TextRange};
+    use waft_embedder::{TextAffinity, TextBaseline, TextPosition, TextRange};
     use waft_painting::TextSpan;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{SystemMouseCursors, TextInputClient, TextInputFormatterRef};
     use waft_widgets::{
-        AnyElement, Builder, Center, Column, FocusScope, IntoWidget, MediaQueryData, Opacity,
-        Overlay, OverlayEntry, SizedBox, Text, TextEditingController, WidgetStates,
+        AnyElement, AnyFocusNode, Builder, Center, Column, FocusScope, IntoWidget, MediaQueryData,
+        Opacity, Overlay, OverlayEntry, SizedBox, Text, TextEditingController, WidgetStates,
     };
 
-    use waft_rendering::testing::{PaintCall, assert_more_or_less_equals_within, paints};
+    use waft_rendering::testing::{
+        CanvasMethod, PaintCall, assert_more_or_less_equals_within, count_calls, painted_ops,
+        paints,
+    };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::testing::{
         TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
@@ -2365,7 +2368,10 @@ mod tests {
 
     use waft_foundation::UniqueKey;
     use waft_test::{MockClipboard, TestPlatform};
-    use waft_widgets::{Container, IntrinsicHeight};
+    use waft_widgets::{
+        Container, CrossAxisAlignment, IntrinsicHeight, MainAxisAlignment, MainAxisSize, Row,
+        TickerMode,
+    };
     use waft_widgets::{FocusNodeLeaf, TextEditingControllerLeaf};
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
@@ -7990,6 +7996,406 @@ mod tests {
             tester.up(&pointer);
             tester.pump();
             assert!(selection_overlay_visibility(tester).1);
+        });
+    }
+
+    #[test]
+    fn when_is_dense_text_field_can_go_below_k_min_interactive_dimension_height() {
+        test_widgets(|tester| {
+            let root = material_app(
+                theme(tester),
+                Scaffold::new()
+                    .body(Center::new().child(
+                        TextField::new().decoration(Some(InputDecoration::new().is_dense(true))),
+                    ))
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert!(
+                tester.get_size(find::by_type::<TextField>()).height()
+                    < K_MIN_INTERACTIVE_DIMENSION
+            );
+        });
+    }
+
+    /// Dart's `buildTest`: a field in a `SliverFillRemaining` whose intrinsic height must match
+    /// its layout height.
+    fn sliver_intrinsics_case(tester: &mut WidgetTester, is_dense: bool) {
+        let root = material_app(
+            theme(tester),
+            Scaffold::new()
+                .body(
+                    waft_widgets::CustomScrollView::new()
+                        .slivers([waft_widgets::SliverFillRemaining::new()
+                            .has_scroll_body(false)
+                            .child(
+                                Column::new().children([
+                                    TextField::new()
+                                        .decoration(Some(InputDecoration::new().is_dense(is_dense)))
+                                        .into_widget(),
+                                    Container::new().height(1000.0).into_widget(),
+                                ]),
+                            )
+                            .into_widget()])
+                        .into_widget(),
+                )
+                .into_widget(),
+        );
+        tester.pump_widget(root);
+    }
+
+    #[test]
+    fn by_default_intrinsic_height_is_at_least_k_min_interactive_dimension_high() {
+        test_widgets(|tester| sliver_intrinsics_case(tester, false));
+    }
+
+    #[test]
+    fn when_is_dense_intrinsic_height_can_go_below_k_min_interactive_dimension_height() {
+        test_widgets(|tester| sliver_intrinsics_case(tester, true));
+    }
+
+    #[test]
+    fn cursor_blinking_respects_ticker_mode() {
+        test_widgets(|tester| {
+            let focus_node = {
+                let mut app = tester.cell.borrow_mut();
+                FocusNode::new(&mut app)
+            };
+            let builder = |tester: &WidgetTester, ticker_mode: bool| {
+                material_app(
+                    theme(tester),
+                    Material::new()
+                        .child(
+                            Center::new().child(TickerMode::new(
+                                ticker_mode,
+                                TextField::new()
+                                    .focus_node(focus_node.clone().into_erased::<AnyFocusNode>()),
+                            )),
+                        )
+                        .into_widget(),
+                )
+            };
+            tester.pump_widget(builder(tester, true));
+            tester.show_keyboard(find::by_type::<TextField>());
+            let state = editable_state(tester);
+            let editable = render_editable(tester);
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+
+            // With TickerMode off, the cursor does not blink.
+            tester.pump_widget(builder(tester, false));
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            for _ in 0..3 {
+                tester.pump_by(EditableTextState::cursor_blink_interval());
+                assert!(
+                    !*editable
+                        .show_cursor(&tester.cell.borrow())
+                        .value(&tester.cell.borrow())
+                );
+            }
+
+            // On again, it blinks.
+            tester.pump_widget(builder(tester, true));
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+
+            // Dismissing focus while off does not start it when on again.
+            tester.pump_widget(builder(tester, false));
+            focus_node.unfocus(
+                &mut tester.cell.borrow_mut(),
+                waft_widgets::UnfocusDisposition::Scope,
+            );
+            tester.pump();
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_widget(builder(tester, true));
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_by(EditableTextState::cursor_blink_interval());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+
+            // Focusing while off does not start it, but turning tickers on does.
+            tester.pump_widget(builder(tester, false));
+            tester.show_keyboard(find::by_type::<TextField>());
+            assert!(
+                !*editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+            tester.pump_widget(builder(tester, true));
+            assert!(
+                *editable
+                    .show_cursor(&tester.cell.borrow())
+                    .value(&tester.cell.borrow())
+            );
+        });
+    }
+
+    #[test]
+    fn text_field_does_not_crash_at_zero_area() {
+        test_widgets(|tester| {
+            tester.view().set_physical_size(waft_embedder::Size::ZERO);
+            let controller = controller_with(tester, "X");
+            let root = material_app(
+                theme(tester),
+                Scaffold::new()
+                    .body(Center::new().child(TextField::new().controller(controller.erase())))
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert_eq!(
+                tester.get_size(find::by_type::<TextField>()),
+                waft_embedder::Size::ZERO
+            );
+            controller.handle().set_selection(
+                &mut tester.cell.borrow_mut(),
+                TextSelection::collapsed(0, TextAffinity::Downstream),
+            );
+            tester.pump();
+        });
+    }
+
+    #[test]
+    fn entering_text_does_not_scroll_a_surrounding_page_view() {
+        test_widgets(|tester| {
+            let page_controller = {
+                let mut app = tester.cell.borrow_mut();
+                waft_widgets::PageController::new(&mut app, 1, true, 1.0, None, None)
+            };
+            let controller = controller_with(tester, "");
+            let root = material_app(
+                theme(tester),
+                Material::new()
+                    .child(
+                        waft_widgets::PageView::new()
+                            .controller(page_controller)
+                            .children([
+                                Container::new().color(Colors::RED).into_widget(),
+                                waft_widgets::ColoredBox::new(Colors::GREEN)
+                                    .child(TextField::new().controller(controller.erase()))
+                                    .into_widget(),
+                                Container::new().color(Colors::RED).into_widget(),
+                            ]),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            tester.show_keyboard(find::by_type::<EditableText>());
+            tester.pump_and_settle();
+            assert_eq!(text(tester, controller.handle()), "");
+            tester.test_text_input().enter_text("H");
+            let frames = tester.pump_and_settle();
+
+            // The text input must not trigger any animation, which would mean the PageView
+            // scrolled back and forth.
+            assert_eq!(frames, 1);
+            assert_eq!(text(tester, controller.handle()), "H");
+        });
+    }
+
+    #[test]
+    fn cursor_does_not_show_when_not_focused() {
+        test_widgets(|tester| {
+            let focus_node = {
+                let mut app = tester.cell.borrow_mut();
+                FocusNode::new(&mut app)
+            };
+            let root = material_app(
+                theme(tester),
+                Material::new()
+                    .child(
+                        TextField::new()
+                            .focus_node(focus_node.clone().erase())
+                            .autofocus(true),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            assert!(has_focus(tester, focus_node.clone().handle()));
+            let editable = render_editable(tester);
+
+            focus_node.unfocus(
+                &mut tester.cell.borrow_mut(),
+                waft_widgets::UnfocusDisposition::Scope,
+            );
+            tester.pump();
+            let caret_rects = |tester: &WidgetTester| {
+                let mut app = tester.cell.borrow_mut();
+                let ops = painted_ops(&mut app, editable.as_object());
+                count_calls(&ops, CanvasMethod::DrawRect)
+            };
+            assert_eq!(caret_rects(tester), 0);
+
+            focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
+            assert!(caret_rects(tester) > 0);
+        });
+    }
+
+    #[test]
+    fn arrow_keys_dont_move_input_focus() {
+        test_widgets(|tester| {
+            let (focus_node1, focus_node2, focus_node3, focus_node4, focus_node5) = {
+                let mut app = tester.cell.borrow_mut();
+                (
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                    FocusNode::new(&mut app),
+                )
+            };
+            let field = |controller: &Ref<TextEditingController>, focus_node: &Ref<FocusNode>| {
+                SizedBox::new().width(100.0).child(
+                    TextField::new()
+                        .controller(controller.clone().erase())
+                        .focus_node(focus_node.clone().into_erased::<AnyFocusNode>()),
+                )
+            };
+            let controller1 = controller_with(tester, "");
+            let controller2 = controller_with(tester, "");
+            let controller3 = controller_with(tester, "");
+            let controller4 = controller_with(tester, "");
+            let controller5 = controller_with(tester, "");
+            let root = material_app(
+                theme(tester),
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            Column::new()
+                                .main_axis_alignment(MainAxisAlignment::Center)
+                                .main_axis_size(MainAxisSize::Min)
+                                .children([
+                                    field(&controller1, &focus_node1).into_widget(),
+                                    Row::new()
+                                        .main_axis_alignment(MainAxisAlignment::Center)
+                                        .main_axis_size(MainAxisSize::Min)
+                                        .children([
+                                            field(&controller2, &focus_node2).into_widget(),
+                                            field(&controller3, &focus_node3).into_widget(),
+                                            field(&controller4, &focus_node4).into_widget(),
+                                        ])
+                                        .into_widget(),
+                                    field(&controller5, &focus_node5).into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            focus_node3.request_focus(&mut tester.cell.borrow_mut(), None);
+            tester.pump();
+            assert!(has_focus(tester, focus_node3.clone().handle()));
+
+            for (physical, logical) in [
+                (PhysicalKeyboardKey::ARROW_UP, LogicalKeyboardKey::ARROW_UP),
+                (
+                    PhysicalKeyboardKey::ARROW_DOWN,
+                    LogicalKeyboardKey::ARROW_DOWN,
+                ),
+                (
+                    PhysicalKeyboardKey::ARROW_LEFT,
+                    LogicalKeyboardKey::ARROW_LEFT,
+                ),
+                (
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                ),
+            ] {
+                tester.send_key_event(physical, logical);
+                tester.pump();
+                assert!(
+                    has_focus(tester, focus_node3.clone().handle()),
+                    "{logical:?}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn text_field_icons_change_mouse_cursor_when_hovered() {
+        test_widgets(|tester| {
+            let root = material_app(
+                theme(tester),
+                Material::new()
+                    .child(
+                        waft_widgets::MouseRegion::new()
+                            .cursor(SystemMouseCursors::FORBIDDEN.into())
+                            .child(
+                                TextField::new().decoration(Some(
+                                    InputDecoration::new()
+                                        .icon(waft_widgets::Icon::new(Some(Icons::label())))
+                                        .prefix_icon(waft_widgets::Icon::new(Some(Icons::cabin())))
+                                        .suffix_icon(waft_widgets::Icon::new(
+                                            Some(Icons::person()),
+                                        )),
+                                )),
+                            ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            let center = tester.get_center(find::by_type::<TextField>());
+            let icon_area = tester.get_center(find::by_icon(&Icons::label()));
+            let prefix_area = tester.get_center(find::by_icon(&Icons::cabin()));
+            let suffix_area = tester.get_center(find::by_icon(&Icons::person()));
+
+            let mut pointer = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut pointer, center);
+            tester.pump();
+            tester.move_to(&mut pointer, center, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
+            tester.move_to(&mut pointer, icon_area, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+            tester.move_to(&mut pointer, prefix_area, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
+            tester.move_to(&mut pointer, suffix_area, false);
+            assert_eq!(tester.active_cursor(1), SystemMouseCursors::BASIC.into());
         });
     }
 }
