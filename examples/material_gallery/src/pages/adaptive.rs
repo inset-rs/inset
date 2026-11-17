@@ -28,26 +28,47 @@ pub fn body(_app: &mut App, _context: BuildContext) -> WidgetRef {
 #[derive(Debug)]
 pub struct AdaptiveDemo;
 
+/// One entry of the inbox's own back stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InboxEntry {
+    /// The mail list.
+    List,
+    /// One opened mail.
+    Mail(u32),
+}
+
+impl InboxEntry {
+    /// The pane this entry fills.
+    fn pane(&self) -> Option<ThreePaneScaffoldDestinationItem<u32>> {
+        match *self {
+            InboxEntry::List => Some(ThreePaneScaffoldDestinationItem::new(
+                ListDetailPaneScaffoldRole::LIST,
+                None,
+            )),
+            InboxEntry::Mail(mail) => Some(ThreePaneScaffoldDestinationItem::new(
+                ListDetailPaneScaffoldRole::DETAIL,
+                Some(mail),
+            )),
+        }
+    }
+}
+
 /// Dart would spell this `_AdaptiveDemoState`.
 pub struct AdaptiveDemoState {
     state: StateData<AdaptiveDemo>,
     destination: usize,
-    /// The list, then each opened mail; every entry is a pane.
-    stack: Vec<Option<ThreePaneScaffoldDestinationItem<u32>>>,
+    /// The list, then each opened mail.
+    stack: Vec<InboxEntry>,
 }
 
 impl StatefulWidget for AdaptiveDemo {
     type State = AdaptiveDemoState;
 
     fn create_state(&self) -> AdaptiveDemoState {
-        let list = Some(ThreePaneScaffoldDestinationItem::new(
-            ListDetailPaneScaffoldRole::LIST,
-            None,
-        ));
         AdaptiveDemoState {
             state: StateData::new(),
             destination: 0,
-            stack: vec![list],
+            stack: vec![InboxEntry::List],
         }
     }
 }
@@ -86,20 +107,20 @@ fn inbox(self_: Handle<AdaptiveDemoState>, app: &mut App, context: BuildContext)
         PaneScaffoldDirective::from_window_size_class(WindowSizeClass::of(app, context)),
     );
     let stack = app.get(self_).stack.clone();
-    let directive = strategy.directive.clone();
     ThreePaneNavigator::new(
         strategy,
         stack,
-        move |app, context, index| match open_mail(app, self_, index) {
-            Some(mail) => mail_detail(mail).into_widget(),
-            None => mail_list(self_, app, context, None),
+        InboxEntry::pane,
+        move |app, context, index| match app.get(self_).stack[index] {
+            InboxEntry::Mail(mail) => mail_detail(mail).into_widget(),
+            InboxEntry::List => mail_list(self_, app, context, None),
         },
         move |app, context, scene| {
             let mail = scene
                 .entry_for(ListDetailPaneScaffoldRole::DETAIL)
                 .and_then(|index| open_mail(app, self_, index));
             ThreePaneScaffold::list_detail(
-                directive.clone(),
+                scene.directive.clone(),
                 scene.value,
                 Pane::new(mail_list(self_, app, context, mail))
                     .preferred_width(PanePreferredSize::Fixed(300.0)),
@@ -114,7 +135,10 @@ fn inbox(self_: Handle<AdaptiveDemoState>, app: &mut App, context: BuildContext)
 
 /// The mail `stack[index]` shows: `None` for the list.
 fn open_mail(app: &App, self_: Handle<AdaptiveDemoState>, index: usize) -> Option<u32> {
-    app.get(self_).stack[index].as_ref()?.content_key
+    match app.get(self_).stack[index] {
+        InboxEntry::Mail(mail) => Some(mail),
+        InboxEntry::List => None,
+    }
 }
 
 fn mail_list(
@@ -129,12 +153,7 @@ fn mail_list(
                 .title(Text::new(format!("Mail {mail}")))
                 .selected(selected == Some(mail))
                 .on_tap(Listener::new(move |app| {
-                    self_.set_state(app, |state| {
-                        state.stack.push(Some(ThreePaneScaffoldDestinationItem::new(
-                            ListDetailPaneScaffoldRole::DETAIL,
-                            Some(mail),
-                        )));
-                    });
+                    self_.set_state(app, |state| state.stack.push(InboxEntry::Mail(mail)));
                 }))
                 .into_widget()
         })))

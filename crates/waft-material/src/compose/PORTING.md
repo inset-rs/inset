@@ -40,7 +40,7 @@ Reasons are the porting skill's `language` and `platform`, plus `framework`: Com
 ## three_pane_navigator.rs → ThreePaneScaffoldNavigator.kt (replaced), Navigation 3's NavDisplay
 - Change: `ThreePaneNavigator` turns the app's back stack and a `ThreePaneSceneStrategy` into the pages of a nested Waft `Navigator`, behind a `NavigatorPopHandler`; there is no `ThreePaneScaffoldNavigator` and no pane history beside the app's navigation.
   Reason: framework — Flutter's Navigator 2.0 owns the page list and its back gestures, and the app owns the back stack.
-  Affect: an app supplies an entry-page builder, a scene-page builder and a callback that truncates its stack; a phone's detail is an ordinary pushed page with predictive back and the platform's swipe, and the system back reaches it first.
+  Affect: an app supplies its own entries, a function naming each entry's pane, an entry-page builder, a scene-page builder and a callback that truncates its stack; a phone's detail is an ordinary pushed page with predictive back and the platform's swipe, and the system back reaches it first.
 - Change: pages that a resize adds or removes, because the scene strategy changed while the back stack did not, come and go without a transition.
   Reason: framework — Navigation 3 swaps scenes in place, where a Flutter `Navigator` pushes and pops pages unless its `TransitionDelegate` says otherwise.
   Affect: crossing 840 swaps the detail's page for the shared page at once, instead of sliding it away.

@@ -26,6 +26,9 @@ pub type ThreePaneScenePageBuilder =
 /// Called with the length the back stack has after back, so the app truncates its stack.
 pub type ThreePaneBackStackTruncated = Rc<dyn Fn(&mut App, usize)>;
 
+/// Names the pane an app entry fills; `None` for an entry that is not a pane.
+pub type ThreePaneOf<E, K> = Rc<dyn Fn(&E) -> Option<ThreePaneScaffoldDestinationItem<K>>>;
+
 /// A [`Navigator`] whose pages follow an app's back stack, grouped by a [`ThreePaneSceneStrategy`].
 ///
 /// Each entry before the scene is a page of its own, and one page holds the scene. With no scene
@@ -38,15 +41,17 @@ pub type ThreePaneBackStackTruncated = Rc<dyn Fn(&mut App, usize)>;
 /// panes of the scene, reaches the app as the length its stack should be truncated to. The
 /// navigator is nested in the app's, so it takes the system back first, through a
 /// [`NavigatorPopHandler`], while it has a page to pop.
-pub struct ThreePaneNavigator<T: PartialEq + 'static> {
+pub struct ThreePaneNavigator<E: 'static, K: PartialEq + 'static> {
     /// The widget's key.
     pub key: Option<KeyRef>,
     /// The inner navigator's key; `None` uses one of the widget's own.
     pub navigator_key: Option<GlobalKey>,
     /// Which trailing entries share a page.
     pub strategy: ThreePaneSceneStrategy,
-    /// The app's back stack; `None` for an entry that is not a pane.
-    pub back_stack: Vec<Option<ThreePaneScaffoldDestinationItem<T>>>,
+    /// The app's own back stack.
+    pub back_stack: Vec<E>,
+    /// The pane each entry fills, or `None` for an entry that is not a pane.
+    pub pane_of: ThreePaneOf<E, K>,
     /// Builds the page of its own for an entry.
     pub entry_page: ThreePaneEntryPageBuilder,
     /// Builds the page that holds the scene.
@@ -55,21 +60,24 @@ pub struct ThreePaneNavigator<T: PartialEq + 'static> {
     pub on_back_stack_truncated: ThreePaneBackStackTruncated,
 }
 
-impl<T: PartialEq + 'static> ThreePaneNavigator<T> {
-    /// Creates a navigator over `back_stack`: `entry_page` builds an entry's own page,
+impl<E: 'static, K: PartialEq + 'static> ThreePaneNavigator<E, K> {
+    /// Creates a navigator over the app's `back_stack`: `pane_of` names the pane each entry
+    /// fills (`None` for an entry that is not a pane), `entry_page` builds an entry's own page,
     /// `scene_page` the page of the scene, and `on_back_stack_truncated` receives every back.
     pub fn new(
         strategy: ThreePaneSceneStrategy,
-        back_stack: Vec<Option<ThreePaneScaffoldDestinationItem<T>>>,
+        back_stack: Vec<E>,
+        pane_of: impl Fn(&E) -> Option<ThreePaneScaffoldDestinationItem<K>> + 'static,
         entry_page: impl Fn(&mut App, BuildContext, usize) -> WidgetRef + 'static,
         scene_page: impl Fn(&mut App, BuildContext, &ThreePaneScaffoldScene) -> WidgetRef + 'static,
         on_back_stack_truncated: impl Fn(&mut App, usize) + 'static,
-    ) -> ThreePaneNavigator<T> {
+    ) -> ThreePaneNavigator<E, K> {
         ThreePaneNavigator {
             key: None,
             navigator_key: None,
             strategy,
             back_stack,
+            pane_of: Rc::new(pane_of),
             entry_page: Rc::new(entry_page),
             scene_page: Rc::new(scene_page),
             on_back_stack_truncated: Rc::new(on_back_stack_truncated),
@@ -77,19 +85,27 @@ impl<T: PartialEq + 'static> ThreePaneNavigator<T> {
     }
 
     /// Sets the widget's key.
-    pub fn key(mut self, key: KeyRef) -> ThreePaneNavigator<T> {
+    pub fn key(mut self, key: KeyRef) -> ThreePaneNavigator<E, K> {
         self.key = Some(key);
         self
     }
 
     /// Sets the inner navigator's key.
-    pub fn navigator_key(mut self, navigator_key: GlobalKey) -> ThreePaneNavigator<T> {
+    pub fn navigator_key(mut self, navigator_key: GlobalKey) -> ThreePaneNavigator<E, K> {
         self.navigator_key = Some(navigator_key);
         self
     }
 
+    fn pane_stack(&self) -> Vec<Option<ThreePaneScaffoldDestinationItem<K>>> {
+        self.back_stack
+            .iter()
+            .map(|entry| (self.pane_of)(entry))
+            .collect()
+    }
+
     fn pages(&self, app: &mut App, context: BuildContext) -> Vec<PageRef> {
-        match self.strategy.calculate_scene(&self.back_stack) {
+        let pane_stack = self.pane_stack();
+        match self.strategy.calculate_scene(&pane_stack) {
             None => (0..self.back_stack.len())
                 .map(|index| self.build_entry_page(app, context, index))
                 .collect(),
@@ -142,7 +158,7 @@ fn first_entry_of(page: &PageRef) -> Option<usize> {
     page.name().and_then(|name| name.parse().ok())
 }
 
-impl<T: PartialEq + 'static> fmt::Debug for ThreePaneNavigator<T> {
+impl<E: 'static, K: PartialEq + 'static> fmt::Debug for ThreePaneNavigator<E, K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThreePaneNavigator")
             .field("key", &self.key)
@@ -152,14 +168,14 @@ impl<T: PartialEq + 'static> fmt::Debug for ThreePaneNavigator<T> {
     }
 }
 
-impl<T: PartialEq + 'static> StatefulWidget for ThreePaneNavigator<T> {
-    type State = ThreePaneNavigatorState<T>;
+impl<E: 'static, K: PartialEq + 'static> StatefulWidget for ThreePaneNavigator<E, K> {
+    type State = ThreePaneNavigatorState<E, K>;
 
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
     }
 
-    fn create_state(&self) -> ThreePaneNavigatorState<T> {
+    fn create_state(&self) -> ThreePaneNavigatorState<E, K> {
         ThreePaneNavigatorState {
             state: StateData::new(),
             own_navigator_key: GlobalKey::new(),
@@ -170,19 +186,19 @@ impl<T: PartialEq + 'static> StatefulWidget for ThreePaneNavigator<T> {
 
 /// The navigator's key, and the strategy of the last build: when it changes, the window
 /// regrouped the same entries.
-pub struct ThreePaneNavigatorState<T: PartialEq + 'static> {
-    state: StateData<ThreePaneNavigator<T>>,
+pub struct ThreePaneNavigatorState<E: 'static, K: PartialEq + 'static> {
+    state: StateData<ThreePaneNavigator<E, K>>,
     own_navigator_key: GlobalKey,
     last_strategy: Option<ThreePaneSceneStrategy>,
 }
 
-impl<T: PartialEq + 'static> State for ThreePaneNavigatorState<T> {
-    type Widget = ThreePaneNavigator<T>;
+impl<E: 'static, K: PartialEq + 'static> State for ThreePaneNavigatorState<E, K> {
+    type Widget = ThreePaneNavigator<E, K>;
     waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let widget_ref = context.widget(app).clone();
-        let widget = waft_widgets::downcast_widget::<ThreePaneNavigator<T>>(&*widget_ref)
+        let widget = waft_widgets::downcast_widget::<ThreePaneNavigator<E, K>>(&*widget_ref)
             .expect("a ThreePaneNavigatorState builds its ThreePaneNavigator");
         let regrouped = app.get(self).last_strategy.as_ref() != Some(&widget.strategy);
         app.get_mut(self).last_strategy = Some(widget.strategy.clone());
@@ -308,39 +324,59 @@ mod tests {
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
-    type Stack = Rc<RefCell<Vec<Option<ThreePaneScaffoldDestinationItem<i32>>>>>;
+    type Stack = Rc<RefCell<Vec<Entry>>>;
 
-    fn list() -> Option<ThreePaneScaffoldDestinationItem<i32>> {
-        Some(ThreePaneScaffoldDestinationItem::new(
-            ListDetailPaneScaffoldRole::LIST,
-            None,
-        ))
+    /// One entry of the test app's own back stack.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Entry {
+        Home,
+        List,
+        Detail(i32),
+        Extra,
     }
 
-    fn detail(mail: i32) -> Option<ThreePaneScaffoldDestinationItem<i32>> {
-        Some(ThreePaneScaffoldDestinationItem::new(
-            ListDetailPaneScaffoldRole::DETAIL,
-            Some(mail),
-        ))
+    impl Entry {
+        fn pane(&self) -> Option<ThreePaneScaffoldDestinationItem<i32>> {
+            match *self {
+                Entry::Home => None,
+                Entry::List => Some(ThreePaneScaffoldDestinationItem::new(
+                    ListDetailPaneScaffoldRole::LIST,
+                    None,
+                )),
+                Entry::Detail(mail) => Some(ThreePaneScaffoldDestinationItem::new(
+                    ListDetailPaneScaffoldRole::DETAIL,
+                    Some(mail),
+                )),
+                Entry::Extra => Some(ThreePaneScaffoldDestinationItem::new(
+                    ListDetailPaneScaffoldRole::EXTRA,
+                    Some(9),
+                )),
+            }
+        }
     }
 
-    fn extra() -> Option<ThreePaneScaffoldDestinationItem<i32>> {
-        Some(ThreePaneScaffoldDestinationItem::new(
-            ListDetailPaneScaffoldRole::EXTRA,
-            Some(9),
-        ))
+    fn list() -> Entry {
+        Entry::List
     }
 
-    fn home() -> Option<ThreePaneScaffoldDestinationItem<i32>> {
-        None
+    fn detail(mail: i32) -> Entry {
+        Entry::Detail(mail)
+    }
+
+    fn extra() -> Entry {
+        Entry::Extra
+    }
+
+    fn home() -> Entry {
+        Entry::Home
     }
 
     fn entry_widget(stack: &Stack, index: usize) -> WidgetRef {
-        let label = match stack.borrow()[index].as_ref().map(|item| item.pane) {
-            Some(ListDetailPaneScaffoldRole::LIST) => "entry list",
-            Some(ListDetailPaneScaffoldRole::DETAIL) => "entry detail",
-            Some(_) => "entry extra",
-            None => "entry home",
+        let label = match stack.borrow()[index] {
+            Entry::List => "entry list",
+            Entry::Detail(_) => "entry detail",
+            Entry::Extra => "entry extra",
+            Entry::Home => "entry home",
         };
         Text::new(label).into_widget()
     }
@@ -349,12 +385,9 @@ mod tests {
         Pane::new(Text::new(label))
     }
 
-    fn scene_widget(
-        strategy: &ThreePaneSceneStrategy,
-        scene: &ThreePaneScaffoldScene,
-    ) -> WidgetRef {
+    fn scene_widget(scene: &ThreePaneScaffoldScene) -> WidgetRef {
         let mut scaffold = ThreePaneScaffold::list_detail(
-            strategy.directive.clone(),
+            scene.directive.clone(),
             scene.value,
             pane_widget("list pane"),
             pane_widget("detail pane"),
@@ -373,12 +406,12 @@ mod tests {
             );
             let stack_for_pages = Rc::clone(&stack);
             let stack_for_truncate = Rc::clone(&stack);
-            let scene_strategy = strategy.clone();
             ThreePaneNavigator::new(
                 strategy,
                 stack.borrow().clone(),
+                Entry::pane,
                 move |_app, _context, index| entry_widget(&stack_for_pages, index),
-                move |_app, _context, scene| scene_widget(&scene_strategy, scene),
+                move |_app, _context, scene| scene_widget(scene),
                 move |app, len| {
                     stack_for_truncate.borrow_mut().truncate(len);
                     set_state(app, &mut |_app| {});
