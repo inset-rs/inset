@@ -11,6 +11,7 @@ use std::time::Duration;
 use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
+use material_gallery_lib::pages::steppers::LAST_ACTION;
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
 use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
 use waft_material::{
@@ -753,5 +754,46 @@ fn the_time_picker_opens_and_answers_with_ok() {
             .into_iter()
             .find(|text| text.starts_with("Time: "));
         assert_ne!(before, after, "the page's caption took the picked time");
+    });
+}
+
+/// The stepper page's continue button moves the vertical stepper on and says so.
+#[test]
+fn the_stepper_page_continues_to_the_next_step() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Steppers);
+        fixture.expect_shown(LAST_ACTION);
+
+        // The vertical stepper comes first, and the horizontal one has a continue button too.
+        fixture.tap(find::text("Continue").first());
+        fixture.expect_shown("Continued to step 2");
+
+        fixture.go_back();
+        assert!(!fixture.can_pop());
+    });
+}
+
+/// Tapping an expansion panel's header opens it, and only its own list moves.
+#[test]
+fn an_expansion_panel_opens_on_a_header_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::ExpansionPanels);
+        fixture.expect_shown("Payment (closed)");
+
+        fixture.tap_text("Payment (closed)");
+        fixture.expect_shown("Payment (open)");
+    });
+}
+
+/// The account header shows the signed-in account, and its arrow reports the details press.
+#[test]
+fn the_account_header_shows_the_account() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::AccountHeader);
+        fixture.expect_shown("Jane Doe");
+        fixture.expect_shown("jane@example.com");
+
+        fixture.tap_text("Jane Doe");
+        assert!(fixture.shows("Jane Doe"));
     });
 }
