@@ -10,7 +10,8 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-# Images and drawn pixels for tests, which need a GPU device to exist at all.
+# Images and drawn pixels for tests, which need a GPU device to exist at all, and flutter_test's
+# FlutterTest font (`TestFontSource`).
 test-support = ["dep:pollster"]
 # Serde's derives for the values a host gives a view and takes from it, for an app that sends them
 # between processes.

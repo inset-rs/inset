@@ -15,6 +15,7 @@ use waft_services::{TextBoundary, UntilPredicate};
 
 use crate::editable::RenderEditable;
 use crate::object::RenderHandle;
+use crate::paragraph::RenderParagraph;
 
 /// A [`TextBoundary`] subclass for locating closest line breaks to a given
 /// `position`.
@@ -59,9 +60,14 @@ impl TextBoundary for LineBoundary {
 #[derive(Clone)]
 pub struct WordBoundary {
     text: InlineSpanRef,
-    /// Dart holds the `ui.Paragraph`; a laid-out paragraph lives in the arena here, so the
-    /// render object that owns it answers the query instead.
-    paragraph: RenderHandle<RenderEditable>,
+    layout: WordBoundaryLayout,
+}
+
+/// The render object that owns the laid-out paragraph a [`WordBoundary`] asks.
+#[derive(Clone)]
+enum WordBoundaryLayout {
+    Editable(RenderHandle<RenderEditable>),
+    Paragraph(RenderHandle<RenderParagraph>),
 }
 
 impl WordBoundary {
@@ -70,7 +76,21 @@ impl WordBoundary {
         text: InlineSpanRef,
         paragraph: RenderHandle<RenderEditable>,
     ) -> WordBoundary {
-        WordBoundary { text, paragraph }
+        WordBoundary {
+            text,
+            layout: WordBoundaryLayout::Editable(paragraph),
+        }
+    }
+
+    /// Creates a [`WordBoundary`] over a [`RenderParagraph`]'s laid-out text.
+    pub(crate) fn for_paragraph(
+        text: InlineSpanRef,
+        paragraph: RenderHandle<RenderParagraph>,
+    ) -> WordBoundary {
+        WordBoundary {
+            text,
+            layout: WordBoundaryLayout::Paragraph(paragraph),
+        }
     }
 
     /// Returns a [`TextBoundary`] suitable for handling keyboard navigation
@@ -85,21 +105,36 @@ impl WordBoundary {
     /// skipped, to match the behavior of most platforms. Additional rules may be
     /// added in the future to better match platform behaviors.
     pub fn move_by_word_boundary(&self) -> Box<dyn TextBoundary> {
-        let text = Rc::clone(&self.text);
-        Box::new(UntilTextBoundary {
-            text_boundary: Box::new(self.clone()),
-            predicate: Rc::new(move |offset, forward| {
-                skip_spaces_and_punctuations(&text, offset, forward)
-            }),
-        })
+        move_by_word_boundary(self.text.clone(), Box::new(self.clone()))
     }
 }
 
 impl TextBoundary for WordBoundary {
     fn get_text_boundary_at(&self, app: &mut App, position: i32) -> TextRange {
-        self.paragraph
-            .get_word_boundary(app, TextPosition::new(position.max(0)))
+        match self.layout {
+            WordBoundaryLayout::Editable(paragraph) => {
+                paragraph.get_word_boundary(app, TextPosition::new(position.max(0)))
+            }
+            WordBoundaryLayout::Paragraph(paragraph) => {
+                paragraph.get_word_boundary(app, TextPosition::new(position.max(0)))
+            }
+        }
     }
+}
+
+/// Wraps `boundary` so it keeps searching past the breaks its predicate rejects: Dart's
+/// `_UntilTextBoundary`, which `move_by_word_boundary` builds.
+pub(crate) fn move_by_word_boundary(
+    text: InlineSpanRef,
+    boundary: Box<dyn TextBoundary>,
+) -> Box<dyn TextBoundary> {
+    let text = Rc::clone(&text);
+    Box::new(UntilTextBoundary {
+        text_boundary: boundary,
+        predicate: Rc::new(move |offset, forward| {
+            skip_spaces_and_punctuations(&text, offset, forward)
+        }),
+    })
 }
 
 /// Combines two UTF-16 code units (high surrogate + low surrogate) into a

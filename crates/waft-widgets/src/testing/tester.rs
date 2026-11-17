@@ -162,7 +162,7 @@ impl WidgetTester {
     fn install_flutter_test_fonts(&self) {
         let mut app = self.cell.borrow_mut();
         let binding = waft_painting::PaintingBinding::instance(&mut app);
-        binding.install_platform_fonts(&mut app);
+        binding.install_flutter_test_fonts(&mut app);
     }
 
     /// The platform the app runs on, for a case that changes what the host reports while it

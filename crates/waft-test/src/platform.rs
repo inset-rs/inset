@@ -767,6 +767,13 @@ mod tests {
     use super::TestPlatform;
 
     #[test]
+    fn the_test_platforms_fonts_are_flutter_test() {
+        let platform = TestPlatform::new();
+        let mut source = platform.font_source().expect("the test platform has fonts");
+        assert!(source.family("Roboto")[0].matches("FlutterTest"));
+    }
+
+    #[test]
     fn a_test_platform_briefly_shows_passwords_unless_told_not_to() {
         assert!(TestPlatform::new().briefly_show_password());
         assert!(

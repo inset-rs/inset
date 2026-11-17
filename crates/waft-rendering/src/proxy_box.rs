@@ -2881,7 +2881,7 @@ impl RenderLimitedBox {
             return;
         }
         self.get_mut(app).max_width = value;
-        self.mark_needs_layout(app);
+        RenderBox::mark_needs_layout(self, app);
     }
 
     /// The value to use for `max_height` if the incoming `max_height` constraint is infinite.
@@ -2896,7 +2896,7 @@ impl RenderLimitedBox {
             return;
         }
         self.get_mut(app).max_height = value;
-        self.mark_needs_layout(app);
+        RenderBox::mark_needs_layout(self, app);
     }
 
     /// Flutter's `_computeSize`.
@@ -3108,7 +3108,7 @@ impl RenderAspectRatio {
             return;
         }
         self.get_mut(app).aspect_ratio = value;
-        self.mark_needs_layout(app);
+        RenderBox::mark_needs_layout(self, app);
     }
 
     fn apply_aspect_ratio(
@@ -3387,7 +3387,7 @@ impl RenderIntrinsicWidth {
             return;
         }
         self.get_mut(app).step_width = value;
-        self.mark_needs_layout(app);
+        RenderBox::mark_needs_layout(self, app);
     }
 
     /// If non-null, force the child's height to be a multiple of this value.
@@ -3402,7 +3402,7 @@ impl RenderIntrinsicWidth {
             return;
         }
         self.get_mut(app).step_height = value;
-        self.mark_needs_layout(app);
+        RenderBox::mark_needs_layout(self, app);
     }
 
     fn child_constraints(
@@ -6556,7 +6556,7 @@ impl RenderFittedBox {
         }
         self.get_mut(app).fit = value;
         if fit_affects_layout(last_fit) || fit_affects_layout(value) {
-            self.mark_needs_layout(app);
+            RenderBox::mark_needs_layout(self, app);
         } else {
             self.clear_paint_data(app);
             self.mark_needs_paint(app);

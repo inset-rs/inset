@@ -1177,7 +1177,7 @@ impl RenderInputPadding {
             return;
         }
         self.get_mut(app).min_size = value;
-        self.mark_needs_layout(app);
+        RenderBox::mark_needs_layout(self, app);
     }
 
     fn compute_size(
