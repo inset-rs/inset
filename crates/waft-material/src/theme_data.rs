@@ -25,6 +25,8 @@ use crate::badge_theme::BadgeThemeData;
 use crate::banner_theme::MaterialBannerThemeData;
 use crate::bottom_navigation_bar_theme::BottomNavigationBarThemeData;
 use crate::bottom_sheet_theme::BottomSheetThemeData;
+#[allow(deprecated)]
+use crate::button_bar_theme::ButtonBarThemeData;
 use crate::button_theme::ButtonThemeData;
 use crate::card_theme::CardThemeData;
 use crate::carousel_theme::CarouselViewThemeData;
@@ -736,6 +738,12 @@ pub struct ThemeData {
     pub tooltip_theme: TooltipThemeData,
 
     // DEPRECATED (newest deprecations at the bottom)
+    /// A theme for customizing the appearance and layout of `ButtonBar` widgets.
+    #[deprecated(
+        note = "Use OverflowBar instead. This feature was deprecated after v3.21.0-10.0.pre."
+    )]
+    #[allow(deprecated)]
+    pub button_bar_theme: ButtonBarThemeData,
     /// The background color of `Dialog` elements.
     #[deprecated(
         note = "Use DialogThemeData.backgroundColor instead. This feature was deprecated after v3.27.0-0.1.pre."
@@ -1338,6 +1346,12 @@ impl ThemeData {
             )
             .expect("both sides"),
             // DEPRECATED (newest deprecations at the bottom)
+            button_bar_theme: ButtonBarThemeData::lerp(
+                Some(&a.button_bar_theme),
+                Some(&b.button_bar_theme),
+                t,
+            )
+            .expect("both sides"),
             dialog_background_color: color(a.dialog_background_color, b.dialog_background_color),
             indicator_color: color(a.indicator_color, b.indicator_color),
         }
@@ -1446,6 +1460,7 @@ impl PartialEq for ThemeData {
             && other.toggle_buttons_theme == self.toggle_buttons_theme
             && other.tooltip_theme == self.tooltip_theme
             // DEPRECATED (newest deprecations at the bottom)
+            && other.button_bar_theme == self.button_bar_theme
             && other.dialog_background_color == self.dialog_background_color
             && other.indicator_color == self.indicator_color
     }
@@ -1554,6 +1569,8 @@ pub struct ThemeDataBuilder {
     toggle_buttons_theme: Option<Box<ToggleButtonsThemeData>>,
     tooltip_theme: Option<Box<TooltipThemeData>>,
     // DEPRECATED (newest deprecations at the bottom)
+    #[allow(deprecated)]
+    button_bar_theme: Option<Box<ButtonBarThemeData>>,
     dialog_background_color: Option<Color>,
     indicator_color: Option<Color>,
 }
@@ -2146,6 +2163,16 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(buttonBarTheme:)`.
+    #[deprecated(
+        note = "Use OverflowBar instead. This feature was deprecated after v3.21.0-10.0.pre."
+    )]
+    #[allow(deprecated)]
+    pub fn button_bar_theme(mut self, button_bar_theme: ButtonBarThemeData) -> ThemeDataBuilder {
+        self.button_bar_theme = Some(Box::new(button_bar_theme));
+        self
+    }
+
     /// Dart `ThemeData(dialogBackgroundColor:)`.
     #[deprecated(
         note = "Use DialogThemeData.backgroundColor instead. This feature was deprecated after v3.27.0-0.1.pre."
@@ -2255,6 +2282,7 @@ impl ThemeDataBuilder {
             time_picker_theme,
             toggle_buttons_theme,
             tooltip_theme,
+            button_bar_theme,
             mut dialog_background_color,
             mut indicator_color,
         } = self;
@@ -2572,6 +2600,7 @@ impl ThemeDataBuilder {
         });
 
         // DEPRECATED (newest deprecations at the bottom)
+        let button_bar_theme = unboxed_or_default(button_bar_theme);
         let dialog_background_color = dialog_background_color.unwrap_or_else(|| {
             if is_dark {
                 Colors::GREY.shade800()
@@ -2676,6 +2705,7 @@ impl ThemeDataBuilder {
             toggle_buttons_theme: unboxed_or_default(toggle_buttons_theme),
             tooltip_theme: unboxed_or_default(tooltip_theme),
             // DEPRECATED (newest deprecations at the bottom)
+            button_bar_theme,
             dialog_background_color,
             indicator_color,
         }
@@ -3338,6 +3368,16 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(buttonBarTheme:)`.
+    #[deprecated(
+        note = "Use OverflowBar instead. This feature was deprecated after v3.21.0-10.0.pre."
+    )]
+    #[allow(deprecated)]
+    pub fn button_bar_theme(mut self, button_bar_theme: ButtonBarThemeData) -> ThemeDataCopyWith {
+        self.theme.button_bar_theme = button_bar_theme;
+        self
+    }
+
     /// Dart `copyWith(dialogBackgroundColor:)`.
     #[deprecated(
         note = "Use DialogThemeData.backgroundColor instead. This feature was deprecated after v3.27.0-0.1.pre."
@@ -3876,6 +3916,7 @@ mod tests {
 
     use waft_painting::TextStyle;
 
+    use waft_widgets::MainAxisAlignment;
     use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
@@ -5231,6 +5272,7 @@ mod tests {
                 .text_style(TextStyle::new().color(Colors::BLACK)),
             tooltip_theme: TooltipThemeData::new().height(100.0),
             // DEPRECATED (newest deprecations at the bottom)
+            button_bar_theme: ButtonBarThemeData::new().with_alignment(MainAxisAlignment::Start),
             dialog_background_color: Colors::BLACK,
             indicator_color: Colors::BLACK,
         })
@@ -5358,6 +5400,7 @@ mod tests {
                 .text_style(TextStyle::new().color(Colors::WHITE)),
             tooltip_theme: TooltipThemeData::new().height(100.0),
             // DEPRECATED (newest deprecations at the bottom)
+            button_bar_theme: ButtonBarThemeData::new().with_alignment(MainAxisAlignment::End),
             dialog_background_color: Colors::WHITE,
             indicator_color: Colors::WHITE,
         })
@@ -5455,6 +5498,7 @@ mod tests {
             .toggle_buttons_theme(other_theme.toggle_buttons_theme.clone())
             .tooltip_theme(other_theme.tooltip_theme.clone())
             // DEPRECATED (newest deprecations at the bottom)
+            .button_bar_theme(other_theme.button_bar_theme.clone())
             .dialog_background_color(other_theme.dialog_background_color)
             .indicator_color(other_theme.indicator_color)
             .build();
@@ -5690,6 +5734,10 @@ mod tests {
             );
             assert_eq!(theme_data_copy.tooltip_theme, other_theme.tooltip_theme);
             // DEPRECATED (newest deprecations at the bottom)
+            assert_eq!(
+                theme_data_copy.button_bar_theme,
+                other_theme.button_bar_theme
+            );
             assert_eq!(
                 theme_data_copy.dialog_background_color,
                 other_theme.dialog_background_color

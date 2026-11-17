@@ -11,6 +11,7 @@ use std::time::Duration;
 use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
+use material_gallery_lib::pages::steppers::LAST_ACTION;
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
 use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
 use waft_material::{
@@ -924,5 +925,43 @@ fn a_carousel_item_reports_its_tap() {
             "the first carousel reported item 1; saw {:?}",
             fixture.texts()
         );
+    });
+}
+
+/// The stepper page's continue button moves the vertical stepper on and says so.
+#[test]
+fn the_stepper_page_continues_to_the_next_step() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Steppers);
+        fixture.expect_shown(LAST_ACTION);
+
+        // The vertical stepper comes first, and the horizontal one has a continue button too.
+        fixture.tap(find::text("Continue").first());
+        fixture.expect_shown("Continued to step 2");
+
+        fixture.go_back();
+        assert!(!fixture.can_pop());
+    });
+}
+
+/// Tapping an expansion panel's header opens it.
+#[test]
+fn an_expansion_panel_opens_on_a_header_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::ExpansionPanels);
+        fixture.expect_shown("Payment (closed)");
+
+        fixture.tap_text("Payment (closed)");
+        fixture.expect_shown("Payment (open)");
+    });
+}
+
+/// The account header shows the signed-in account's name and email.
+#[test]
+fn the_account_header_shows_the_account() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::AccountHeader);
+        fixture.expect_shown("Jane Doe");
+        fixture.expect_shown("jane@example.com");
     });
 }

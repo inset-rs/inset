@@ -53,6 +53,13 @@ Ported against: 34b89b2086d4
 - generated/divider_defaults_m3.rs → generated/divider_defaults_m3.g.dart
 - divider_theme.rs → divider_theme.dart
 - drawer_header.rs → drawer_header.dart
+- grid_tile.rs → grid_tile.dart
+- grid_tile_bar.rs → grid_tile_bar.dart
+- user_accounts_drawer_header.rs → user_accounts_drawer_header.dart
+- refresh_indicator.rs → refresh_indicator.dart
+- button_bar.rs → button_bar.dart
+- button_bar_theme.rs → button_bar_theme.dart
+- material_button.rs → material_button.dart
 - drawer.rs → drawer.dart
 - generated/drawer_defaults_m3.rs → generated/drawer_defaults_m3.g.dart
 - generated/navigation_drawer_defaults_m3.rs → generated/navigation_drawer_defaults_m3.g.dart
@@ -644,6 +651,31 @@ Ported against: 34b89b2086d4
   Reason: language — Rust generics are invariant, where Dart's property of a colour is also a property of an optional colour.
   Affect: a caller resolves to an optional value where Dart passes the property itself.
 
+## mergeable_material.rs → mergeable_material.dart
+- Change: a mergeable material's item is one of two kinds, a slice or a gap, and an app wraps each slice or gap in its kind before handing it over.
+  Reason: language — Rust has no subclassing, and Dart's two subclasses are the only kinds the widget handles, so the abstract base becomes a closed set of two.
+  Affect: an item list names each item's kind, or converts a slice or gap into an item, where Dart lists the slices and gaps as they are.
+
+- Change: the update loop stops at the end of the new children, where Dart's `while (newOnly.contains(newChildren[i].key))` reads one past the last new child.
+  Reason: language — Rust's index is bounds-checked where Dart's throws a `RangeError`, and that read is a crash rather than behaviour to keep.
+  Affect: replacing the last child with one whose key is new updates the list where Dart throws.
+
+## refresh_indicator.rs → refresh_indicator.dart
+
+- Change: a refresh indicator's status callback can be set on any constructor, where Dart declares it on the `noSpinner` constructor alone.
+  Reason: language — Rust constructors are associated functions over one shared struct, so no one of them can own a field.
+  Affect: a default or adaptive indicator reports its status changes where Dart's cannot be asked to.
+
+## expansion_panel.rs → expansion_panel.dart
+- Change: a radio panel holds the plain panel it extends, beside its value, and the radio list takes its panels through its own constructor only.
+  Reason: language — Rust has no subclassing, so the radio panel cannot be a plain panel that the list's children accept.
+  Affect: a radio panel is not a plain panel to a caller, and a radio list is built with all its panels at once rather than given children afterwards.
+
+## stepper.rs → stepper.dart
+- Change: the rule that a stepper's step icon height and width are given together and are equal is checked when the stepper first builds, not when it is made.
+  Reason: language — the two values arrive in separate setter calls, where Dart's constructor takes them together.
+  Affect: a mismatched pair fails in a debug build at the stepper's first build rather than at the call that made it.
+
 ## Deferred
 - reorderable_list.rs: reorderable_list_test 'Vertical drag in progress golden image' and 'Horizontal drag in progress golden image'. Trigger: golden comparison in waft-test.
 - reorderable_list.rs: reorderable_list_test "Doesn't hide accessibility when a child declares its own semantics" (reads the semantics tree of a `SwitchListTile` item). Trigger: the semantics tree.
@@ -719,8 +751,7 @@ Ported against: 34b89b2086d4
 - ink_well.rs: `InkResponse(onDoubleTap:)` reaching the gesture detector (the field and `handleDoubleTap` exist; a double tap never fires). Trigger: `DoubleTapGestureRecognizer` (waft-widgets gesture_detector deferral).
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
-- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, button_bar_theme. Trigger: each one's `*_theme.dart`, with its component.
-- button_theme.rs: `ButtonThemeData`'s methods that take a `MaterialButton` (`getBrightness`, `getTextTheme`, `getDisabledTextColor`, `getDisabledFillColor`, `getFillColor`, `getTextColor`, `getSplashColor`, `getFocusColor`, `getHoverColor`, `getHighlightColor`, the five elevation getters, `getPadding`, `getShape`, `getAnimationDuration`, `getConstraints`, `getMaterialTapTargetSize`). Trigger: material_button.dart.
+- theme_data.rs: the component theme field bottom_app_bar_theme, with its factory and `copyWith` argument and its `lerp` and `==` branches. Trigger: `bottom_app_bar_theme.dart`, with its component.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
 - `ColorScheme.fromImageProvider` with `_extractColorsFromImageProvider`, `_imageProviderToScaled` and `_getArgbFromAbgr`. Trigger: reading an image's pixels back (`Image.toByteData`, deferred in waft-embedder) and `Picture.toImage`.
@@ -768,10 +799,17 @@ Ported against: 34b89b2086d4
 - time_picker.rs tests: the two 'TimePicker dialog displays centered separator between hour and minute selectors' golden cases. Trigger: golden comparison in waft-test.
 - time_picker.rs tests: 'TAB key selects text in hour and minute fields on the web', whose behaviour (`_HourMinuteTextFieldState`'s select-all on focus under `kIsWeb`) is ported. Trigger: a waft-material test run on the web target.
 - tests of about 40 files: element-based lookups remain, `tester.descendants_of_type`, `ancestor_of_type`, `ancestors`, `render_box_of`, `is_onstage` and `global_rect` on an `AnyElement` (about 120, 190, 30 and 10 sites; 54 `render_box_of` sites in dropdown.rs), because `find::descendant` and `find::ancestor` take a `Finder` and there is no finder from an element. They move to Dart's finders (`find::descendant(of:)`, `find::ancestor(of:)`, `tester.render_object(finder)`), not to a finder from an element, which flutter_test has none of. Trigger: the next edit of each file.
-- tests: `PaintCall::Clip` has no path matcher, so `navigation_bar::paints_indicator_ripple` and `navigation_rail::paints_indicator_highlight` read the clip path raw; `PaintCall::Paragraph` has no offset, so switch.rs's 'Switch can set icon - M3' reads the glyph runs' origins. Trigger: a path matcher on `Clip` and an offset on `Paragraph` in waft-rendering's testing.
+- tests: `PaintCall::Clip` has no path matcher, so `navigation_bar::paints_indicator_ripple` and `navigation_rail::paints_indicator_highlight` read the clip path raw, and material_button.rs's 'MaterialButton with explicit splashColor and highlightColor' matches the clip without its path; `PaintCall::Paragraph` has no offset, so switch.rs's 'Switch can set icon - M3' reads the glyph runs' origins. Trigger: a path matcher on `Clip` and an offset on `Paragraph` in waft-rendering's testing.
+- paginated_data_table.rs tests: the RenderFlex overflow exception Dart expects in 'PaginatedDataTable control test' (the test forces a 600-pixel column); Waft reports none, having no `tester.takeException`. Trigger: `FlutterError.reportError`.
+- material_button.rs tests: 'Default MaterialButton meets a11y contrast guidelines', which runs Flutter's `textContrastGuideline`. Trigger: accessibility guidelines in the harness.
+- material_button.rs tests: 'Disabled MaterialButton has same semantic size as enabled and exposes disabled semantics'. Trigger: the semantics tree.
+- expansion_panel.rs tests: the five semantics cases (the Material 2 and Material 3 'does not merge header when canTapOnHeader is false' and 'Panel header has semantics, canTapOnHeader = false', and 'Panel header has semantics, canTapOnHeader = true'). Trigger: the semantics tree.
+- refresh_indicator.rs tests: the semantics label checks of 'RefreshIndicator' and 'RefreshIndicator.adaptive'; the rest of both cases is ported. Trigger: the semantics tree.
+- user_accounts_drawer_header.rs tests: the three semantics cases ('UserAccountsDrawerHeader provides semantics', '… with missing properties', and 'alternative account selectors have sufficient tap targets'). Trigger: the semantics tree.
 
 ## Skipped
 
+- about.dart, the licence page and the licence registry: the about dialog and about list tile exist to reach the licence page, which gains a Waft app nothing, so they are left out.
 - segmented_button.rs: the second segment's path of segmented_button_test's 'SegmentedButton clips border path when drawing segments', and 'SegmentedButton.styleFrom with transparent overlayColor', whose hovered and pressed overlay paints a rect: calls drawn at alpha 0, with no visible effect, that the display list drops; each segment's save and clip and the first segment's fill are ported.
 - toggle_buttons.rs: the `paints..path()` physical-model call of an unselected or disabled button, drawn at fill alpha 0, a draw with no visible effect that the display list drops; the border-path cases assert it for a selected button.
 - range_slider.rs: the zero-width inactive track rrects of range_slider_test's 'RangeSlider.padding can override the default RangeSlider padding', and of slider_theme_test's 'The RangeSlider track layout correctly when the overlay size is smaller than the thumb size', 'SliderThemeData.padding can override the default RangeSlider padding' and 'Default paddle range slider value indicator shape draws correctly' (at x 24): draws with no visible effect; the rest of each case is ported.
@@ -796,3 +834,8 @@ Ported against: 34b89b2086d4
 - text_field.rs tests: the toolbar-content cases and 'Can select text with a mouse when wrapped in a GestureDetector with tap/double tap callbacks' need the platforms' toolbar buttons and `GestureDetector.onDoubleTap`. Trigger: the toolbar's button set and double-tap recognizers.
 - selectable_text.rs tests: the baseline-alignment cases need the FlutterTest glyph's descent to match Flutter's. Trigger: text layout measuring the test font as Skia does.
 - paginated_data_table.rs tests: the RenderFlex overflow exception Dart expects in 'PaginatedDataTable control test' (the test forces a 600-pixel column); Waft reports none, having no `tester.takeException`. Trigger: `FlutterError.reportError`.
+- button_bar.rs tests: '_RenderButtonBarRow.constraints does not work before layout', which checks that a private getter fails before layout, something no user sees.
+- button_bar_theme.rs tests: 'Default ButtonBarThemeData debugFillProperties' and 'ButtonBarThemeData implements debugFillProperties' (diagnostics only), and the `hashCode` half of the copyWith and `==` case (the theme data has no hash).
+- stepper.rs tests: 'Stepper custom margin' and 'StepperProperties test', which only read constructor arguments back.
+- refresh_indicator.rs tests: 'RefreshIndicator responds to strokeWidth' and 'RefreshIndicator responds to edgeOffset', which only read constructor arguments back.
+- mergeable_material.rs tests: the `debugDisableShadows` toggles around the two shadow cases; Waft has no such flag (waft-painting PORTING.md), and the cases read the shadow itself.
