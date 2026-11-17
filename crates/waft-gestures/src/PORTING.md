@@ -73,7 +73,7 @@ Pattern: same leaf-inheritance as [monodrag.rs](#monodragrs--monodragdart). `Bas
 
 ## multidrag.rs → multidrag.dart
 
-Pattern: same leaf-inheritance. Each per-pointer state is an arena object, and a custom recognizer implements `MultiDragGestureRecognizer` and a `MultiDragPointerState` leaf.
+Pattern: same leaf-inheritance. Each per-pointer state is an arena object, and a custom recognizer implements `MultiDragGestureRecognizer` and a `MultiDragPointerState` leaf; `AnyMultiDragGestureRecognizer` is the erased form Dart uses `MultiDragGestureRecognizer` as a type for.
 
 ## recognizer.rs / tap.rs / long_press.rs / monodrag.rs / tap_and_drag.rs / force_press.rs / scale.rs — GestureRecognizer hierarchy
 

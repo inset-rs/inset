@@ -24,7 +24,7 @@ use waft_foundation::{
 use waft_gestures::{
     DelayedMultiDragGestureRecognizer, Drag, DragEndDetails, DragObject, DragStartBehavior,
     DragUpdateDetails, GestureMultiDragStartCallback, ImmediateMultiDragGestureRecognizer,
-    MultiDragGestureRecognizer, PointerDownEvent, RecognizerRef,
+    MultiDragRecognizerRef, PointerDownEvent,
 };
 use waft_painting::{
     AlignmentGeometry, Axis, EdgeInsetsGeometry, axis_direction_is_reversed, axis_direction_to_axis,
@@ -629,12 +629,12 @@ impl ReorderableListState {
     /// Most applications will not use this directly, but will wrap the item (or part of the
     /// item, like a drag handle) in either a [`ReorderableDragStartListener`] or
     /// [`ReorderableDelayedDragStartListener`] which call this for the application.
-    pub fn start_item_drag_reorder<R: MultiDragGestureRecognizer>(
+    pub fn start_item_drag_reorder(
         self: Handle<Self>,
         app: &mut App,
         index: i32,
         event: PointerDownEvent,
-        recognizer: Ref<R>,
+        recognizer: MultiDragRecognizerRef,
     ) {
         app.get(self)
             .sliver_reorderable_list_key
@@ -1047,7 +1047,7 @@ pub struct SliverReorderableListState {
     drag_info: Option<Ref<DragInfo>>,
     insert_index: Option<i32>,
     final_drop_position: Option<Offset>,
-    recognizer: Option<RecognizerRef>,
+    recognizer: Option<MultiDragRecognizerRef>,
     recognizer_pointer: Option<i64>,
 
     auto_scroller: Option<Ref<EdgeDraggingAutoScroller>>,
@@ -1102,12 +1102,12 @@ impl SliverReorderableListState {
     /// item, like a drag handle) in either a [`ReorderableDragStartListener`] or
     /// [`ReorderableDelayedDragStartListener`] which call this method when they detect the
     /// gesture that triggers a drag start.
-    pub fn start_item_drag_reorder<R: MultiDragGestureRecognizer>(
+    pub fn start_item_drag_reorder(
         self: Handle<Self>,
         app: &mut App,
         index: i32,
         event: PointerDownEvent,
-        recognizer: Ref<R>,
+        recognizer: MultiDragRecognizerRef,
     ) {
         debug_assert!(0 <= index && index < self.widget(app).item_count);
         if app.get(self).drag_info.is_some() {
@@ -1127,9 +1127,9 @@ impl SliverReorderableListState {
                 Rc::new(move |app, position| self.drag_start(app, position));
             recognizer.set_on_start(app, Some(on_start));
             let pointer = event.pointer;
-            recognizer.add_pointer(app, event);
+            recognizer.add_pointer(app, &event);
             let state = app.get_mut(self);
-            state.recognizer = Some(recognizer.into_erased());
+            state.recognizer = Some(recognizer);
             state.recognizer_pointer = Some(pointer);
         } else {
             panic!("Attempting to start a drag on a non-visible item");
@@ -2001,9 +2001,6 @@ impl ReorderableDragStartListener {
 /// [`create_recognizer`](Self::create_recognizer), and its build is
 /// [`build`](Self::build).
 pub trait ReorderableDragStartListenerWidget: Clone + 'static {
-    /// The recognizer [`create_recognizer`](Self::create_recognizer) provides.
-    type Recognizer: MultiDragGestureRecognizer;
-
     /// The base class's fields.
     fn reorderable_drag_start_listener(&self) -> &ReorderableDragStartListener;
 
@@ -2012,7 +2009,7 @@ pub trait ReorderableDragStartListenerWidget: Clone + 'static {
     ///
     /// [`ReorderableDragStartListener`] answers an [`ImmediateMultiDragGestureRecognizer`];
     /// a subclass customizes the drag start gesture here.
-    fn create_recognizer(&self, app: &mut App) -> Ref<Self::Recognizer>;
+    fn create_recognizer(&self, app: &mut App) -> MultiDragRecognizerRef;
 
     /// Dart's `ReorderableDragStartListener.build`, which every subclass inherits.
     fn build(&self, _app: &mut App, context: BuildContext) -> WidgetRef {
@@ -2048,14 +2045,12 @@ fn start_dragging<W: ReorderableDragStartListenerWidget>(
 }
 
 impl ReorderableDragStartListenerWidget for ReorderableDragStartListener {
-    type Recognizer = ImmediateMultiDragGestureRecognizer;
-
     fn reorderable_drag_start_listener(&self) -> &ReorderableDragStartListener {
         self
     }
 
-    fn create_recognizer(&self, app: &mut App) -> Ref<ImmediateMultiDragGestureRecognizer> {
-        ImmediateMultiDragGestureRecognizer::new(app)
+    fn create_recognizer(&self, app: &mut App) -> MultiDragRecognizerRef {
+        ImmediateMultiDragGestureRecognizer::new(app).into_erased()
     }
 }
 
@@ -2111,14 +2106,12 @@ impl ReorderableDelayedDragStartListener {
 }
 
 impl ReorderableDragStartListenerWidget for ReorderableDelayedDragStartListener {
-    type Recognizer = DelayedMultiDragGestureRecognizer;
-
     fn reorderable_drag_start_listener(&self) -> &ReorderableDragStartListener {
         &self.listener
     }
 
-    fn create_recognizer(&self, app: &mut App) -> Ref<DelayedMultiDragGestureRecognizer> {
-        DelayedMultiDragGestureRecognizer::new(app)
+    fn create_recognizer(&self, app: &mut App) -> MultiDragRecognizerRef {
+        DelayedMultiDragGestureRecognizer::new(app).into_erased()
     }
 }
 
