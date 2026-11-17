@@ -988,6 +988,9 @@ fn an_adaptive_wide_window_shows_the_list_beside_the_detail() {
             &find::by_type::<BackButton>(),
             finds_one_widget(),
         );
+    });
+}
+
 /// The stepper page's continue button moves the vertical stepper on and says so.
 #[test]
 fn the_stepper_page_continues_to_the_next_step() {
