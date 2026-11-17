@@ -3825,7 +3825,7 @@ impl ScaffoldState {
     ///
     ///  * [`BottomSheet`], which becomes the parent of the widget returned by the
     ///    `builder`.
-    ///  * `show_bottom_sheet`, which calls this method given a [`BuildContext`].
+    ///  * `ShowBottomSheet`, which calls this method given a [`BuildContext`].
     ///  * `ShowModalBottomSheet`, which can be used to display a modal bottom
     ///    sheet.
     ///  * [`Scaffold::of`], for information about how to obtain the [`ScaffoldState`].
@@ -8419,25 +8419,15 @@ mod tests {
                                     match current {
                                         None => {
                                             let bottom_sheet_key = bottom_sheet_key.clone();
-                                            let shown = crate::show_bottom_sheet(
-                                                app,
-                                                context,
+                                            let shown = crate::bottom_sheet::ShowBottomSheet::new(
                                                 Rc::new(move |_app, _context| {
                                                     Container::new()
                                                         .key(bottom_sheet_key.clone().into())
                                                         .height(200.0)
                                                         .into_widget()
                                                 }),
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                            );
+                                            )
+                                            .show(app, context);
                                             *controller.borrow_mut() = Some(shown);
                                         }
                                         Some(current) => current.close(app),
