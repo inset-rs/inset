@@ -29,6 +29,9 @@ pub struct TableViewSelection {
     notifier: ChangeNotifierData,
     model: SelectionModel,
     binding: Option<SelectionBinding>,
+    /// The items source the selection was last set to; kept across tables, so a new table adopting
+    /// it again changes nothing.
+    source: Option<HandleId>,
     /// `m_lastRaisedSelectedItem`: the item `SelectionChanged` last reported.
     last_raised_item: Option<usize>,
 }
@@ -42,6 +45,7 @@ impl TableViewSelection {
             notifier: ChangeNotifierData::new(),
             model,
             binding: None,
+            source: None,
             last_raised_item: None,
         })
     }
@@ -95,32 +99,35 @@ impl TableViewSelection {
 // MARK: The holding table's view of the selection
 
 impl TableViewSelection {
-    /// The table `owner` holds the selection; a selection new to it starts over on its rows, as `SelectionModel::Source` clears.
+    /// The table `owner` holds the selection over `source`; a selection set to a different source starts over on its rows, as `SelectionModel::Source` clears. Adopting the same source again keeps the selection. Answers whether the selected row was cleared, which the table defers to its listener until after the frame.
     pub(crate) fn bind(
         self: Handle<Self>,
         app: &mut App,
         owner: HandleId,
         can_select: bool,
         row_count: usize,
+        source: HandleId,
         item_of_row: ItemOfRow,
-    ) {
-        let new_owner = app
-            .get(self)
-            .binding
-            .as_ref()
-            .is_none_or(|binding| binding.owner != owner);
+    ) -> bool {
+        let source_changed = app.get(self).source != Some(source);
+        if source_changed {
+            app.get_mut(self).source = Some(source);
+        }
         app.get_mut(self).binding = Some(SelectionBinding {
             owner,
             can_select,
             item_of_row,
         });
-        if new_owner {
-            self.set_source(app, row_count);
-        }
+        let cleared = if source_changed {
+            app.get_mut(self).start_over(row_count)
+        } else {
+            false
+        };
         if !can_select {
             // `OnSelectionModePropertyChanged`: turning selection off clears it.
             self.apply(app, None);
         }
+        cleared
     }
 
     /// The table `owner` lets the selection go.
@@ -132,13 +139,6 @@ impl TableViewSelection {
             .is_some_and(|binding| binding.owner == owner)
         {
             selection.binding = None;
-        }
-    }
-
-    /// `UpdateSelectionModelSource`: the rows were reshaped, which clears the selection (`SelectionNode::OnSourceListChanged`, `Reset`).
-    pub(crate) fn set_source(self: Handle<Self>, app: &mut App, row_count: usize) {
-        if app.get_mut(self).start_over(row_count) {
-            self.notify_listeners(app);
         }
     }
 
@@ -310,7 +310,18 @@ impl<T: 'static> TableViewState<T> {
                 }
                 self.source_handle(app).view(app).get(row).copied()
             });
-            selection.bind(app, id, can_select, count, item_of_row);
+            let source = self.widget(app).items_source.handle().id();
+            // A replaced source clears the selected row while the table builds; its listener hears
+            // of it once the frame is over, as a rebuild of the table during build must not dirty
+            // a widget above it.
+            if selection.bind(app, id, can_select, count, source, item_of_row) {
+                let selection = selection.clone();
+                self.after_frame(app, move |app| {
+                    if app.contains(selection.handle()) {
+                        selection.handle().notify_listeners(app);
+                    }
+                });
+            }
         }
     }
 
@@ -354,6 +365,16 @@ mod tests {
     use waft_foundation::AppCell;
 
     fn bound(app: &mut App, rows: usize, can_select: bool) -> Ref<TableViewSelection> {
+        let source = app.create(0u8);
+        bound_to(app, rows, can_select, &source)
+    }
+
+    fn bound_to(
+        app: &mut App,
+        rows: usize,
+        can_select: bool,
+        source: &Ref<u8>,
+    ) -> Ref<TableViewSelection> {
         let selection = TableViewSelection::new(app);
         let owner = app.create(0u8);
         selection.bind(
@@ -361,6 +382,7 @@ mod tests {
             owner.handle().id(),
             can_select,
             rows,
+            source.handle().id(),
             Rc::new(|_, row| Some(row + 10)),
         );
         selection
@@ -410,8 +432,50 @@ mod tests {
         selection.select(&mut app, 0);
         assert_eq!(selection.take_change(&mut app), Some((None, Some(10))));
         assert_eq!(selection.take_change(&mut app), None);
-        selection.set_source(&mut app, 3);
+        // A replaced source clears the row and the clear is reported from the item last raised.
+        let owner = app.create(0u8);
+        let other_source = app.create(0u8);
+        assert!(selection.bind(
+            &mut app,
+            owner.handle().id(),
+            true,
+            3,
+            other_source.handle().id(),
+            Rc::new(|_, row| Some(row)),
+        ));
         assert_eq!(selection.take_change(&mut app), Some((Some(10), None)));
+    }
+
+    /// A table adopting the same source again changes nothing: the selected row stays and no
+    /// listener hears of it.
+    #[test]
+    fn rebinding_the_same_source_keeps_the_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = app.create(0u8);
+        let selection = bound_to(&mut app, 3, true, &source);
+        selection.select(&mut app, 1);
+        assert_eq!(selection.selected_index(&app), Some(1));
+
+        let heard = Rc::new(std::cell::Cell::new(0));
+        let heard_here = Rc::clone(&heard);
+        selection.add_listener(
+            &mut app,
+            Listener::new(move |_app| heard_here.set(heard_here.get() + 1)),
+        );
+
+        let owner = app.create(0u8);
+        let cleared = selection.bind(
+            &mut app,
+            owner.handle().id(),
+            true,
+            3,
+            source.handle().id(),
+            Rc::new(|_, row| Some(row)),
+        );
+        assert!(!cleared);
+        assert_eq!(selection.selected_index(&app), Some(1));
+        assert_eq!(heard.get(), 0);
     }
 
     // A row the source moved keeps its selection; one moved across it shifts it.

@@ -794,6 +794,14 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
   Reason: framework — a Waft application reaches a control's state through an object it holds, as `ItemsView`'s `ItemsViewSource` does, and a widget has no methods to call.
   Affect: An application gives `.selection(..)` for selectable rows, calls `select` on the selection with a row of the view, and reads `selected_item` as an index into the source's items.
 
+- Change: the selection remembers the items source it was last set to, so a table adopting the same source again keeps its selected row, and only a replaced source clears it.
+  Reason: framework — a Waft table is a new element on every mount (a tab switch rebuilds it), where WinUI's control keeps its `SelectionModel`; assigning the same source again is not WinUI's items-source replacement, and a source reset reaches the selection as a `Reset` view change.
+  Affect: a selected row survives a table rebuilt over the same source, and the widget above the table listening to the selection is not rebuilt while the new table binds it.
+
+- Change: the clear a replaced source causes is reported to the selection's listeners after the frame the new table builds in, where WinUI raises `SelectionChanged` as the source is assigned.
+  Reason: framework — the table binds its selection during build, and marking an ancestor for rebuild then panics in Waft.
+  Affect: a listener above the table hears of the clear one frame later; the selected row is already cleared when the table lays out.
+
 - Change: `TableView`'s `SortByColumn`, `ToggleSortDirection` and `ClearSort` are members of a `TableViewSort` the application gives the table to sort from code; header clicks sort without one, the direction living on the column.
   Reason: framework — a widget has no methods an application can call.
   Affect: A request to a `TableViewSort` no mounted table holds answers false.

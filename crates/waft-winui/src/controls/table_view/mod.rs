@@ -561,10 +561,6 @@ impl<T: 'static> TableViewState<T> {
         let listener = Listener::new(move |app| self.source_changed(app));
         source.add_listener(app, listener.clone());
         app.get_mut(self).source = Some((source, listener));
-        if let Some(selection) = self.selection_handle(app) {
-            let count = self.row_count(app);
-            selection.set_source(app, count);
-        }
     }
 
     /// The source changed its view: the selection follows the rows the change moved, or starts over on a rebuilt view (`SelectionNode::OnSourceListChanged`), and the rows are rebuilt.
