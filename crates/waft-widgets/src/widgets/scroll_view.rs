@@ -1733,7 +1733,7 @@ impl IntoWidget<StatelessKind> for GridViewExtent {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use waft_foundation::AppCell;
+    use waft_foundation::{AppCell, ValueKey};
 
     use waft_embedder::{Size, TextDirection};
     use waft_painting::EdgeInsets;
@@ -1744,6 +1744,7 @@ mod tests {
     use crate::testing::{WidgetTester, find, test_widgets};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
+    use crate::widgets::reorderable_list::ReorderableDragStartListener;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
     use crate::widgets::text::Text;
 
@@ -1958,9 +1959,13 @@ mod tests {
                 let number = numbers[index as usize];
                 Some(
                     SizedBox::new()
+                        .key(ValueKey::new(number).into())
                         // children with different heights
                         .height(20.0 + f64::from(number) * 10.0)
-                        .child(Text::new(number.to_string()))
+                        .child(ReorderableDragStartListener::new(
+                            Text::new(number.to_string()),
+                            index,
+                        ))
                         .into_widget(),
                 )
             })
@@ -1969,6 +1974,7 @@ mod tests {
             .prototype_item(SizedBox::new().height(30.0).child(Text::new("3")));
             tester.pump_widget(wrap_in_tester_view(list));
 
+            // Dart's finders are `hitTestable()`, which `waft_widgets::testing` does not have.
             assert_eq!(tester.get_size(find::text("0")).height(), 30.0);
             assert_eq!(tester.get_size(find::text("1")).height(), 30.0);
             assert_eq!(tester.get_size(find::text("2")).height(), 30.0);

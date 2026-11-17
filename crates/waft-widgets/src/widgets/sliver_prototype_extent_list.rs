@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn the_builder_constructor_sizes_twenty_items_to_the_prototype() {
+    fn sliver_prototype_extent_list_builder_test() {
         test_widgets(|tester| {
             tester.pump_widget(test_widgets_app(
                 CustomScrollView::new().slivers([SliverPrototypeExtentList::builder(
@@ -855,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn the_builder_constructor_sizes_eight_items_to_the_prototype() {
+    fn sliver_prototype_extent_list_builder_test_with_eight_items() {
         test_widgets(|tester| {
             tester.pump_widget(test_widgets_app(
                 CustomScrollView::new().slivers([SliverPrototypeExtentList::builder(
@@ -873,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn a_vertical_prototype_extent_list_scrolls_to_its_end() {
+    fn sliver_prototype_extent_list_vertical_scrolling_basics() {
         test_widgets(|tester| {
             tester.pump_widget(build_frame(Some(20), None, Some(100.0), None, None));
 
@@ -891,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn a_horizontal_prototype_extent_list_scrolls_to_its_end() {
+    fn sliver_prototype_extent_list_horizontal_scrolling_basics() {
         test_widgets(|tester| {
             tester.pump_widget(build_frame(
                 Some(20),
@@ -915,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn changing_the_prototype_item_changes_the_item_extent() {
+    fn sliver_prototype_extent_list_change_the_prototype_item() {
         test_widgets(|tester| {
             tester.pump_widget(build_frame(Some(10), None, Some(60.0), None, None));
 
@@ -936,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn the_first_item_can_also_be_the_prototype() {
+    fn sliver_prototype_extent_list_first_item_is_also_the_prototype() {
         test_widgets(|tester| {
             let items: Rc<Vec<WidgetRef>> = Rc::new(
                 (0..10)
@@ -979,7 +979,7 @@ mod tests {
     /// Regression test for https://github.com/flutter/flutter/issues/67117: the paint transform
     /// of the prototype item, which is not visible, is zero rather than an assertion error.
     #[test]
-    fn the_prototype_items_paint_transform_is_zero() {
+    fn sliver_prototype_extent_list_prototype_item_paint_transform_is_zero() {
         test_widgets(|tester| {
             let prototype_key = GlobalKey::new();
             tester.pump_widget(build_frame(
