@@ -15,23 +15,21 @@
 use std::fmt;
 
 use waft_embedder::{Radius, Size};
-use waft_foundation::{App, Listener};
+use waft_foundation::{App, Listener, ValueChanged};
 use waft_painting::{
-    BorderRadius, BorderRadiusGeometry, BorderSide, EdgeInsetsDirectional, EdgeInsetsGeometry,
-    OutlinedBorderRef, RoundedRectangleBorder,
+    BorderRadiusDirectional, BorderRadiusGeometry, BorderSide, EdgeInsetsDirectional,
+    EdgeInsetsGeometry, OutlinedBorderRef, RoundedRectangleBorder,
 };
 use waft_widgets::{
-    BuildContext, IntoWidget, IntrinsicHeight, KeyRef, MainAxisSize, Row, SizedBox,
-    StatelessWidget, WidgetRef, WidgetState, WidgetStateProperty, WidgetStatePropertyRef,
+    BuildContext, CrossAxisAlignment, Flexible, IntoWidget, IntrinsicHeight, KeyRef, MainAxisSize,
+    Row, SizedBox, StatelessWidget, WidgetRef, WidgetState, WidgetStateProperty,
+    WidgetStatePropertyRef,
 };
 
 use crate::button_style::ButtonStyle;
 use crate::elevated_button::ElevatedButton;
 use crate::filled_button::FilledButton;
 use crate::outlined_button::OutlinedButton;
-
-/// The default spacing between a split button's two parts.
-pub const K_SPLIT_BUTTON_SPACING: f64 = 2.0;
 
 /// The smallest horizontal extent of either part.
 const K_SPLIT_BUTTON_MIN_WIDTH: f64 = 48.0;
@@ -81,6 +79,9 @@ pub enum SplitButtonVariant {
 pub struct SplitButtonDefaults;
 
 impl SplitButtonDefaults {
+    /// The default spacing between a split button's two parts.
+    pub const SPACING: f64 = 2.0;
+
     /// The height of an extra small container.
     pub const EXTRA_SMALL_CONTAINER_HEIGHT: f64 = 32.0;
     /// The height of a small container, and the parts' default minimum height.
@@ -178,11 +179,12 @@ impl SplitButtonDefaults {
     }
 }
 
-/// A shape whose start corners are `start` and end corners `end`.
+/// A shape whose start corners are `start` and end corners `end`, flipped for right-to-left text
+/// as Compose's `RoundedCornerShape(topStart, topEnd, bottomEnd, bottomStart)` is.
 fn rounded(start: Radius, end: Radius) -> OutlinedBorderRef {
     OutlinedBorderRef::new(RoundedRectangleBorder::new(
         BorderSide::NONE,
-        BorderRadiusGeometry::BorderRadius(BorderRadius::only(start, end, start, end)),
+        BorderRadiusGeometry::Directional(BorderRadiusDirectional::only(start, end, start, end)),
     ))
 }
 
@@ -210,30 +212,27 @@ fn inner_corners_for(button_height: f64) -> (Radius, Radius) {
     }
 }
 
-/// A split button's style: the part's variant and the state-dependent shape it draws with.
+/// A part's style: the state-dependent shape, padding and minimum size the split layers over the
+/// variant's own style.
 fn part_style(
-    variant: SplitButtonVariant,
     shapes: &SplitButtonShapes,
     content_padding: EdgeInsetsGeometry,
     checked: bool,
 ) -> ButtonStyle {
-    let shape: WidgetStatePropertyRef<Option<waft_painting::OutlinedBorderRef>> = {
-        let resting = shapes.shape.clone();
-        let pressed = shapes.pressed_shape.clone();
-        let checked_shape = shapes.checked_shape.clone();
-        <dyn WidgetStateProperty<Option<waft_painting::OutlinedBorderRef>>>::resolve_with(
-            move |states| {
-                if states.contains(&WidgetState::Pressed) {
-                    return Some(pressed_shape_or(&pressed, &resting));
-                }
-                if checked {
-                    return Some(checked_shape_or(&checked_shape, &resting));
-                }
-                Some(resting.clone())
-            },
-        )
-    };
-    let _ = variant;
+    let resting = shapes.shape.clone();
+    let pressed = shapes.pressed_shape.clone();
+    let checked_shape = shapes.checked_shape.clone();
+    let shape: WidgetStatePropertyRef<Option<OutlinedBorderRef>> =
+        <dyn WidgetStateProperty<Option<OutlinedBorderRef>>>::resolve_with(move |states| {
+            let shape = if states.contains(&WidgetState::Pressed) {
+                pressed.as_ref()
+            } else if checked {
+                checked_shape.as_ref()
+            } else {
+                None
+            };
+            Some(shape.unwrap_or(&resting).clone())
+        });
     let padding: WidgetStatePropertyRef<Option<EdgeInsetsGeometry>> =
         <dyn WidgetStateProperty<Option<EdgeInsetsGeometry>>>::all(Some(content_padding));
     let minimum_size: WidgetStatePropertyRef<Option<Size>> =
@@ -248,18 +247,27 @@ fn part_style(
         .animation_duration(crate::constants::K_THEME_CHANGE_DURATION)
 }
 
-fn pressed_shape_or(
-    pressed: &Option<OutlinedBorderRef>,
-    resting: &OutlinedBorderRef,
-) -> OutlinedBorderRef {
-    pressed.clone().unwrap_or_else(|| resting.clone())
-}
-
-fn checked_shape_or(
-    checked: &Option<OutlinedBorderRef>,
-    resting: &OutlinedBorderRef,
-) -> OutlinedBorderRef {
-    checked.clone().unwrap_or_else(|| resting.clone())
+/// The Flutter button that draws a part of `variant`, with `style` over its own.
+fn part_button(
+    variant: SplitButtonVariant,
+    on_pressed: Option<Listener>,
+    style: ButtonStyle,
+    child: WidgetRef,
+) -> WidgetRef {
+    match variant {
+        SplitButtonVariant::Filled => FilledButton::new(on_pressed, Some(child))
+            .style(style)
+            .into_widget(),
+        SplitButtonVariant::Tonal => FilledButton::tonal(on_pressed, Some(child))
+            .style(style)
+            .into_widget(),
+        SplitButtonVariant::Elevated => ElevatedButton::new(on_pressed, Some(child))
+            .style(style)
+            .into_widget(),
+        SplitButtonVariant::Outlined => OutlinedButton::new(on_pressed, Some(child))
+            .style(style)
+            .into_widget(),
+    }
 }
 
 /// The leading part of a split button: Compose's `SplitButtonDefaults.LeadingButton` and its
@@ -341,26 +349,12 @@ impl StatelessWidget for SplitButtonLeadingButton {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        let style = part_style(self.variant, &self.shapes, self.content_padding, false);
-        let child = self.child.clone();
-        match self.variant {
-            SplitButtonVariant::Filled => FilledButton::new(self.on_pressed.clone(), Some(child))
-                .style(style)
-                .into_widget(),
-            SplitButtonVariant::Tonal => FilledButton::tonal(self.on_pressed.clone(), Some(child))
-                .style(style)
-                .into_widget(),
-            SplitButtonVariant::Elevated => {
-                ElevatedButton::new(self.on_pressed.clone(), Some(child))
-                    .style(style)
-                    .into_widget()
-            }
-            SplitButtonVariant::Outlined => {
-                OutlinedButton::new(self.on_pressed.clone(), Some(child))
-                    .style(style)
-                    .into_widget()
-            }
-        }
+        part_button(
+            self.variant,
+            self.on_pressed.clone(),
+            part_style(&self.shapes, self.content_padding, false),
+            self.child.clone(),
+        )
     }
 }
 
@@ -406,13 +400,16 @@ impl SplitButtonTrailingButton {
     }
 
     /// Creates a filled trailing part that acts as a toggle; Compose's
-    /// `TrailingButton(checked, onCheckedChange, content)`. `on_pressed` receives the value the
-    /// toggle should take next.
+    /// `TrailingButton(checked, onCheckedChange, content)`. A press calls `on_checked_change` with
+    /// `!checked`; `None` disables the part.
     pub fn toggle<K>(
         checked: bool,
-        on_pressed: Option<Listener>,
+        on_checked_change: Option<ValueChanged<bool>>,
         child: impl IntoWidget<K>,
     ) -> SplitButtonTrailingButton {
+        let on_pressed = on_checked_change.map(|on_checked_change| {
+            Listener::new(move |app: &mut App| on_checked_change(app, !checked))
+        });
         let mut button = SplitButtonTrailingButton::new(on_pressed, child);
         button.checked = Some(checked);
         button
@@ -461,31 +458,16 @@ impl StatelessWidget for SplitButtonTrailingButton {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        let style = part_style(
+        part_button(
             self.variant,
-            &self.shapes,
-            self.content_padding,
-            self.checked.unwrap_or(false),
-        );
-        let child = self.child.clone();
-        match self.variant {
-            SplitButtonVariant::Filled => FilledButton::new(self.on_pressed.clone(), Some(child))
-                .style(style)
-                .into_widget(),
-            SplitButtonVariant::Tonal => FilledButton::tonal(self.on_pressed.clone(), Some(child))
-                .style(style)
-                .into_widget(),
-            SplitButtonVariant::Elevated => {
-                ElevatedButton::new(self.on_pressed.clone(), Some(child))
-                    .style(style)
-                    .into_widget()
-            }
-            SplitButtonVariant::Outlined => {
-                OutlinedButton::new(self.on_pressed.clone(), Some(child))
-                    .style(style)
-                    .into_widget()
-            }
-        }
+            self.on_pressed.clone(),
+            part_style(
+                &self.shapes,
+                self.content_padding,
+                self.checked.unwrap_or(false),
+            ),
+            self.child.clone(),
+        )
     }
 }
 
@@ -493,9 +475,10 @@ impl StatelessWidget for SplitButtonTrailingButton {
 /// them, at one height.
 ///
 /// Compose measures the trailing part first, so it keeps its width when the pair must shrink, and
-/// forces both parts to the taller intrinsic height. Here an [`IntrinsicHeight`] and a
-/// [`Row`] with stretched children give both parts one height, and the row lays the leading part
-/// out first (PORTING.md).
+/// forces both parts to the taller intrinsic height. Here an [`IntrinsicHeight`] and a [`Row`]
+/// with stretched children give both parts one height, and the leading part is a loose
+/// [`Flexible`], so the row lays the trailing part out first and gives the leading part what is
+/// left.
 pub struct SplitButtonLayout {
     pub key: Option<KeyRef>,
     /// The part that performs the primary action.
@@ -516,7 +499,7 @@ impl SplitButtonLayout {
             key: None,
             leading_button: leading_button.into_widget(),
             trailing_button: trailing_button.into_widget(),
-            spacing: K_SPLIT_BUTTON_SPACING,
+            spacing: SplitButtonDefaults::SPACING,
         }
     }
 
@@ -551,9 +534,9 @@ impl StatelessWidget for SplitButtonLayout {
             .child(
                 Row::new()
                     .main_axis_size(MainAxisSize::Min)
-                    .cross_axis_alignment(waft_rendering::CrossAxisAlignment::Stretch)
+                    .cross_axis_alignment(CrossAxisAlignment::Stretch)
                     .children(vec![
-                        self.leading_button.clone(),
+                        Flexible::new(self.leading_button.clone()).into_widget(),
                         SizedBox::new().width(self.spacing).into_widget(),
                         self.trailing_button.clone(),
                     ]),
@@ -568,15 +551,16 @@ mod tests {
     use std::rc::Rc;
 
     use waft_widgets::testing::{WidgetTester, find, test_widgets};
-    use waft_widgets::{Center, IntoWidget, Row, SizedBox, Text};
+    use waft_widgets::{
+        Axis, Center, Icon, IntoWidget, Row, SingleChildScrollView, SizedBox, StatefulBuilder, Text,
+    };
 
     use super::*;
     use crate::icons::Icons;
     use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use waft_widgets::Icon;
 
-    fn pump(tester: &mut WidgetTester, layout: SplitButtonLayout) {
+    fn pump<K>(tester: &mut WidgetTester, layout: impl IntoWidget<K>) {
         let theme = ThemeData::builder().build(&tester.cell.borrow());
         tester.pump_widget(material_app(
             theme,
@@ -588,6 +572,24 @@ mod tests {
         Listener::new(move |_app| flag.set(true))
     }
 
+    fn ignored() -> Option<Listener> {
+        Some(Listener::new(|_app| {}))
+    }
+
+    /// Compose's `ButtonDefaults.iconSpacingFor`, which the positioning cases space the icon by;
+    /// its small and medium spacings are both 8.
+    fn icon_spacing_for(height: f64) -> f64 {
+        if height < SplitButtonDefaults::SMALL_CONTAINER_HEIGHT {
+            4.0
+        } else if height < SplitButtonDefaults::LARGE_CONTAINER_HEIGHT {
+            8.0
+        } else if height < SplitButtonDefaults::EXTRA_LARGE_CONTAINER_HEIGHT {
+            12.0
+        } else {
+            16.0
+        }
+    }
+
     fn leading_with_icon_and_text(
         on_pressed: Option<Listener>,
         icon_size: f64,
@@ -596,6 +598,7 @@ mod tests {
         SplitButtonLeadingButton::new(
             on_pressed,
             Row::new()
+                .main_axis_size(MainAxisSize::Min)
                 .children(vec![
                     Icon::new(Some(Icons::edit())).size(icon_size).into_widget(),
                     SizedBox::new().width(icon_spacing).into_widget(),
@@ -605,118 +608,23 @@ mod tests {
         )
     }
 
-    fn trailing_with_icon(on_pressed: Option<Listener>) -> SplitButtonTrailingButton {
+    fn trailing_toggle(
+        checked: bool,
+        on_checked_change: Option<ValueChanged<bool>>,
+    ) -> SplitButtonTrailingButton {
         SplitButtonTrailingButton::toggle(
-            false,
-            on_pressed,
-            Icon::new(Some(Icons::arrow_drop_down())),
+            checked,
+            on_checked_change,
+            Icon::new(Some(Icons::keyboard_arrow_down())),
         )
     }
 
-    #[test]
-    fn a_filled_split_button_shows_both_parts_and_reports_their_presses() {
-        test_widgets(|tester| {
-            let leading_pressed = Rc::new(Cell::new(false));
-            let trailing_pressed = Rc::new(Cell::new(false));
-            pump(
-                tester,
-                SplitButtonLayout::new(
-                    leading_with_icon_and_text(
-                        Some(recorded(Rc::clone(&leading_pressed))),
-                        20.0,
-                        4.0,
-                    ),
-                    trailing_with_icon(Some(recorded(Rc::clone(&trailing_pressed)))),
-                ),
-            );
-
-            assert_eq!(find::text("My Button").evaluate(tester).len(), 1);
-            assert_eq!(find::by_icon(&Icons::edit()).evaluate(tester).len(), 1);
-            assert_eq!(
-                find::by_icon(&Icons::arrow_drop_down())
-                    .evaluate(tester)
-                    .len(),
-                1
-            );
-
-            tester.tap(find::text("My Button"));
-            assert!(leading_pressed.get());
-
-            tester.tap(find::by_icon(&Icons::arrow_drop_down()));
-            assert!(trailing_pressed.get());
-        });
+    fn label_leading() -> SplitButtonLeadingButton {
+        SplitButtonLeadingButton::new(ignored(), Text::new("Label"))
     }
 
-    #[test]
-    fn a_tonal_elevated_and_outlined_split_button_build() {
-        test_widgets(|tester| {
-            for variant in [
-                SplitButtonVariant::Tonal,
-                SplitButtonVariant::Elevated,
-                SplitButtonVariant::Outlined,
-            ] {
-                pump(
-                    tester,
-                    SplitButtonLayout::new(
-                        leading_with_icon_and_text(Some(Listener::new(|_app| {})), 20.0, 4.0)
-                            .variant(variant),
-                        trailing_with_icon(Some(Listener::new(|_app| {}))).variant(variant),
-                    ),
-                );
-                assert_eq!(find::text("My Button").evaluate(tester).len(), 1);
-            }
-        });
-    }
-
-    /// Compose's positioning cases: the content sits between the size's start and end paddings,
-    /// with the icon separated from the text by `icon_spacing`.
-    fn check_leading_padding(tester: &mut WidgetTester, height: f64) {
-        let shapes = SplitButtonDefaults::leading_button_shapes_for(height);
-        let content_padding = SplitButtonDefaults::leading_button_content_padding_for(height);
-        let icon_size = SplitButtonDefaults::leading_button_icon_size_for(height);
-        let icon_spacing = if height < SplitButtonDefaults::SMALL_CONTAINER_HEIGHT {
-            4.0
-        } else {
-            8.0
-        };
-        pump(
-            tester,
-            SplitButtonLayout::new(
-                SizedBox::new().height(height).child(
-                    leading_with_icon_and_text(
-                        Some(Listener::new(|_app| {})),
-                        icon_size,
-                        icon_spacing,
-                    )
-                    .shapes(shapes)
-                    .content_padding(content_padding),
-                ),
-                trailing_with_icon(None),
-            ),
-        );
-
-        let button = tester.get_rect(find::by_type::<SplitButtonLeadingButton>());
-        let icon = tester.get_rect(find::by_icon(&Icons::edit()));
-        let text = tester.get_rect(find::text("My Button"));
-        let padding = content_padding;
-        let resolved = padding.resolve(Some(waft_embedder::TextDirection::Ltr));
-        assert_eq!(icon.left - button.left, resolved.left);
-        assert_eq!(text.left - icon.right, icon_spacing);
-        assert_eq!(button.right - text.right, resolved.right);
-    }
-
-    #[test]
-    fn an_extra_small_leading_part_uses_its_start_and_end_paddings() {
-        test_widgets(|tester| {
-            check_leading_padding(tester, SplitButtonDefaults::EXTRA_SMALL_CONTAINER_HEIGHT);
-        });
-    }
-
-    #[test]
-    fn a_small_leading_part_uses_its_start_and_end_paddings() {
-        test_widgets(|tester| {
-            check_leading_padding(tester, SplitButtonDefaults::SMALL_CONTAINER_HEIGHT);
-        });
+    fn icon_trailing() -> SplitButtonTrailingButton {
+        SplitButtonTrailingButton::new(ignored(), Icon::new(Some(Icons::keyboard_arrow_down())))
     }
 
     fn part_heights(tester: &WidgetTester) -> (f64, f64) {
@@ -730,60 +638,343 @@ mod tests {
         )
     }
 
+    fn assert_content_displayed(tester: &WidgetTester) {
+        assert_eq!(find::text("My Button").evaluate(tester).len(), 1);
+        assert_eq!(find::by_icon(&Icons::edit()).evaluate(tester).len(), 1);
+        assert_eq!(
+            find::by_icon(&Icons::keyboard_arrow_down())
+                .evaluate(tester)
+                .len(),
+            1
+        );
+    }
+
+    /// Compose's `filledSplitButton_contentDisplay`: both parts' content shows and both parts
+    /// act on a press.
     #[test]
-    fn a_split_button_stretches_both_parts_to_the_taller_one() {
+    fn filled_split_button_content_display() {
         test_widgets(|tester| {
+            let leading_pressed = Rc::new(Cell::new(false));
+            let trailing_pressed = Rc::new(Cell::new(false));
+            let on_checked_change: ValueChanged<bool> = {
+                let trailing_pressed = Rc::clone(&trailing_pressed);
+                Rc::new(move |_app, _checked| trailing_pressed.set(true))
+            };
             pump(
                 tester,
                 SplitButtonLayout::new(
+                    leading_with_icon_and_text(
+                        Some(recorded(Rc::clone(&leading_pressed))),
+                        24.0,
+                        8.0,
+                    ),
                     SizedBox::new()
-                        .height(40.0)
-                        .child(leading_with_icon_and_text(
-                            Some(Listener::new(|_app| {})),
-                            20.0,
-                            4.0,
-                        )),
-                    SizedBox::new().height(80.0).child(trailing_with_icon(None)),
+                        .width(34.0)
+                        .height(34.0)
+                        .child(trailing_toggle(false, Some(on_checked_change))),
                 ),
             );
-            assert_eq!(part_heights(tester), (80.0, 80.0));
+
+            assert_content_displayed(tester);
+
+            tester.tap(find::text("My Button"));
+            assert!(leading_pressed.get());
+            tester.tap(find::by_icon(&Icons::keyboard_arrow_down()));
+            assert!(trailing_pressed.get());
+        });
+    }
+
+    /// Compose's `filledSplitButton_trailingButtonChecked`: the trailing toggle starts off and a
+    /// press turns it on.
+    #[test]
+    fn filled_split_button_trailing_button_checked() {
+        test_widgets(|tester| {
+            let checked = Rc::new(Cell::new(false));
+            let layout = {
+                let checked = Rc::clone(&checked);
+                StatefulBuilder::new(move |_app, _context, set_state| {
+                    let on_checked_change: ValueChanged<bool> = {
+                        let checked = Rc::clone(&checked);
+                        Rc::new(move |app, value| {
+                            let checked = Rc::clone(&checked);
+                            set_state(app, &mut |_app| checked.set(value));
+                        })
+                    };
+                    SplitButtonLayout::new(
+                        leading_with_icon_and_text(ignored(), 24.0, 8.0),
+                        SizedBox::new()
+                            .width(34.0)
+                            .height(34.0)
+                            .child(trailing_toggle(checked.get(), Some(on_checked_change))),
+                    )
+                    .into_widget()
+                })
+            };
+            pump(tester, layout);
+
+            assert_eq!(tester_checked(tester), Some(false));
+            tester.tap(find::by_icon(&Icons::keyboard_arrow_down()));
+            tester.pump();
+            assert!(checked.get());
+            assert_eq!(tester_checked(tester), Some(true));
+        });
+    }
+
+    fn tester_checked(tester: &WidgetTester) -> Option<bool> {
+        tester.widget(
+            find::by_type::<SplitButtonTrailingButton>(),
+            |button: &SplitButtonTrailingButton| button.checked,
+        )
+    }
+
+    /// Compose's `TonalSplitButton_contentDisplay`, `ElevatedSplitButton_contentDisplay` and
+    /// `OutlinedSplitButton_contentDisplay`.
+    #[test]
+    fn tonal_elevated_and_outlined_split_buttons_display_their_content() {
+        test_widgets(|tester| {
+            for variant in [
+                SplitButtonVariant::Tonal,
+                SplitButtonVariant::Elevated,
+                SplitButtonVariant::Outlined,
+            ] {
+                pump(
+                    tester,
+                    SplitButtonLayout::new(
+                        leading_with_icon_and_text(ignored(), 24.0, 8.0).variant(variant),
+                        SizedBox::new().width(34.0).height(34.0).child(
+                            trailing_toggle(false, Some(Rc::new(|_app, _checked| {})))
+                                .variant(variant),
+                        ),
+                    ),
+                );
+                assert_content_displayed(tester);
+            }
+        });
+    }
+
+    /// Compose's `filledSplitButton_*_positioning`: the content sits between the size's start
+    /// and end paddings, with the icon separated from the text by the size's icon spacing.
+    fn check_leading_positioning(
+        tester: &mut WidgetTester,
+        height: f64,
+        start: f64,
+        between: f64,
+        end: f64,
+    ) {
+        pump(
+            tester,
+            SplitButtonLayout::new(
+                SizedBox::new().height(height).child(
+                    leading_with_icon_and_text(ignored(), 24.0, icon_spacing_for(height))
+                        .shapes(SplitButtonDefaults::leading_button_shapes_for(height))
+                        .content_padding(SplitButtonDefaults::leading_button_content_padding_for(
+                            height,
+                        )),
+                ),
+                SizedBox::new().height(height).child(
+                    trailing_toggle(false, Some(Rc::new(|_app, _checked| {})))
+                        .shapes(SplitButtonDefaults::trailing_button_shapes_for(height))
+                        .content_padding(SplitButtonDefaults::trailing_button_content_padding_for(
+                            height,
+                        )),
+                ),
+            ),
+        );
+
+        let button = tester.get_rect(find::by_type::<SplitButtonLeadingButton>());
+        let icon = tester.get_rect(find::by_icon(&Icons::edit()));
+        let text = tester.get_rect(find::text("My Button"));
+        assert_is_equal_to(
+            icon.left - button.left,
+            start,
+            "start padding for leading button",
+        );
+        assert_is_equal_to(
+            text.left - icon.right,
+            between,
+            "icon and text between spacing for leading button",
+        );
+        assert_is_equal_to(
+            button.right - text.right,
+            end,
+            "end padding for leading button",
+        );
+    }
+
+    /// Compose's `Dp.assertIsEqualTo`, whose default tolerance is half a pixel.
+    fn assert_is_equal_to(actual: f64, expected: f64, subject: &str) {
+        assert!(
+            (actual - expected).abs() <= 0.5,
+            "{subject}: expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn filled_split_button_extra_small_positioning() {
+        test_widgets(|tester| {
+            check_leading_positioning(
+                tester,
+                SplitButtonDefaults::EXTRA_SMALL_CONTAINER_HEIGHT,
+                12.0,
+                4.0,
+                10.0,
+            );
         });
     }
 
     #[test]
-    fn a_split_button_matches_the_leading_part_to_a_taller_trailing_one() {
+    fn filled_split_button_small_positioning() {
+        test_widgets(|tester| {
+            check_leading_positioning(
+                tester,
+                SplitButtonDefaults::SMALL_CONTAINER_HEIGHT,
+                16.0,
+                8.0,
+                12.0,
+            );
+        });
+    }
+
+    #[test]
+    fn filled_split_button_medium_positioning() {
+        test_widgets(|tester| {
+            check_leading_positioning(
+                tester,
+                SplitButtonDefaults::MEDIUM_CONTAINER_HEIGHT,
+                24.0,
+                8.0,
+                24.0,
+            );
+        });
+    }
+
+    #[test]
+    fn filled_split_button_large_positioning() {
+        test_widgets(|tester| {
+            check_leading_positioning(
+                tester,
+                SplitButtonDefaults::LARGE_CONTAINER_HEIGHT,
+                48.0,
+                12.0,
+                48.0,
+            );
+        });
+    }
+
+    #[test]
+    fn filled_split_button_extra_large_positioning() {
+        test_widgets(|tester| {
+            check_leading_positioning(
+                tester,
+                SplitButtonDefaults::EXTRA_LARGE_CONTAINER_HEIGHT,
+                64.0,
+                16.0,
+                64.0,
+            );
+        });
+    }
+
+    /// Compose's `splitButton_leadingFillMaxWidth_horizontalScroll_noCrash`, without the
+    /// `fillMaxWidth`, which has no Flutter equivalent under unbounded width: a split button laid
+    /// out at unbounded width still shows its label.
+    #[test]
+    fn split_button_in_a_horizontal_scroll_shows_its_label() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                SingleChildScrollView::new()
+                    .scroll_direction(Axis::Horizontal)
+                    .child(SplitButtonLayout::new(label_leading(), icon_trailing())),
+            );
+            assert_eq!(find::text("Label").evaluate(tester).len(), 1);
+            assert!(tester.get_size(find::text("Label")).width() > 0.0);
+        });
+    }
+
+    /// Compose's `splitButton_stretchesButtonsToMaxHeight`.
+    #[test]
+    fn split_button_stretches_buttons_to_max_height() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                SizedBox::new()
+                    .height(100.0)
+                    .child(SplitButtonLayout::new(label_leading(), icon_trailing())),
+            );
+            assert_eq!(part_heights(tester), (100.0, 100.0));
+        });
+    }
+
+    /// Compose's `splitButton_trailingMatchLeadingHeight`.
+    #[test]
+    fn split_button_trailing_matches_leading_height() {
         test_widgets(|tester| {
             pump(
                 tester,
                 SplitButtonLayout::new(
-                    SizedBox::new()
-                        .height(80.0)
-                        .child(leading_with_icon_and_text(
-                            Some(Listener::new(|_app| {})),
-                            20.0,
-                            4.0,
-                        )),
-                    SizedBox::new().height(34.0).child(trailing_with_icon(None)),
+                    SizedBox::new().height(100.0).child(label_leading()),
+                    icon_trailing(),
                 ),
             );
-            assert_eq!(part_heights(tester), (80.0, 80.0));
+            assert_eq!(part_heights(tester), (100.0, 100.0));
         });
     }
 
+    /// Compose's `splitButton_leadingMatchTrailingHeight`.
+    #[test]
+    fn split_button_leading_matches_trailing_height() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                SplitButtonLayout::new(
+                    label_leading(),
+                    SizedBox::new().height(100.0).child(icon_trailing()),
+                ),
+            );
+            assert_eq!(part_heights(tester), (100.0, 100.0));
+        });
+    }
+
+    /// Not a Compose test: the layout's spacing separates the parts.
     #[test]
     fn a_split_button_spaces_its_parts_by_the_given_spacing() {
         test_widgets(|tester| {
             pump(
                 tester,
-                SplitButtonLayout::new(
-                    leading_with_icon_and_text(Some(Listener::new(|_app| {})), 20.0, 4.0),
-                    trailing_with_icon(None),
-                )
-                .spacing(12.0),
+                SplitButtonLayout::new(label_leading(), icon_trailing()).spacing(12.0),
             );
             let leading = tester.get_rect(find::by_type::<SplitButtonLeadingButton>());
             let trailing = tester.get_rect(find::by_type::<SplitButtonTrailingButton>());
             assert_eq!(trailing.left - leading.right, 12.0);
+        });
+    }
+
+    /// Not a Compose test: as Compose's measure policy does, a width too small for the pair
+    /// shrinks the leading part and leaves the trailing part its own width.
+    #[test]
+    fn a_narrow_split_button_shrinks_the_leading_part() {
+        test_widgets(|tester| {
+            pump(
+                tester,
+                SplitButtonLayout::new(label_leading(), icon_trailing()),
+            );
+            let trailing_width = tester
+                .get_size(find::by_type::<SplitButtonTrailingButton>())
+                .width();
+
+            pump(
+                tester,
+                SizedBox::new()
+                    .width(100.0)
+                    .child(SplitButtonLayout::new(label_leading(), icon_trailing())),
+            );
+            let leading = tester.get_size(find::by_type::<SplitButtonLeadingButton>());
+            let trailing = tester.get_size(find::by_type::<SplitButtonTrailingButton>());
+            assert_eq!(trailing.width(), trailing_width);
+            assert_eq!(
+                leading.width(),
+                100.0 - SplitButtonDefaults::SPACING - trailing_width
+            );
         });
     }
 }

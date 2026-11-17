@@ -1,15 +1,15 @@
 //! The first Material 3 Expressive components the port carries: split buttons in their four
 //! styles and two states, and button groups, standard and connected.
 
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, ValueChanged};
 use waft_material::{
     ButtonGroup, ButtonGroupDefaults, ButtonStyle, FilledButton, Icons, SplitButtonDefaults,
     SplitButtonLayout, SplitButtonLeadingButton, SplitButtonTrailingButton, SplitButtonVariant,
 };
 use waft_painting::OutlinedBorderRef;
 use waft_widgets::{
-    BuildContext, Icon, IntoWidget, ListView, Row, SizedBox, State, StateData, StatefulWidget,
-    Text, WidgetRef, WidgetState, WidgetStateProperty,
+    BuildContext, Icon, IntoWidget, ListView, MainAxisSize, Row, SizedBox, State, StateData,
+    StatefulWidget, Text, WidgetRef, WidgetState, WidgetStateProperty,
 };
 
 use crate::catalog::Entry;
@@ -45,6 +45,7 @@ fn leading(on_pressed: Option<Listener>) -> SplitButtonLeadingButton {
     SplitButtonLeadingButton::new(
         on_pressed,
         Row::new()
+            .main_axis_size(MainAxisSize::Min)
             .children(vec![
                 Icon::new(Some(Icons::edit()))
                     .size(SplitButtonDefaults::leading_button_icon_size_for(
@@ -58,10 +59,13 @@ fn leading(on_pressed: Option<Listener>) -> SplitButtonLeadingButton {
     )
 }
 
-fn trailing(checked: bool, on_pressed: Option<Listener>) -> SplitButtonTrailingButton {
+fn trailing(
+    checked: bool,
+    on_checked_change: Option<ValueChanged<bool>>,
+) -> SplitButtonTrailingButton {
     SplitButtonTrailingButton::toggle(
         checked,
-        on_pressed,
+        on_checked_change,
         Icon::new(Some(Icons::arrow_drop_down())).size(
             SplitButtonDefaults::trailing_button_icon_size_for(
                 SplitButtonDefaults::SMALL_CONTAINER_HEIGHT,
@@ -101,11 +105,11 @@ impl State for ExpressiveButtonsDemoState {
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let checked = app.get(self).checked;
         let toggles = app.get(self).toggles;
-        let on_toggle: Listener = Listener::new(move |app: &mut App| {
-            let checked = app.get(self).checked;
-            app.get_mut(self).checked = !checked;
-            app.get_mut(self).toggles += 1;
-            self.set_state(app, |_state| {});
+        let on_checked_change: ValueChanged<bool> = std::rc::Rc::new(move |app, checked| {
+            self.set_state(app, |state| {
+                state.checked = checked;
+                state.toggles += 1;
+            });
         });
 
         let mut split_buttons: Vec<WidgetRef> = Vec::new();
@@ -118,7 +122,7 @@ impl State for ExpressiveButtonsDemoState {
             split_buttons.push(
                 SplitButtonLayout::new(
                     leading(Some(Listener::new(|_app| {}))).variant(variant),
-                    trailing(checked, Some(on_toggle.clone())).variant(variant),
+                    trailing(checked, Some(on_checked_change.clone())).variant(variant),
                 )
                 .into_widget(),
             );
