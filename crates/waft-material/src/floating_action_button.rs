@@ -6,7 +6,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Clip, Color, Offset, Size, TextBaseline};
-use waft_foundation::{App, Listener};
+use waft_foundation::{AnyEq, App, Listener};
 use waft_painting::{
     AlignmentGeometry, CircleBorder, EdgeInsetsDirectional, EdgeInsetsGeometry, ShapeBorderRef,
     StadiumBorder, TextDirection, TextStyle,
@@ -19,10 +19,10 @@ use waft_rendering::{
 use waft_rendering::{RenderAligningShiftedBox, RenderAligningShiftedBoxData};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    BuildContext, Directionality, FocusNodeRef, Hero, HeroTagRef, IconTheme, IconThemeData,
-    IntoWidget, KeyRef, MainAxisSize, MergeSemantics, Padding, RenderObjectWidget, Row,
-    SingleChildRenderObjectWidget, SizedBox, StatelessWidget, WidgetRef, WidgetStateMouseCursor,
-    WidgetStateProperty, WidgetStatePropertyRef,
+    BuildContext, Directionality, FocusNodeRef, Hero, IconTheme, IconThemeData, IntoWidget, KeyRef,
+    MainAxisSize, MergeSemantics, Padding, RenderObjectWidget, Row, SingleChildRenderObjectWidget,
+    SizedBox, StatelessWidget, WidgetRef, WidgetStateMouseCursor, WidgetStateProperty,
+    WidgetStatePropertyRef,
 };
 
 use crate::button::RawMaterialButton;
@@ -50,9 +50,9 @@ impl Debug for DefaultHeroTag {
 
 /// Dart's `const _DefaultHeroTag()`: one shared tag, so every floating action button that
 /// keeps the default matches every other.
-fn default_hero_tag() -> HeroTagRef {
+fn default_hero_tag() -> Rc<dyn AnyEq> {
     thread_local! {
-        static TAG: HeroTagRef = Rc::new(DefaultHeroTag);
+        static TAG: Rc<dyn AnyEq> = Rc::new(DefaultHeroTag);
     }
     TAG.with(Rc::clone)
 }
@@ -154,7 +154,7 @@ pub struct FloatingActionButton {
     /// there would be a tag conflict (multiple heroes on one route can't have the
     /// same tag). The Material Design specification recommends only using one
     /// floating action button per screen.
-    pub hero_tag: Option<HeroTagRef>,
+    pub hero_tag: Option<Rc<dyn AnyEq>>,
 
     /// The callback that is called when the button is tapped or otherwise activated.
     ///
@@ -494,7 +494,7 @@ impl FloatingActionButton {
     }
 
     /// Dart `FloatingActionButton(heroTag:)`; `None` is Dart's explicit `heroTag: null`.
-    pub fn hero_tag(mut self, hero_tag: Option<HeroTagRef>) -> FloatingActionButton {
+    pub fn hero_tag(mut self, hero_tag: Option<Rc<dyn AnyEq>>) -> FloatingActionButton {
         self.hero_tag = hero_tag;
         self
     }

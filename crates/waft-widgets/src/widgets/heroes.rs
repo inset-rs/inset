@@ -6,9 +6,7 @@
 //! [`PageRoute`]: crate::PageRoute
 
 use crate::widgets::pages::PageRouteRef;
-use std::any::{Any, TypeId};
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -18,7 +16,7 @@ use waft_animation::{
     ReverseAnimation, Tween, k_always_complete_animation,
 };
 use waft_embedder::{Offset, Rect, Size};
-use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Retained};
+use waft_foundation::{AnyEq, App, Handle, ListenableObject, Listener, OptionRetained, Retained};
 use waft_painting::transform_rect;
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 
@@ -170,52 +168,6 @@ pub enum HeroFlightDirection {
 // ---------------------------------------------------------------------------------------------
 // Hero
 
-/// The identifier a [`Hero`] is matched by: Dart's `Object` tag, compared with `==` and used as
-/// a map key.
-///
-/// The blanket implementation covers every value that can answer both questions, so a tag is
-/// written as `Rc::new("photo")` or `Rc::new(42)`. Two tags of different concrete types never
-/// match, as two Dart objects of different classes do not.
-pub trait HeroTag: Any + Debug {
-    /// Dart's `operator ==`. Must return false when `other` is a different concrete type, even
-    /// if the two carry the same value.
-    fn eq_tag(&self, other: &dyn HeroTag) -> bool;
-
-    /// Dart's `hashCode`. Must mix in the concrete type so that two types carrying the same
-    /// value do not collide.
-    fn hash_tag(&self, state: &mut dyn Hasher);
-}
-
-impl<T: PartialEq + Hash + Debug + 'static> HeroTag for T {
-    fn eq_tag(&self, other: &dyn HeroTag) -> bool {
-        (other as &dyn Any)
-            .downcast_ref::<T>()
-            .is_some_and(|other| other == self)
-    }
-
-    fn hash_tag(&self, mut state: &mut dyn Hasher) {
-        TypeId::of::<T>().hash(&mut state);
-        self.hash(&mut state);
-    }
-}
-
-impl PartialEq for dyn HeroTag {
-    fn eq(&self, other: &dyn HeroTag) -> bool {
-        self.eq_tag(other)
-    }
-}
-
-impl Eq for dyn HeroTag {}
-
-impl Hash for dyn HeroTag {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.hash_tag(state);
-    }
-}
-
-/// A shared [`HeroTag`] (Dart's `Object tag` on a [`Hero`]).
-pub type HeroTagRef = Rc<dyn HeroTag>;
-
 /// A widget that marks its child as being a candidate for
 /// [hero animations](https://docs.flutter.dev/ui/animations/hero-animations).
 ///
@@ -282,7 +234,7 @@ pub struct Hero {
     /// The identifier for this particular hero. If the tag of this hero matches the tag of a
     /// hero on a `PageRoute` that we're navigating to or from, then a hero animation will be
     /// triggered.
-    pub tag: HeroTagRef,
+    pub tag: Rc<dyn AnyEq>,
     /// Defines how the destination hero's bounds change as it flies from the starting route to
     /// the destination route.
     ///
@@ -361,7 +313,7 @@ impl Hero {
     /// The `child` parameter and all of its descendants must not be [`Hero`]es.
     ///
     /// Dart's defaults: `transition_on_user_gestures` false, `curve` `Curves::fast_out_slow_in()`.
-    pub fn new<K>(tag: HeroTagRef, child: impl IntoWidget<K>) -> Hero {
+    pub fn new<K>(tag: Rc<dyn AnyEq>, child: impl IntoWidget<K>) -> Hero {
         Hero {
             key: None,
             tag,
@@ -427,8 +379,8 @@ impl Hero {
         context: BuildContext,
         is_user_gesture_transition: bool,
         navigator: Handle<NavigatorState>,
-    ) -> IndexMap<HeroTagRef, Handle<HeroState>> {
-        let mut result: IndexMap<HeroTagRef, Handle<HeroState>> = IndexMap::new();
+    ) -> IndexMap<Rc<dyn AnyEq>, Handle<HeroState>> {
+        let mut result: IndexMap<Rc<dyn AnyEq>, Handle<HeroState>> = IndexMap::new();
 
         // Dart's `visitor` decides on each element and recurses; the walk itself only reads the
         // tree, so it collects the heroes in visit order and `invite_hero`'s `Navigator::of` /
@@ -486,9 +438,9 @@ impl Hero {
 
         fn invite_hero(
             app: &mut App,
-            result: &mut IndexMap<HeroTagRef, Handle<HeroState>>,
+            result: &mut IndexMap<Rc<dyn AnyEq>, Handle<HeroState>>,
             hero: AnyElement,
-            tag: HeroTagRef,
+            tag: Rc<dyn AnyEq>,
             transition_on_user_gestures: bool,
             is_user_gesture_transition: bool,
         ) {
@@ -719,7 +671,7 @@ impl HeroFlightManifest {
         })
     }
 
-    fn tag(self: Handle<Self>, app: &App) -> HeroTagRef {
+    fn tag(self: Handle<Self>, app: &App) -> Rc<dyn AnyEq> {
         let from_hero = app.get(self).from_hero.handle();
         Rc::clone(&from_hero.widget(app).tag)
     }
@@ -1334,7 +1286,7 @@ pub struct HeroController {
     /// If `None`, the controller uses a linear `RectTween`.
     pub create_rect_tween: Option<CreateRectTween>,
     // All of the heroes that are currently in the overlay and in motion. Indexed by the hero tag.
-    flights: IndexMap<HeroTagRef, Ref<HeroFlight>>,
+    flights: IndexMap<Rc<dyn AnyEq>, Ref<HeroFlight>>,
 }
 
 impl HeroController {
@@ -1792,7 +1744,7 @@ mod tests {
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::routes::RoutePageBuilder;
 
-    fn tag() -> HeroTagRef {
+    fn tag() -> Rc<dyn AnyEq> {
         Rc::new("photo")
     }
 
@@ -2150,15 +2102,15 @@ mod tests {
 
     #[test]
     fn hero_tags_match_by_value_and_type() {
-        let a: HeroTagRef = Rc::new("photo");
-        let b: HeroTagRef = Rc::new("photo");
-        let c: HeroTagRef = Rc::new("other");
-        let number: HeroTagRef = Rc::new(1_i32);
+        let a: Rc<dyn AnyEq> = Rc::new("photo");
+        let b: Rc<dyn AnyEq> = Rc::new("photo");
+        let c: Rc<dyn AnyEq> = Rc::new("other");
+        let number: Rc<dyn AnyEq> = Rc::new(1_i32);
         assert!(*a == *b);
         assert!(*a != *c);
         assert!(*a != *number, "two tags of different types never match");
 
-        let mut flights: IndexMap<HeroTagRef, u32> = IndexMap::new();
+        let mut flights: IndexMap<Rc<dyn AnyEq>, u32> = IndexMap::new();
         flights.insert(Rc::clone(&a), 1);
         assert_eq!(flights.get(&b).copied(), Some(1));
         assert_eq!(flights.get(&number), None);

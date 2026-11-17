@@ -671,6 +671,10 @@ Ported against: 34b89b2086d4
   Reason: language — Rust has no subclassing, so the radio panel cannot be a plain panel that the list's children accept.
   Affect: a radio panel is not a plain panel to a caller, and a radio list is built with all its panels at once rather than given children afterwards.
 
+- Change: a radio panel's value is Dart's `Object`, erased as `Rc<dyn AnyEq>`, and a value is made by wrapping it.
+  Reason: language — the value is only compared with `==`, which one erased trait in `waft-foundation` answers where Dart's `Object` needs no declaration.
+  Affect: values compare by the value and type they were made from, so `1_u32` and `1_i32` are different values.
+
 ## stepper.rs → stepper.dart
 - Change: the rule that a stepper's step icon height and width are given together and are equal is checked when the stepper first builds, not when it is made.
   Reason: language — the two values arrive in separate setter calls, where Dart's constructor takes them together.
