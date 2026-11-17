@@ -8741,4 +8741,57 @@ mod tests {
             assert_eq!(caret_at(tester, 2).dx(), 399.0);
         });
     }
+    #[test]
+    fn text_field_scrolls_the_caret_into_view() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                m2_theme(tester),
+                Center::new().child(
+                    Material::new().child(
+                        MediaQuery::new(
+                            MediaQueryData::new().size(waft_embedder::Size::new(800.0, 600.0)),
+                            SizedBox::new().width(100.0).child(
+                                TextField::new()
+                                    .controller(controller.erase())
+                                    .decoration(None),
+                            ),
+                        )
+                        .into_widget(),
+                    ),
+                ),
+            );
+            tester.pump_widget(root);
+
+            let long_text = "a".repeat(20);
+            tester.enter_text(find::by_type::<TextField>(), &long_text);
+            skip_past_scrolling_animation(tester);
+
+            let scrollable = |tester: &WidgetTester| {
+                let element = find::by_type::<waft_widgets::Scrollable>().evaluate(tester)[0];
+                element
+                    .state_handle::<waft_widgets::ScrollableState>(&tester.cell.borrow())
+                    .expect("a Scrollable state")
+            };
+            let pixels = |tester: &WidgetTester| {
+                scrollable(tester)
+                    .position(&tester.cell.borrow())
+                    .pixels(&tester.cell.borrow())
+            };
+            assert_eq!(pixels(tester), 0.0);
+
+            tester.test_text_input().update_editing_value(
+                TextEditingValue::new()
+                    .text(&long_text)
+                    .selection(TextSelection::collapsed(
+                        long_text.len() as i32,
+                        TextAffinity::Downstream,
+                    )),
+            );
+            tester.pump();
+            skip_past_scrolling_animation(tester);
+
+            assert_eq!(pixels(tester), 222.0);
+        });
+    }
 }
