@@ -4,5 +4,6 @@
 #![feature(arbitrary_self_types)]
 
 mod button_input;
+mod selector_bar_icon;
 mod text_box_height;
 mod text_box_no_wrap;
