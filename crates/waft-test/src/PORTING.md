@@ -53,12 +53,6 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
   Reason: platform — it stands in for a host that draws a view into a layer the app made, as `TestWindows` stands in for one that makes windows.
   Affect: a test drives a view the app adds on a layer without a host, and tells the framework of its coming and going itself; the metrics, sight and input the app sends it go nowhere.
 
-## test_font_manager.rs → engine `txt/test_font_manager.cc` and `FontCollection::RegisterTestFonts`
-
-- Change: `TestFontSource` carries FlutterTest alone, so every family, "Ahem" and "Cough" included, answers with FlutterTest.
-  Reason: platform — the lead's decision D16 bundles FlutterTest under Flutter's licence and no Ahem.
-  Affect: a test that names Ahem or Cough measures FlutterTest's squares (ascent 0.75 em) instead of Ahem's (0.8 em).
-
 ## view_host.rs → flutter_test `TestTextInput`
 
 - Change: every `TestView` has a `TestViewHost`, which records the cursors shown over the view, the focus requested for it and what its text input was asked, unless the app added the view on a layer and gave it a host of its own, where `flutter_test` logs the text input channel in `TestTextInput` and leaves the mouse cursor channel to each test's own mock.

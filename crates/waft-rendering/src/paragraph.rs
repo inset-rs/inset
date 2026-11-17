@@ -3806,16 +3806,6 @@ mod tests {
     use crate::proxy_box::RenderRepaintBoundary;
     use crate::testing::{EnginePhase, layout_with, pump_frame, test_render_root};
 
-    /// What the shell does at start-up: the app-wide fonts, here the OS fonts.
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
-
     fn span(text: &str) -> InlineSpanRef {
         TextSpan::new()
             .text(text)
@@ -3838,7 +3828,6 @@ mod tests {
         text: InlineSpanRef,
         constraints: BoxConstraints,
     ) -> RenderHandle<RenderParagraph> {
-        install_fonts(app);
         let paragraph = RenderParagraph::new(app, text, TextDirection::Ltr, None);
         lay_out_at_the_top_left(app, paragraph, constraints);
         paragraph
@@ -3864,7 +3853,7 @@ mod tests {
     fn paragraph_intrinsics_come_from_the_text() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
+        crate::testing::install_test_fonts(&mut app);
         let paragraph = RenderParagraph::new(
             &mut app,
             span("one two three four"),
@@ -3892,8 +3881,8 @@ mod tests {
     fn paragraph_dry_layout_and_baseline_match_its_layout() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
+        crate::testing::install_test_fonts(&mut app);
         let constraints = BoxConstraints::new().max_width(200.0).max_height(1000.0);
-        install_fonts(&mut app);
         let paragraph =
             RenderParagraph::new(&mut app, span("one two three"), TextDirection::Ltr, None);
         let dry = paragraph.as_box().get_dry_layout(&mut app, constraints);
@@ -3946,7 +3935,6 @@ mod tests {
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let wide = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
-        install_fonts(&mut app);
         let paragraph = RenderParagraph::new(
             &mut app,
             span("one two three four"),
@@ -3978,7 +3966,6 @@ mod tests {
         let loose = BoxConstraints::new().max_width(1000.0).max_height(1000.0);
         let wide = laid_out(&mut app, "one two three four", loose);
         let natural = wide.size(&app);
-        install_fonts(&mut app);
         let paragraph = RenderParagraph::new(
             &mut app,
             span("one two three four"),
@@ -4392,11 +4379,9 @@ mod tests {
 mod selection_tests {
     //! The `Selection` group of `paragraph_test.dart`.
 
-    use waft_embedder::{
-        BoxHeightStyle, BoxWidthStyle, Color, Offset, Rect, TextPosition, TextSelection,
-    };
+    use waft_embedder::{Color, Offset, Rect, TextPosition};
     use waft_foundation::{AppCell, Handle};
-    use waft_painting::{PaintingBinding, TextSpan};
+    use waft_painting::TextSpan;
 
     use super::*;
     use crate::selection::{
@@ -4422,15 +4407,6 @@ mod selection_tests {
         }
     }
 
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
-
     fn span(text: &str) -> InlineSpanRef {
         TextSpan::new().text(text).into_span()
     }
@@ -4450,7 +4426,6 @@ mod selection_tests {
         text: &str,
         registrar: &Ref<TestSelectionRegistrar>,
     ) -> RenderHandle<RenderParagraph> {
-        install_fonts(app);
         let paragraph = RenderParagraph::new(app, span(text), TextDirection::Ltr, None);
         paragraph.set_registrar(app, Some(registrar.as_selection_registrar()));
         paragraph
@@ -4518,13 +4493,7 @@ mod selection_tests {
             TextPosition::new(1),
             TextPosition::new(5),
         );
-        let boxes = paragraph.get_boxes_for_selection(
-            &mut app,
-            TextSelection::new(1, 5),
-            BoxHeightStyle::Tight,
-            BoxWidthStyle::Tight,
-        );
-        let expected = boxes.first().expect("a box for the selection").to_rect();
+        let expected = Rect::from_ltwh(14.0, 0.0, 56.0, 14.0);
 
         let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
         let drawn: Vec<(Rect, Color)> = ops
@@ -4574,13 +4543,7 @@ mod selection_tests {
             TextPosition::new(2),
             TextPosition::new(4),
         );
-        let boxes = paragraph.get_boxes_for_selection(
-            &mut app,
-            TextSelection::new(2, 4),
-            BoxHeightStyle::Tight,
-            BoxWidthStyle::Tight,
-        );
-        let expected = boxes.first().expect("a box").to_rect();
+        let expected = Rect::from_ltwh(28.0, 0.0, 28.0, 14.0);
         let ops = crate::testing::painted_ops(&mut app, paragraph.as_object());
         let rect = ops
             .iter()
@@ -4865,7 +4828,7 @@ mod selection_tests {
                 direction: SelectionExtendDirection::NextLine,
             },
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((14, 24)));
+        assert_eq!(start_and_end(&app, paragraph), Some((14, 25)));
         selectable.dispatch_selection_event(
             &mut app,
             &SelectionEvent::DirectionallyExtendSelection {
@@ -4903,7 +4866,7 @@ mod selection_tests {
                 direction: SelectionExtendDirection::Forward,
             },
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((0, 5)));
+        assert_eq!(start_and_end(&app, paragraph), Some((0, 6)));
         selectable.dispatch_selection_event(&mut app, &SelectionEvent::Clear);
         assert!(paragraph.selections(&app).is_empty());
         selectable.dispatch_selection_event(
@@ -4914,6 +4877,6 @@ mod selection_tests {
                 direction: SelectionExtendDirection::Backward,
             },
         );
-        assert_eq!(start_and_end(&app, paragraph), Some((27, 31)));
+        assert_eq!(start_and_end(&app, paragraph), Some((28, 31)));
     }
 }

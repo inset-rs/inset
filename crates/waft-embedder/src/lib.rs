@@ -44,6 +44,8 @@ mod signed_duration;
 mod snapshot_delegate;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
+mod test_font;
+#[cfg(feature = "test-support")]
 pub mod test_support;
 mod text;
 mod text_editing;
@@ -139,6 +141,8 @@ pub use semantics::{
 pub use signed_duration::SignedDuration;
 pub use snapshot_delegate::SnapshotDelegate;
 pub use system_context_menu::SystemContextMenuItem;
+#[cfg(feature = "test-support")]
+pub use test_font::TestFontSource;
 pub use text::*;
 pub use text_editing::*;
 pub use text_input::*;

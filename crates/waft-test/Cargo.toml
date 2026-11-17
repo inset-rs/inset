@@ -8,10 +8,10 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-include = ["src/**", "assets/**", "THIRD_PARTY.md", "Cargo.toml"]
+include = ["src/**", "THIRD_PARTY.md", "Cargo.toml"]
 
 [dependencies]
-waft-embedder.workspace = true
+waft-embedder = { workspace = true, features = ["test-support"] }
 # The arena a leak snapshot reads.
 waft-foundation.workspace = true
 # The device a video frame's texture is made on, which a mock frame names to make none.

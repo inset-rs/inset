@@ -1,6 +1,6 @@
 # Third-party notices
 
-`assets/FlutterTest.ttf` is FlutterTest, the default font of Flutter's `flutter_test`, from Flutter's source:
+FlutterTest (`waft-embedder/assets/FlutterTest.ttf`) is FlutterTest, the default font of Flutter's `flutter_test`, from Flutter's source:
 https://github.com/flutter/flutter
 
 It is the byte array `kFlutterTestFont` (2984 bytes, SHA-256 `cc25fc38471ffe455c04a09de7d569abbcb071bd1536b18bb1281a5f351bf7fe`) of `engine/src/flutter/runtime/test_font_data.cc`, at Flutter commit `ed2132410ee9`, which `engine/src/flutter/tools/gen_test_font.py` generates. `src/test_font_manager.rs` follows the engine's `txt/test_font_manager.cc` and `lib/ui/text/font_collection.cc`.

@@ -8,13 +8,22 @@
 
 use waft_embedder::{Offset, Size};
 use waft_foundation::{App, Handle, Ref};
-use waft_painting::AlignmentGeometry;
+use waft_painting::{AlignmentGeometry, PaintingBinding};
 
 use crate::{
     AnyRenderBox, BoxConstraints, ContainerLayer, ErasedLayer, OffsetLayer, PipelineOwner,
     RenderBox, RenderConstrainedBox, RenderHandle, RenderObjectWithChildMixin, RenderPositionedBox,
     RenderRepaintBoundary,
 };
+
+/// Installs flutter_test's fonts if the app has none: what
+/// `TestRenderingFlutterBinding` does before a case lays text out.
+pub fn install_test_fonts(app: &mut App) {
+    let binding = PaintingBinding::instance(app);
+    if !binding.has_fonts(app) {
+        binding.install_flutter_test_fonts(app);
+    }
+}
 
 /// The size of the test view, which the root lays its child out at.
 pub const TEST_VIEW_SIZE: Size = Size::new(800.0, 600.0);
@@ -40,6 +49,7 @@ struct TestRenderRoot {
 
 /// The app's test root, made with its pipeline owner and paint layer the first time.
 fn test_root(app: &mut App) -> (Handle<PipelineOwner>, RenderHandle<RenderRepaintBoundary>) {
+    install_test_fonts(app);
     let this: Handle<TestRenderRoot> = app.singleton();
     if let (Some(owner), Some(root)) = (&app.get(this).owner, app.get(this).root) {
         return (owner.handle(), root);

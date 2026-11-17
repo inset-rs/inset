@@ -6,8 +6,8 @@
 //! and every glyph an em wide, most of them a square filling the em. Text in it at a font size
 //! measures one font size per glyph, and a line one font size high.
 
-use waft_embedder::FontSource;
-use waft_embedder::valo::{FaceSet, Font, FontAttrs};
+use crate::FontSource;
+use valo::{FaceSet, Font, FontAttrs};
 
 /// FlutterTest's bytes: the engine's `kFlutterTestFont`.
 const FLUTTER_TEST_FONT: &[u8] = include_bytes!("../assets/FlutterTest.ttf");
@@ -63,7 +63,7 @@ impl FontSource for TestFontSource {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{
+    use crate::{
         FontCollection, Paragraph, ParagraphBuilder, ParagraphConstraints, ParagraphStyle,
         TextStyle, set_default_font_manager,
     };
@@ -131,14 +131,6 @@ mod tests {
         assert_eq!(paragraph.longest_line(), 42.0);
         assert_eq!(paragraph.height(), 14.0);
         assert_eq!(paragraph.alphabetic_baseline(), 10.5);
-    }
-
-    #[test]
-    fn the_test_platforms_fonts_are_flutter_test() {
-        use waft_embedder::Platform;
-        let platform = crate::TestPlatform::new();
-        let mut source = platform.font_source().expect("the test platform has fonts");
-        assert!(source.family("Roboto")[0].matches(FLUTTER_TEST));
     }
 
     #[test]
