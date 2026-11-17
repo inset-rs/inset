@@ -210,10 +210,10 @@ type GetSheetDragged = Rc<dyn Fn(&App) -> bool>;
 /// necessary however, it can be done by pushing to the root [`Navigator`].
 ///
 /// If `use_nested_navigation` is `false` (Dart's default), then a [`CupertinoSheetRoute`]
-/// will be shown with no [`Navigator`] widget. Multiple calls to [`show_cupertino_sheet`]
+/// will be shown with no [`Navigator`] widget. Multiple calls to [`ShowCupertinoSheet`]
 /// can still be made to show multiple stacked sheets, if desired.
 ///
-/// [`show_cupertino_sheet`] always pushes the [`CupertinoSheetRoute`] to the root
+/// [`ShowCupertinoSheet`] always pushes the [`CupertinoSheetRoute`] to the root
 /// [`Navigator`]. This is to ensure the previous route animates correctly.
 ///
 /// Returns a future that resolves to the value (if any) that was passed to [`Navigator::pop`]
@@ -225,13 +225,7 @@ type GetSheetDragged = Rc<dyn Fn(&App) -> bool>;
 ///  * [`ShowCupertinoDialog`] which displays an iOS-styled
 ///    dialog.
 ///  * <https://developer.apple.com/design/human-interface-guidelines/sheets>
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments, in Dart's order"
-)]
-pub fn show_cupertino_sheet(
-    app: &mut App,
-    context: BuildContext,
+pub struct ShowCupertinoSheet {
     builder: Option<WidgetBuilder>,
     scrollable_builder: Option<ScrollableWidgetBuilder>,
     use_nested_navigation: bool,
@@ -239,67 +233,141 @@ pub fn show_cupertino_sheet(
     settings: Option<RouteSettingsRef>,
     top_gap: Option<f64>,
     show_drag_handle: bool,
-) -> CompleterFuture<RouteResult> {
-    debug_assert!(
-        top_gap.is_none_or(|top_gap| (0.0..=0.9).contains(&top_gap)),
-        "topGap must be between 0.0 and 0.9"
-    );
-    debug_assert!(builder.is_some() || scrollable_builder.is_some());
-    debug_assert!(
-        (builder.is_none() && scrollable_builder.is_some()) || scrollable_builder.is_none()
-    );
+}
 
-    let effective_builder = builder;
-    let nested_navigator_key = GlobalKey::new();
-    if !use_nested_navigation {
-        let mut route = CupertinoSheetRoute::new(app).enable_drag(app, enable_drag);
-        if let Some(effective_builder) = effective_builder {
-            route = route.builder(app, effective_builder);
+impl ShowCupertinoSheet {
+    /// Creates a builder for a Cupertino sheet; Dart's `showCupertinoSheet` has no required
+    /// argument besides the context, and every argument is a setter.
+    pub fn new() -> ShowCupertinoSheet {
+        ShowCupertinoSheet {
+            builder: None,
+            scrollable_builder: None,
+            use_nested_navigation: false,
+            enable_drag: true,
+            settings: None,
+            top_gap: None,
+            show_drag_handle: false,
         }
-        if let Some(scrollable_builder) = scrollable_builder {
-            route = route.scrollable_builder(app, scrollable_builder);
-        }
-        if let Some(settings) = settings {
-            route = route.settings(app, settings);
-        }
-        if let Some(top_gap) = top_gap {
-            route = route.top_gap(app, top_gap);
-        }
-        let route = route.show_drag_handle(app, show_drag_handle);
+    }
 
-        let navigator = Navigator::of(app, context, true);
-        navigator.push(app, route.into_erased())
-    } else {
-        let mut route = CupertinoSheetRoute::new(app)
-            .enable_drag(app, enable_drag)
-            .scrollable_builder(
-                app,
-                Rc::new(move |_app: &mut App, _context: BuildContext, controller| {
-                    let builder: WidgetBuilder = match &scrollable_builder {
-                        Some(scrollable_builder) => {
-                            let scrollable_builder = Rc::clone(scrollable_builder);
-                            Rc::new(move |app: &mut App, context: BuildContext| {
-                                scrollable_builder(app, context, controller.clone())
-                            })
-                        }
-                        None => Rc::clone(
-                            effective_builder
-                                .as_ref()
-                                .expect("either builder or scrollableBuilder is given"),
-                        ),
-                    };
-                    nested_navigation_content(&nested_navigator_key, builder)
-                }),
-            );
-        if let Some(settings) = settings {
-            route = route.settings(app, settings);
+    /// The widget shown in the sheet.
+    pub fn builder(mut self, builder: WidgetBuilder) -> ShowCupertinoSheet {
+        self.builder = Some(builder);
+        self
+    }
+
+    /// Builds a scrollable widget in the sheet.
+    pub fn scrollable_builder(
+        mut self,
+        scrollable_builder: ScrollableWidgetBuilder,
+    ) -> ShowCupertinoSheet {
+        self.scrollable_builder = Some(scrollable_builder);
+        self
+    }
+
+    /// Whether the sheet contains a nested navigator. Defaults to `false`.
+    pub fn use_nested_navigation(mut self, use_nested_navigation: bool) -> ShowCupertinoSheet {
+        self.use_nested_navigation = use_nested_navigation;
+        self
+    }
+
+    /// Whether the sheet can be dragged down to dismiss it. Defaults to `true`.
+    pub fn enable_drag(mut self, enable_drag: bool) -> ShowCupertinoSheet {
+        self.enable_drag = enable_drag;
+        self
+    }
+
+    /// The route settings passed to the sheet's route.
+    pub fn settings(mut self, settings: RouteSettingsRef) -> ShowCupertinoSheet {
+        self.settings = Some(settings);
+        self
+    }
+
+    /// The gap between the top of the screen and the sheet, between 0.0 and 0.9.
+    pub fn top_gap(mut self, top_gap: f64) -> ShowCupertinoSheet {
+        self.top_gap = Some(top_gap);
+        self
+    }
+
+    /// Whether the sheet shows a drag handle. Defaults to `false`.
+    pub fn show_drag_handle(mut self, show_drag_handle: bool) -> ShowCupertinoSheet {
+        self.show_drag_handle = show_drag_handle;
+        self
+    }
+
+    /// Shows the sheet and returns a future that resolves when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowCupertinoSheet {
+            builder,
+            scrollable_builder,
+            use_nested_navigation,
+            enable_drag,
+            settings,
+            top_gap,
+            show_drag_handle,
+        } = self;
+
+        debug_assert!(
+            top_gap.is_none_or(|top_gap| (0.0..=0.9).contains(&top_gap)),
+            "topGap must be between 0.0 and 0.9"
+        );
+        debug_assert!(builder.is_some() || scrollable_builder.is_some());
+        debug_assert!(
+            (builder.is_none() && scrollable_builder.is_some()) || scrollable_builder.is_none()
+        );
+
+        let effective_builder = builder;
+        let nested_navigator_key = GlobalKey::new();
+        if !use_nested_navigation {
+            let mut route = CupertinoSheetRoute::new(app).enable_drag(app, enable_drag);
+            if let Some(effective_builder) = effective_builder {
+                route = route.builder(app, effective_builder);
+            }
+            if let Some(scrollable_builder) = scrollable_builder {
+                route = route.scrollable_builder(app, scrollable_builder);
+            }
+            if let Some(settings) = settings {
+                route = route.settings(app, settings);
+            }
+            if let Some(top_gap) = top_gap {
+                route = route.top_gap(app, top_gap);
+            }
+            let route = route.show_drag_handle(app, show_drag_handle);
+
+            let navigator = Navigator::of(app, context, true);
+            navigator.push(app, route.into_erased())
+        } else {
+            let mut route = CupertinoSheetRoute::new(app)
+                .enable_drag(app, enable_drag)
+                .scrollable_builder(
+                    app,
+                    Rc::new(move |_app: &mut App, _context: BuildContext, controller| {
+                        let builder: WidgetBuilder = match &scrollable_builder {
+                            Some(scrollable_builder) => {
+                                let scrollable_builder = Rc::clone(scrollable_builder);
+                                Rc::new(move |app: &mut App, context: BuildContext| {
+                                    scrollable_builder(app, context, controller.clone())
+                                })
+                            }
+                            None => Rc::clone(
+                                effective_builder
+                                    .as_ref()
+                                    .expect("either builder or scrollableBuilder is given"),
+                            ),
+                        };
+                        nested_navigation_content(&nested_navigator_key, builder)
+                    }),
+                );
+            if let Some(settings) = settings {
+                route = route.settings(app, settings);
+            }
+            if let Some(top_gap) = top_gap {
+                route = route.top_gap(app, top_gap);
+            }
+            let route = route.show_drag_handle(app, show_drag_handle);
+            let navigator = Navigator::of(app, context, true);
+            navigator.push(app, route.into_erased())
         }
-        if let Some(top_gap) = top_gap {
-            route = route.top_gap(app, top_gap);
-        }
-        let route = route.show_drag_handle(app, show_drag_handle);
-        let navigator = Navigator::of(app, context, true);
-        navigator.push(app, route.into_erased())
     }
 }
 
@@ -879,7 +947,7 @@ impl InheritedWidget for StretchDragControllerProvider {
 /// is a sheet route, then it will animate slightly upwards to look like it is laying
 /// on top of the previous stack of sheets.
 ///
-/// Typically called by [`show_cupertino_sheet`], which provides some boilerplate for
+/// Typically called by [`ShowCupertinoSheet`], which provides some boilerplate for
 /// pushing the [`CupertinoSheetRoute`] to the root navigator.
 ///
 /// The sheet will be dismissed by dragging downwards on the screen, or a call to
@@ -893,7 +961,7 @@ impl InheritedWidget for StretchDragControllerProvider {
 /// trigger. If there is no scrollable area within the sheet, this parameter can be ignored.
 ///
 /// See also:
-///   * [`show_cupertino_sheet`], which is a convenience method for pushing a
+///   * [`ShowCupertinoSheet`], which is a convenience method for pushing a
 ///     [`CupertinoSheetRoute`], with optional nested navigation built in.
 pub struct CupertinoSheetRoute {
     route: RouteData,
@@ -2315,17 +2383,10 @@ mod tests {
         let sheet_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let builder = page(&sheet_probe, &sheet_key);
-        let popped = show_cupertino_sheet(
-            &mut app,
-            context,
-            Some(builder),
-            None,
-            false,
-            true,
-            None,
-            None,
-            show_drag_handle,
-        );
+        let popped = ShowCupertinoSheet::new()
+            .builder(builder)
+            .show_drag_handle(show_drag_handle)
+            .show(&mut app, context);
         drop(app);
         Sheet {
             page: page_probe,
@@ -2385,7 +2446,7 @@ mod tests {
             let mut app = tester.cell.borrow_mut();
             let sheet_route = route_of_sheet(&mut app, &sheet)
                 .downcast::<CupertinoSheetRoute>(&app)
-                .expect("show_cupertino_sheet pushes a CupertinoSheetRoute");
+                .expect("ShowCupertinoSheet pushes a CupertinoSheetRoute");
             let animation =
                 TransitionRoute::animation(sheet_route, &app).expect("an installed route");
             assert_eq!(animation.value(&app), 1.0);
@@ -2483,19 +2544,13 @@ mod tests {
                 let sheet_probe: Rc<Probe> = Rc::default();
                 let sheet_key = GlobalKey::new();
                 let builder = page(&sheet_probe, &sheet_key);
-                show_cupertino_sheet(
-                    &mut app,
-                    context,
-                    None,
-                    Some(Rc::new(move |app, context, _controller| {
+                ShowCupertinoSheet::new()
+                    .scrollable_builder(Rc::new(move |app, context, _controller| {
                         builder(app, context)
-                    })),
-                    use_nested_navigation,
-                    true,
-                    None,
-                    None,
-                    true,
-                );
+                    }))
+                    .use_nested_navigation(use_nested_navigation)
+                    .show_drag_handle(true)
+                    .show(&mut app, context);
                 drop(app);
                 tester.pump_and_settle();
                 let app = tester.cell.borrow();
@@ -2689,17 +2744,9 @@ mod tests {
                     .into_widget()
             })
         };
-        let popped = show_cupertino_sheet(
-            &mut app,
-            context,
-            None,
-            Some(scrollable_builder),
-            false,
-            true,
-            None,
-            None,
-            false,
-        );
+        let popped = ShowCupertinoSheet::new()
+            .scrollable_builder(scrollable_builder)
+            .show(&mut app, context);
         drop(app);
         tester.pump_and_settle();
         ScrollableSheet {
@@ -2823,17 +2870,10 @@ mod tests {
             let inner_probe: Rc<Probe> = Rc::default();
             let inner_key = GlobalKey::new();
             let context = page_probe.context.get().expect("the page built");
-            let sheet_popped = show_cupertino_sheet(
-                &mut app,
-                context,
-                Some(page(&sheet_probe, &sheet_key)),
-                None,
-                true,
-                true,
-                None,
-                None,
-                false,
-            );
+            let sheet_popped = ShowCupertinoSheet::new()
+                .builder(page(&sheet_probe, &sheet_key))
+                .use_nested_navigation(true)
+                .show(&mut app, context);
             drop(app);
             tester.pump_and_settle();
             let mut app = tester.cell.borrow_mut();

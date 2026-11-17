@@ -9,7 +9,7 @@ use std::rc::Rc;
 use waft_cupertino::{
     CupertinoActionSheet, CupertinoActionSheetAction, CupertinoAlertDialog, CupertinoButton,
     CupertinoDialogAction, CupertinoNavigationBar, CupertinoPopupSurface, ShowCupertinoDialog,
-    ShowCupertinoModalPopup, show_cupertino_sheet,
+    ShowCupertinoModalPopup, ShowCupertinoSheet,
 };
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::EdgeInsetsGeometry;
@@ -173,17 +173,9 @@ fn bare_popup(context: BuildContext) -> Listener {
 fn sheet(this: Handle<LastAnswer>, context: BuildContext) -> Listener {
     Listener::new(move |app: &mut App| {
         let builder: WidgetBuilder = Rc::new(sheet_page);
-        let closed = show_cupertino_sheet(
-            app,
-            context,
-            Some(builder),
-            None,
-            false,
-            true,
-            None,
-            None,
-            false,
-        );
+        let closed = ShowCupertinoSheet::new()
+            .builder(builder)
+            .show(app, context);
         app.spawn(async move |cx| {
             let closed = closed
                 .await
@@ -296,7 +288,7 @@ fn sheet_page(app: &mut App, context: BuildContext) -> WidgetRef {
             vec![showcase(secondary(
                 app,
                 context,
-                "show_cupertino_sheet pushes to the root navigator.",
+                "ShowCupertinoSheet pushes to the root navigator.",
             ))],
         )]),
     )
