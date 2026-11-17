@@ -739,7 +739,7 @@ impl AlertDialog {
     /// On iOS and macOS, this constructor creates a `CupertinoAlertDialog`. On other
     /// platforms, this creates a Material design [`AlertDialog`].
     ///
-    /// Typically passed as a child of [`show_adaptive_dialog`], which will display
+    /// Typically passed as a child of [`ShowAdaptiveDialog`], which will display
     /// the alert differently based on platform.
     ///
     /// If a `CupertinoAlertDialog` is created only these parameters are used:
@@ -2205,21 +2205,13 @@ impl ShowDialog {
     }
 }
 
-/// Displays either a Material or Cupertino dialog depending on platform.
+/// Builder for a dialog that is Material or Cupertino by platform, in place of Dart's named
+/// arguments.
 ///
-/// On most platforms this function will act the same as [`ShowDialog`], except
-/// for iOS and macOS, in which case it will act more like
-/// [`show_cupertino_dialog`].
-///
-/// On Cupertino platforms, `barrier_color`, `use_safe_area`, and
-/// `traversal_edge_behavior` are ignored.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Dart's named arguments; a free function has no receiver for the fluent setters"
-)]
-pub fn show_adaptive_dialog(
-    app: &mut App,
-    context: BuildContext,
+/// On most platforms it acts the same as [`ShowDialog`], except for iOS and macOS, where it
+/// acts more like [`ShowCupertinoDialog`](crate::ShowCupertinoDialog). On Cupertino platforms,
+/// `barrier_color`, `use_safe_area` and `traversal_edge_behavior` are ignored.
+pub struct ShowAdaptiveDialog {
     builder: WidgetBuilder,
     barrier_dismissible: Option<bool>,
     barrier_color: Option<Color>,
@@ -2230,48 +2222,143 @@ pub fn show_adaptive_dialog(
     traversal_edge_behavior: Option<TraversalEdgeBehavior>,
     request_focus: Option<bool>,
     animation_style: Option<AnimationStyle>,
-) -> CompleterFuture<RouteResult> {
-    let theme = Theme::of(app, context);
-    match theme.platform {
-        TargetPlatform::Android
-        | TargetPlatform::Fuchsia
-        | TargetPlatform::Linux
-        | TargetPlatform::Windows => {
-            let mut show = ShowDialog::new(builder)
-                .barrier_dismissible(barrier_dismissible.unwrap_or(true))
-                .use_safe_area(use_safe_area)
-                .use_root_navigator(use_root_navigator);
-            if let Some(barrier_color) = barrier_color {
-                show = show.barrier_color(barrier_color);
-            }
-            if let Some(barrier_label) = barrier_label {
-                show = show.barrier_label(barrier_label);
-            }
-            if let Some(route_settings) = route_settings {
-                show = show.route_settings(route_settings);
-            }
-            if let Some(traversal_edge_behavior) = traversal_edge_behavior {
-                show = show.traversal_edge_behavior(traversal_edge_behavior);
-            }
-            if let Some(request_focus) = request_focus {
-                show = show.request_focus(request_focus);
-            }
-            if let Some(animation_style) = animation_style {
-                show = show.animation_style(animation_style);
-            }
-            show.show(app, context)
-        }
-        TargetPlatform::IOS | TargetPlatform::MacOS => show_cupertino_dialog(
-            app,
-            context,
+}
+
+impl ShowAdaptiveDialog {
+    /// Creates a builder for a platform-adaptive dialog; Dart's `showAdaptiveDialog` required
+    /// argument is the `builder`, and every other argument is a setter.
+    pub fn new(builder: WidgetBuilder) -> ShowAdaptiveDialog {
+        ShowAdaptiveDialog {
             builder,
+            barrier_dismissible: None,
+            barrier_color: None,
+            barrier_label: None,
+            use_safe_area: true,
+            use_root_navigator: true,
+            route_settings: None,
+            traversal_edge_behavior: None,
+            request_focus: None,
+            animation_style: None,
+        }
+    }
+
+    /// Whether tapping on the barrier will dismiss the dialog; the platform's default when
+    /// unset.
+    pub fn barrier_dismissible(mut self, barrier_dismissible: bool) -> ShowAdaptiveDialog {
+        self.barrier_dismissible = Some(barrier_dismissible);
+        self
+    }
+
+    /// The color of the modal barrier that darkens everything below the dialog.
+    pub fn barrier_color(mut self, barrier_color: Color) -> ShowAdaptiveDialog {
+        self.barrier_color = Some(barrier_color);
+        self
+    }
+
+    /// The semantic label of the dialog's modal barrier.
+    pub fn barrier_label(mut self, barrier_label: impl Into<String>) -> ShowAdaptiveDialog {
+        self.barrier_label = Some(barrier_label.into());
+        self
+    }
+
+    /// Whether the dialog should only display in the safe areas of the screen. Defaults to
+    /// `true`.
+    pub fn use_safe_area(mut self, use_safe_area: bool) -> ShowAdaptiveDialog {
+        self.use_safe_area = use_safe_area;
+        self
+    }
+
+    /// Whether to push the dialog to the root navigator rather than the nearest one. Defaults
+    /// to `true`.
+    pub fn use_root_navigator(mut self, use_root_navigator: bool) -> ShowAdaptiveDialog {
+        self.use_root_navigator = use_root_navigator;
+        self
+    }
+
+    /// The route settings passed to the dialog route.
+    pub fn route_settings(mut self, route_settings: RouteSettingsRef) -> ShowAdaptiveDialog {
+        self.route_settings = Some(route_settings);
+        self
+    }
+
+    /// How focus transfers beyond the first and last items of the dialog route.
+    pub fn traversal_edge_behavior(
+        mut self,
+        traversal_edge_behavior: TraversalEdgeBehavior,
+    ) -> ShowAdaptiveDialog {
+        self.traversal_edge_behavior = Some(traversal_edge_behavior);
+        self
+    }
+
+    /// Whether the dialog's route requests focus when it is pushed.
+    pub fn request_focus(mut self, request_focus: bool) -> ShowAdaptiveDialog {
+        self.request_focus = Some(request_focus);
+        self
+    }
+
+    /// An animation style that overrides the default animation duration and curves.
+    pub fn animation_style(mut self, animation_style: AnimationStyle) -> ShowAdaptiveDialog {
+        self.animation_style = Some(animation_style);
+        self
+    }
+
+    /// Displays the dialog and returns a future that resolves to the value passed to
+    /// [`Navigator::pop`] when it closes.
+    pub fn show(self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
+        let ShowAdaptiveDialog {
+            builder,
+            barrier_dismissible,
+            barrier_color,
             barrier_label,
-            None,
+            use_safe_area,
             use_root_navigator,
-            barrier_dismissible.unwrap_or(false),
             route_settings,
+            traversal_edge_behavior,
             request_focus,
-        ),
+            animation_style,
+        } = self;
+        let theme = Theme::of(app, context);
+        match theme.platform {
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Linux
+            | TargetPlatform::Windows => {
+                let mut show = ShowDialog::new(builder)
+                    .barrier_dismissible(barrier_dismissible.unwrap_or(true))
+                    .use_safe_area(use_safe_area)
+                    .use_root_navigator(use_root_navigator);
+                if let Some(barrier_color) = barrier_color {
+                    show = show.barrier_color(barrier_color);
+                }
+                if let Some(barrier_label) = barrier_label {
+                    show = show.barrier_label(barrier_label);
+                }
+                if let Some(route_settings) = route_settings {
+                    show = show.route_settings(route_settings);
+                }
+                if let Some(traversal_edge_behavior) = traversal_edge_behavior {
+                    show = show.traversal_edge_behavior(traversal_edge_behavior);
+                }
+                if let Some(request_focus) = request_focus {
+                    show = show.request_focus(request_focus);
+                }
+                if let Some(animation_style) = animation_style {
+                    show = show.animation_style(animation_style);
+                }
+                show.show(app, context)
+            }
+            TargetPlatform::IOS | TargetPlatform::MacOS => show_cupertino_dialog(
+                app,
+                context,
+                builder,
+                barrier_label,
+                None,
+                use_root_navigator,
+                barrier_dismissible.unwrap_or(false),
+                route_settings,
+                request_focus,
+            ),
+        }
     }
 }
 
@@ -4905,20 +4992,11 @@ pub(crate) mod tests {
         builder: WidgetBuilder,
         animation_style: Option<AnimationStyle>,
     ) {
-        let future = show_adaptive_dialog(
-            &mut tester.cell.borrow_mut(),
-            context,
-            builder,
-            None,
-            None,
-            None,
-            true,
-            true,
-            None,
-            None,
-            None,
-            animation_style,
-        );
+        let mut show = ShowAdaptiveDialog::new(builder);
+        if let Some(animation_style) = animation_style {
+            show = show.animation_style(animation_style);
+        }
+        let future = show.show(&mut tester.cell.borrow_mut(), context);
         drop(future);
         tester.cell.checkpoint();
     }
