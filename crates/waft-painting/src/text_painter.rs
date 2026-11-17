@@ -1995,6 +1995,25 @@ mod tests {
     }
 
     #[test]
+    fn text_painter_caret_height_and_line_height() {
+        let mut fonts = flutter_test_fonts();
+        let mut painter = TextPainter::new();
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.set_strut_style(Some(StrutStyle::new().font_size(50.0)));
+        painter.set_text(Some(
+            TextSpan::new()
+                .text("A")
+                .style(TextStyle::new().height(1.0))
+                .into_span(),
+        ));
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+
+        let caret_height =
+            painter.get_full_height_for_caret(&mut fonts, TextPosition::new(0), Rect::ZERO);
+        assert_eq!(caret_height, 50.0);
+    }
+
+    #[test]
     fn caret_height_reflects_run_height_if_strut_is_disabled() {
         let mut fonts = flutter_test_fonts();
         let span = TextSpan::new()
