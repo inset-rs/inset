@@ -743,9 +743,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - Change: `RawAutocomplete` compares a newly selected option with the current selection by the option type's equality.
   Reason: language — a Rust value has no identity, which Dart's default equality compares.
   Affect: selecting an option equal to the current one does nothing, where Dart selects a distinct object with equal fields again.
-- Change: `RawAutocomplete` adds one focus listener to the caller's focus node and removes another, as Dart's source does, and the listener left behind does nothing once the state is freed.
-  Reason: language — a listener bound to a state's handle is skipped once the arena has freed the state, where Dart's closure keeps the disposed state and runs.
-  Affect: a caller's focus node that outlives the autocomplete keeps one inert listener, where Dart's runs on a disposed state.
 
 ## heroes.rs → heroes.dart
 
