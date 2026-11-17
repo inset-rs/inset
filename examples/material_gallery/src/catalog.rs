@@ -155,6 +155,12 @@ impl Entry {
         }
     }
 
+    /// Whether the entry's page is a whole app of its own, with its own navigation, so it opens
+    /// over the whole gallery instead of beside the index.
+    pub fn fills_window(self) -> bool {
+        self == Entry::Adaptive
+    }
+
     /// How many pages this entry can push beyond its own.
     ///
     /// Only the tests read this; it is here so a new sub-page cannot be added without the

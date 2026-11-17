@@ -1,9 +1,10 @@
 //! The gallery's shell, and the routes its pages ride on.
 //!
-//! The shell is a [`MaterialApp`]: it supplies the navigator every page is pushed onto, the
+//! The shell is a [`MaterialApp`]: it supplies the navigator sub-pages and whole-window pages are
+//! pushed onto, the
 //! `ScaffoldMessenger` the snack bars and banners are shown through, the Material
-//! localizations the back button's tooltip comes from, and the light and dark themes. Nothing
-//! here keeps a page stack of its own — the navigator is the stack.
+//! localizations the back button's tooltip comes from, and the light and dark themes. The index
+//! keeps its own back stack of the page it opened, which it shows beside itself or over itself.
 
 use std::fmt::{self, Debug};
 use std::rc::Rc;
@@ -34,6 +35,7 @@ fn seed_color() -> Color {
 #[derive(Default)]
 pub struct Gallery {
     navigator_key: Option<GlobalKey>,
+    opening: Option<Entry>,
 }
 
 impl Gallery {
@@ -44,6 +46,12 @@ impl Gallery {
     /// The key the app's navigator is reached through from outside the tree.
     pub fn navigator_key(mut self, navigator_key: GlobalKey) -> Gallery {
         self.navigator_key = Some(navigator_key);
+        self
+    }
+
+    /// Opens `entry`'s page beside or over the index from the start.
+    pub fn opening(mut self, entry: Entry) -> Gallery {
+        self.opening = Some(entry);
         self
     }
 }
@@ -82,13 +90,14 @@ impl State for GalleryState {
             });
         let theme_mode = app.get(self).theme_mode;
         let navigator_key = self.widget(app).navigator_key.clone();
+        let opening = self.widget(app).opening;
 
         let gallery = MaterialApp::new()
             .title("Material Gallery")
             .theme(theme(app, Brightness::Light))
             .dark_theme(theme(app, Brightness::Dark))
             .theme_mode(theme_mode)
-            .home(Home::new(on_theme_mode_changed));
+            .home(Home::new(on_theme_mode_changed).opening(opening));
         match navigator_key {
             Some(navigator_key) => gallery.navigator_key(navigator_key),
             None => gallery,
@@ -105,28 +114,28 @@ fn theme(app: &App, brightness: Brightness) -> ThemeData {
         .build(app)
 }
 
-/// Runs the gallery, then opens `opening` over the index once the tree is attached: the page
-/// a user would tap to, reached without input, for a bench or a smoke run.
-pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
+/// Runs the gallery in a window of `size`, a phone's when `None`, with `opening` open: the page a
+/// user would tap to, reached without input, for a bench, a smoke run or a screenshot. A page that
+/// fills the window is pushed once the tree is attached, as its tile pushes it.
+pub fn run_gallery(app: &mut App, opening: Option<Entry>, size: Option<[f64; 2]>) {
     let navigator = GlobalKey::new();
     let window = WindowConfig {
         title: "Waft — material gallery".to_owned(),
-        size: [420.0, 720.0],
+        size: size.unwrap_or([420.0, 720.0]),
         ..WindowConfig::default()
     };
-    run_app_with(
-        app,
-        Gallery::new()
-            .navigator_key(navigator.clone())
-            .into_widget(),
-        window,
-    );
+    let gallery = Gallery::new().navigator_key(navigator.clone());
+    let (gallery, pushed) = match opening {
+        Some(entry) if !entry.fills_window() => (gallery.opening(entry), None),
+        _ => (gallery, opening),
+    };
+    run_app_with(app, gallery.into_widget(), window);
     // AFTER `run_app`, which is what installs the default font collection this registers
     // into. Without the icon face every glyph in the gallery — the back arrow, the drawer
     // button, every tile's leading icon — is a missing glyph and draws nothing at all,
     // silently. There is no asset manifest here, so registration is explicit.
     install_material_icon_font(app);
-    let Some(entry) = opening else {
+    let Some(entry) = pushed else {
         return;
     };
     // `run_app` attaches the tree on the next timer turn; this timer runs right after it.
@@ -157,14 +166,14 @@ pub fn sub_route(app: &mut App, entry: Entry, index: usize) -> RouteRef {
     MaterialPageRoute::new(app, builder).into_erased()
 }
 
-/// Opens an entry's page, from a tile on the index or in its drawer.
+/// Pushes an entry's page over the whole gallery: for an entry that fills the window.
 pub fn open_entry(app: &mut App, context: BuildContext, entry: Entry) {
     let route = entry_route(app, entry);
-    Navigator::push(app, context, route);
+    Navigator::of(app, context, true).push(app, route);
 }
 
-/// Opens one of an entry's sub-pages, from a tile on that entry's own page.
+/// Pushes one of an entry's sub-pages over the whole gallery, from a tile on that entry's page.
 pub fn open_sub_page(app: &mut App, context: BuildContext, entry: Entry, index: usize) {
     let route = sub_route(app, entry, index);
-    Navigator::push(app, context, route);
+    Navigator::of(app, context, true).push(app, route);
 }

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
+use material_gallery_lib::pages::home::INDEX_TITLE;
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
 use material_gallery_lib::pages::steppers::LAST_ACTION;
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
@@ -76,27 +77,38 @@ impl<'t> Fixture<'t> {
             .expect("the MaterialApp's navigator is mounted")
     }
 
-    /// The same call `GALLERY_ENTRY` makes.
+    /// Pushes `route` over the whole gallery, as `GALLERY_ENTRY` does for a page that fills the
+    /// window and a page does for its sub-pages.
     fn push(&mut self, route: RouteRef) {
         let navigator = self.navigator();
         navigator.push(&mut self.tester.cell.borrow_mut(), route);
         self.settle();
-        self.assert_top_route_settled();
     }
 
     fn push_entry(&mut self, entry: Entry) {
         let route = entry_route(&mut self.tester.cell.borrow_mut(), entry);
         self.push(route);
+        self.assert_entry_shown(entry);
     }
 
     fn push_sub_page(&mut self, entry: Entry, index: usize) {
         let route = sub_route(&mut self.tester.cell.borrow_mut(), entry, index);
         self.push(route);
+        self.assert_top_route_settled();
     }
 
-    fn can_pop(&mut self) -> bool {
-        let navigator = self.navigator();
-        navigator.can_pop(&self.tester.cell.borrow())
+    /// Makes the window `width` wide, at the phone's height, and lets the layout settle.
+    fn resize(&mut self, width: f64) {
+        let ratio = self.tester.device_pixel_ratio();
+        self.tester
+            .view()
+            .set_physical_size(Size::new(width * ratio, VIEW[1] * ratio));
+        self.settle();
+    }
+
+    /// Whether a page covers the index: on a phone the index is offstage under any page.
+    fn page_open(&mut self) -> bool {
+        find::text(INDEX_TITLE).evaluate(self.tester).is_empty()
     }
 
     /// The system back, as the engine's `popRoute` sends it, and lets the app settle.
@@ -171,11 +183,21 @@ impl<'t> Fixture<'t> {
         );
     }
 
-    /// Opens `entry` from its tile on the index and checks the page's app bar wears its title.
+    /// Opens `entry` from its tile on the index and checks its page is shown.
     fn open_from_index(&mut self, entry: Entry) {
         self.scroll_index_to(entry.title());
         self.tap_text(entry.title());
-        assert!(self.can_pop(), "the tile pushed {entry:?} over the index");
+        assert!(self.page_open(), "the tile opened {entry:?} over the index");
+        self.assert_entry_shown(entry);
+    }
+
+    /// Checks `entry`'s page is shown in full: its app bar wears its title, or, for Reply, which
+    /// fills the window and has no app bar over its inbox, its navigation shows the inbox.
+    fn assert_entry_shown(&mut self, entry: Entry) {
+        if entry.fills_window() {
+            self.expect_shown("Inbox");
+            return;
+        }
         self.assert_app_bar_reads(entry.title());
         self.assert_top_route_settled();
     }
@@ -289,7 +311,7 @@ fn every_entry_opens_from_its_tile_and_goes_back_with_the_back_button() {
             fixture.open_from_index(entry);
             fixture.go_back();
             assert!(
-                !fixture.can_pop(),
+                !fixture.page_open(),
                 "the back button on {entry:?} returned to the index"
             );
             fixture.assert_app_bar_reads("Material Gallery");
@@ -297,15 +319,14 @@ fn every_entry_opens_from_its_tile_and_goes_back_with_the_back_button() {
     });
 }
 
-/// `GALLERY_ENTRY` pushes the entry's route without a tap: every page builds that way too.
+/// Every page builds as a route of its own too, as Reply's does over the whole gallery.
 #[test]
 fn every_entry_opens_by_a_direct_push() {
     on_each_platform(|fixture| {
         for entry in Entry::ALL {
             fixture.push_entry(entry);
-            fixture.assert_app_bar_reads(entry.title());
             fixture.go_back();
-            assert!(!fixture.can_pop(), "{entry:?} came back off");
+            assert!(!fixture.page_open(), "{entry:?} came back off");
         }
     });
 }
@@ -323,7 +344,7 @@ fn every_sub_page_builds_and_goes_back() {
                 fixture.go_back();
             }
         }
-        assert!(!fixture.can_pop(), "every sub-page came back off");
+        assert!(!fixture.page_open(), "every sub-page came back off");
     });
 }
 
@@ -345,7 +366,7 @@ fn the_index_drawer_opens_an_entry() {
         fixture.assert_app_bar_reads(Entry::Lists.title());
         fixture.assert_top_route_settled();
         fixture.go_back();
-        assert!(!fixture.can_pop(), "the Lists page came back off");
+        assert!(!fixture.page_open(), "the Lists page came back off");
         expect(
             fixture.tester,
             &find::by_type::<DrawerHeader>().skip_offstage(false),
@@ -387,7 +408,7 @@ fn a_button_reports_its_press() {
         fixture.expect_shown("Last pressed: Scaffold FAB");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -406,7 +427,7 @@ fn the_end_drawer_opens_from_the_app_bar_and_closes_from_a_tile() {
         fixture.expect_shown("Chose Starred only");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -421,7 +442,7 @@ fn the_start_edge_swipe_opens_the_drawer_or_goes_back() {
 
         fixture.drag(Offset::new(4.0, VIEW[1] / 2.0), Offset::new(280.0, 0.0));
         if platform == TargetPlatform::MacOS {
-            assert!(!fixture.can_pop(), "the swipe went back to the index");
+            assert!(!fixture.page_open(), "the swipe went back to the index");
             return;
         }
         fixture.expect_shown(DRAWER_HEADER);
@@ -430,7 +451,7 @@ fn the_start_edge_swipe_opens_the_drawer_or_goes_back() {
         fixture.expect_shown("Chose Outbox");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -450,7 +471,7 @@ fn a_snack_bar_shows_and_closes_from_its_icon() {
         fixture.expect_gone("A snack bar with a close icon");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -466,7 +487,7 @@ fn a_persistent_bottom_sheet_opens_and_closes() {
         fixture.expect_gone(PERSISTENT_SHEET_TEXT);
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -487,7 +508,7 @@ fn scrolling_collapses_the_large_app_bar() {
         );
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -514,7 +535,7 @@ fn the_floating_app_bar_opens_from_the_large_one() {
         fixture.go_back();
         fixture.assert_app_bar_reads(Entry::AppBars.title());
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -526,9 +547,8 @@ fn tapping_a_tile_selects_it() {
 
         fixture.tap_text("Starred");
         fixture.expect_shown("Selected: Starred");
-        let tiles = find::by_type::<ListTile>()
-            .skip_offstage(false)
-            .evaluate(fixture.tester);
+        // The index under the page is offstage, with the Lists tile selected.
+        let tiles = find::by_type::<ListTile>().evaluate(fixture.tester);
         let selected = tiles
             .into_iter()
             .filter(|tile| {
@@ -540,7 +560,7 @@ fn tapping_a_tile_selects_it() {
         assert_eq!(selected, 1, "one tile is selected");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -556,7 +576,7 @@ fn a_banner_shows_and_dismisses() {
         fixture.expect_gone(BANNER_TEXT);
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -791,7 +811,7 @@ fn an_autocomplete_filters_its_options_and_selects_one() {
         fixture.expect_shown("Selected: Cherry");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -810,7 +830,7 @@ fn an_autocomplete_of_a_custom_type_shows_the_display_string() {
         fixture.expect_shown("Selected: Bob");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -847,7 +867,7 @@ fn a_tile_is_reordered_by_its_drag_handle() {
         fixture.expect_shown("Order: Green, Blue, Red");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -868,7 +888,7 @@ fn a_tile_is_reordered_by_a_long_press() {
         fixture.expect_shown("Order: Dog, Fox, Cat");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
@@ -939,54 +959,91 @@ fn a_carousel_item_reports_its_tap() {
     });
 }
 
-/// The adaptive page's inbox opens a mail as a page on a phone, and back returns to the list.
+/// Reply opens a mail as a page on a phone, and its back, or the system's, returns to the list.
 #[test]
-fn an_adaptive_mail_opens_its_detail_and_back_returns_to_the_list() {
+fn reply_opens_a_mail_as_a_page_and_back_returns_to_the_list() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Adaptive);
-        fixture.expect_shown("Mail 1");
+        fixture.expect_shown("Brunch this weekend?");
 
-        fixture.tap_text("Mail 1");
-        fixture.expect_shown("Message 1");
+        fixture.tap_text("Brunch this weekend?");
+        fixture.expect_shown("7 Messages");
 
-        fixture.tap(find::by_type::<BackButton>().first());
-        fixture.expect_shown("Mail 1");
+        fixture.tap(find::by_tooltip("Back"));
+        fixture.expect_gone("7 Messages");
+        fixture.expect_shown("Brunch this weekend?");
 
-        // The system back closes the mail, not the whole page.
-        fixture.tap_text("Mail 2");
-        fixture.expect_shown("Message 2");
+        // The system back closes the mail, not the whole app.
+        fixture.tap_text("Bonjour from Paris");
+        fixture.expect_shown("7 Messages");
         fixture.system_back();
-        fixture.expect_shown("Mail 2");
-        fixture.assert_app_bar_reads(Entry::Adaptive.title());
+        fixture.expect_gone("7 Messages");
+        fixture.expect_shown("Inbox");
     });
 }
 
-/// On a wide window the adaptive page's inbox shows the list beside the detail in one page, a
-/// rail instead of the bar, and opening a mail changes only the detail.
+/// On a wide window Reply shows the open mail beside the list, a rail instead of the bar, and
+/// opening another mail changes only the detail.
 #[test]
-fn an_adaptive_wide_window_shows_the_list_beside_the_detail() {
+fn reply_on_a_wide_window_shows_the_mail_beside_the_list() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::Adaptive);
-        let ratio = fixture.tester.device_pixel_ratio();
-        fixture
-            .tester
-            .view()
-            .set_physical_size(Size::new(1000.0 * ratio, VIEW[1] * ratio));
-        fixture.settle();
+        fixture.resize(1000.0);
         expect(
             fixture.tester,
             &find::by_type::<NavigationRail>(),
             finds_one_widget(),
         );
-        fixture.expect_shown("Select a mail");
+        fixture.expect_shown("7 Messages");
 
-        fixture.tap_text("Mail 1");
-        fixture.expect_shown("Message 1");
-        fixture.expect_shown("Mail 2");
+        fixture.tap_text("Bonjour from Paris");
+        expect(
+            fixture.tester,
+            &find::descendant(find::by_type::<AppBar>(), find::text("Bonjour from Paris")),
+            finds_one_widget(),
+        );
+        fixture.expect_shown("Brunch this weekend?");
+        // Only the way back to the gallery: the mail beside the list has no back of its own.
         expect(
             fixture.tester,
             &find::by_type::<BackButton>(),
             finds_one_widget(),
+        );
+    });
+}
+
+/// On a wide window the index stays beside the page it opens, with no drawer of its own, and
+/// opening another page replaces it there.
+#[test]
+fn a_wide_window_shows_the_index_beside_the_page() {
+    on_each_platform(|fixture| {
+        fixture.resize(1300.0);
+        fixture.expect_shown("No page open");
+        // Beside a page the index is the navigation: no drawer, so no menu button.
+        expect(
+            fixture.tester,
+            &find::by_type::<DrawerButton>(),
+            finds_nothing(),
+        );
+
+        fixture.tap_text(Entry::Buttons.title());
+        fixture.assert_app_bar_reads(Entry::Buttons.title());
+        fixture.assert_app_bar_reads(INDEX_TITLE);
+        expect(
+            fixture.tester,
+            &find::by_type::<BackButton>(),
+            finds_nothing(),
+        );
+
+        fixture.tap_text(Entry::Lists.title());
+        fixture.assert_app_bar_reads(Entry::Lists.title());
+        expect(
+            fixture.tester,
+            &find::descendant(
+                find::by_type::<AppBar>(),
+                find::text(Entry::Buttons.title()),
+            ),
+            finds_nothing(),
         );
     });
 }
@@ -1003,7 +1060,7 @@ fn the_stepper_page_continues_to_the_next_step() {
         fixture.expect_shown("Continued to step 2");
 
         fixture.go_back();
-        assert!(!fixture.can_pop());
+        assert!(!fixture.page_open());
     });
 }
 
