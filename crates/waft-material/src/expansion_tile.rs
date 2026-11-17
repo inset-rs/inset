@@ -1496,7 +1496,6 @@ pub(crate) mod tests {
         StadiumBorder, TextStyle,
     };
     use waft_rendering::RenderBox as _;
-    use waft_scheduler::SchedulerBinding;
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
         Animated, AnyElement, Builder, Center, ColoredBox, DefaultTextStyle, Directionality,
@@ -3047,11 +3046,6 @@ pub(crate) mod tests {
         });
     }
 
-    /// Dart's `tester.hasRunningAnimations`.
-    fn has_running_animations(tester: &WidgetTester) -> bool {
-        SchedulerBinding::transient_callback_count(&mut tester.cell.borrow_mut()) > 0
-    }
-
     /// "Calling ExpansionTileController.expand/collapsed has no effect if it is already
     /// expanded/collapsed".
     #[test]
@@ -3077,19 +3071,19 @@ pub(crate) mod tests {
             controller.expand(&mut tester.cell.borrow_mut());
             assert!(is_expanded(tester));
             tester.pump();
-            assert!(!has_running_animations(tester));
+            assert!(!tester.has_running_animations());
             expect(tester, &find::text("Child 0"), finds_one_widget());
             controller.collapse(&mut tester.cell.borrow_mut());
             assert!(!is_expanded(tester));
             tester.pump();
-            assert!(has_running_animations(tester));
+            assert!(tester.has_running_animations());
             tester.pump_and_settle();
             assert!(!is_expanded(tester));
             expect(tester, &find::text("Child 0"), finds_nothing());
             controller.collapse(&mut tester.cell.borrow_mut());
             assert!(!is_expanded(tester));
             tester.pump();
-            assert!(!has_running_animations(tester));
+            assert!(!tester.has_running_animations());
 
             controller.dispose(&mut tester.cell.borrow_mut());
         });
