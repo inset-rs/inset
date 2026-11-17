@@ -8794,4 +8794,64 @@ mod tests {
             assert_eq!(pixels(tester), 222.0);
         });
     }
+    #[test]
+    fn keyboard_down_and_up_test_2() {
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = material_home(
+                theme(tester),
+                TextField::new()
+                    .controller(controller.erase())
+                    .max_lines(Some(3)),
+            );
+            tester.pump_widget(root);
+            tester.enter_text(
+                find::by_type::<TextField>(),
+                "a big house\njumped over a mouse\nOne more line yay",
+            );
+            tester.cell.checkpoint();
+            tester.tap(find::by_type::<TextField>());
+            tester.pump_and_settle();
+
+            for _ in 0..5 {
+                tester.send_key_down_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+                tester.send_key_up_event(
+                    PhysicalKeyboardKey::ARROW_RIGHT,
+                    LogicalKeyboardKey::ARROW_RIGHT,
+                );
+                tester.pump_and_settle();
+            }
+            for (expected, up) in [(12, false), (32, false), (12, true), (0, true), (-5, true)] {
+                tester.send_key_down_event(
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+                let (physical, logical) = if up {
+                    (PhysicalKeyboardKey::ARROW_UP, LogicalKeyboardKey::ARROW_UP)
+                } else {
+                    (
+                        PhysicalKeyboardKey::ARROW_DOWN,
+                        LogicalKeyboardKey::ARROW_DOWN,
+                    )
+                };
+                tester.send_key_event(physical, logical);
+                tester.pump_and_settle();
+                tester.send_key_up_event(
+                    PhysicalKeyboardKey::SHIFT_LEFT,
+                    LogicalKeyboardKey::SHIFT_LEFT,
+                );
+                tester.pump_and_settle();
+                assert_eq!(
+                    selection_delta(tester, controller.handle()),
+                    expected,
+                    "{}",
+                    if up { "up" } else { "down" }
+                );
+            }
+        });
+    }
 }
