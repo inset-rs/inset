@@ -1185,6 +1185,7 @@ mod tests {
     use waft_cupertino::{CupertinoButton, cupertino_text_selection_controls};
     use waft_embedder::Size;
     use waft_embedder::TextAffinity;
+    use waft_foundation::UniqueKey;
     use waft_rendering::{RenderBox as _, RenderEditable};
     use waft_services::{
         LogicalKeyboardKey, PhysicalKeyboardKey, SystemMouseCursors, TextInputClient,
@@ -3737,5 +3738,65 @@ mod tests {
                 assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(0, 1)));
             });
         }
+    }
+
+    #[test]
+    fn selectable_text_baseline_alignment() {
+        test_widgets(|tester| {
+            let key_a: KeyRef = UniqueKey::new().into();
+            let key_b: KeyRef = UniqueKey::new().into();
+            let root = material_app(
+                crate::theme_data::ThemeData::builder()
+                    .use_material3(false)
+                    .build(&tester.cell.borrow()),
+                Center::new()
+                    .child(
+                        Material::new().child(
+                            waft_widgets::Row::new()
+                                .cross_axis_alignment(waft_widgets::CrossAxisAlignment::Baseline)
+                                .text_baseline(waft_embedder::TextBaseline::Alphabetic)
+                                .children([
+                                    waft_widgets::Expanded::new(
+                                        SelectableText::new("A").key(key_a.clone()).style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(10.0),
+                                        ),
+                                    )
+                                    .into_widget(),
+                                    Text::new("abc")
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(20.0),
+                                        )
+                                        .into_widget(),
+                                    waft_widgets::Expanded::new(
+                                        SelectableText::new("B").key(key_b.clone()).style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(30.0),
+                                        ),
+                                    )
+                                    .into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            let row_bottom = tester
+                .get_bottom_left(find::by_type::<waft_widgets::Row>())
+                .dy();
+            assert_eq!(
+                tester.get_bottom_left(find::by_key(key_a)).dy(),
+                row_bottom - 5.0
+            );
+            assert_eq!(
+                tester.get_bottom_left(find::text("abc")).dy(),
+                row_bottom - 2.5
+            );
+            assert_eq!(tester.get_bottom_left(find::by_key(key_b)).dy(), row_bottom);
+        });
     }
 }
