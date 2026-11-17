@@ -12,7 +12,7 @@ use waft_widgets::{
 use crate::catalog::Entry;
 use crate::support::{caption, page, section_header};
 
-/// The title the continue button reports on the caption.
+/// The caption before the steppers report any action.
 pub const LAST_ACTION: &str = "Last action: \u{2014}";
 
 const TITLES: [&str; 3] = ["Address", "Payment", "Review"];

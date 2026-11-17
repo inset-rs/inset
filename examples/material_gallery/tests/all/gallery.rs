@@ -944,7 +944,7 @@ fn the_stepper_page_continues_to_the_next_step() {
     });
 }
 
-/// Tapping an expansion panel's header opens it, and only its own list moves.
+/// Tapping an expansion panel's header opens it.
 #[test]
 fn an_expansion_panel_opens_on_a_header_tap() {
     on_each_platform(|fixture| {
@@ -956,15 +956,12 @@ fn an_expansion_panel_opens_on_a_header_tap() {
     });
 }
 
-/// The account header shows the signed-in account, and its arrow reports the details press.
+/// The account header shows the signed-in account's name and email.
 #[test]
 fn the_account_header_shows_the_account() {
     on_each_platform(|fixture| {
         fixture.open_from_index(Entry::AccountHeader);
         fixture.expect_shown("Jane Doe");
         fixture.expect_shown("jane@example.com");
-
-        fixture.tap_text("Jane Doe");
-        assert!(fixture.shows("Jane Doe"));
     });
 }

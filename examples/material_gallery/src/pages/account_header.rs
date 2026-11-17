@@ -31,7 +31,7 @@ pub fn body(_app: &mut App, _context: BuildContext) -> WidgetRef {
                 caption(
                     app,
                     context,
-                    "Tapping the account row flips the arrow and reports the details press.",
+                    "Tapping the account row turns the arrow over.",
                 ),
                 section_header(app, context, "Another colour"),
                 UserAccountsDrawerHeader::new(
