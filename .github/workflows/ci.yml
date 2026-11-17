@@ -15,4 +15,4 @@ jobs:
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
