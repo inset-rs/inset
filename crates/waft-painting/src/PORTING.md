@@ -133,3 +133,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `TextPainter.locale` / `TextSpan.locale` / `TextSpan.spellOut`. Trigger: `Locale`.
 - `TextSpan` semantics and `computeSemanticsInformation`. Trigger: accessibility; do not stub.
 - `TextPainter.wordBoundaries`: `WordBoundary` reads a laid-out paragraph, which lives in the render object here, so it sits with `RenderEditable` in rendering. Trigger: a word boundary wanted without a render object.
+- `strut_style_test.dart`'s `toString` assertions, which are diagnostics-only; its equality and field assertions are ported. Trigger: a Dart-shaped `toString` on strut styles.
