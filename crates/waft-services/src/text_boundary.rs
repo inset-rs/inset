@@ -7,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use waft_embedder::TextRange;
 use waft_foundation::App;
 
-use crate::text_layout_metrics::TextLayoutMetrics;
+use crate::text_layout_metrics::is_line_terminator;
 
 /// Signature for a predicate that takes an offset into a UTF-16 string, and a
 /// boolean that indicates the search direction.
@@ -184,12 +184,12 @@ impl TextBoundary for ParagraphBoundary {
 
         if index > 1 && self.code_unit_at(index) == 0x0A && self.code_unit_at(index - 1) == 0x0D {
             index -= 2;
-        } else if TextLayoutMetrics::is_line_terminator(self.code_unit_at(index)) {
+        } else if is_line_terminator(self.code_unit_at(index)) {
             index -= 1;
         }
 
         while index > 0 {
-            if TextLayoutMetrics::is_line_terminator(self.code_unit_at(index)) {
+            if is_line_terminator(self.code_unit_at(index)) {
                 return Some(index + 1);
             }
             index -= 1;
@@ -213,7 +213,7 @@ impl TextBoundary for ParagraphBoundary {
 
         let mut index = position;
 
-        while !TextLayoutMetrics::is_line_terminator(self.code_unit_at(index)) {
+        while !is_line_terminator(self.code_unit_at(index)) {
             index += 1;
             if index == self.len() {
                 return Some(index);

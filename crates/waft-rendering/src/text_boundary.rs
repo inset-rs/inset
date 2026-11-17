@@ -13,9 +13,7 @@ use waft_foundation::App;
 use waft_painting::InlineSpanRef;
 use waft_services::{TextBoundary, UntilPredicate};
 
-use crate::editable::RenderEditable;
-use crate::object::RenderHandle;
-use crate::paragraph::RenderParagraph;
+use waft_services::TextLayoutMetrics;
 
 /// A [`TextBoundary`] subclass for locating closest line breaks to a given
 /// `position`.
@@ -25,18 +23,18 @@ use crate::paragraph::RenderParagraph;
 /// the given `position`. For instance, the line breaks at `position = 1` for
 /// "a\nb" is `[0, 1)`, which does not contain the position `1`.
 #[derive(Clone, Copy, Debug)]
-pub struct LineBoundary {
-    text_layout: RenderHandle<RenderEditable>,
+pub struct LineBoundary<T: TextLayoutMetrics> {
+    text_layout: T,
 }
 
-impl LineBoundary {
+impl<T: TextLayoutMetrics> LineBoundary<T> {
     /// Creates a [`LineBoundary`] with the text and layout information.
-    pub fn new(text_layout: RenderHandle<RenderEditable>) -> LineBoundary {
+    pub fn new(text_layout: T) -> LineBoundary<T> {
         LineBoundary { text_layout }
     }
 }
 
-impl TextBoundary for LineBoundary {
+impl<T: TextLayoutMetrics> TextBoundary for LineBoundary<T> {
     fn get_text_boundary_at(&self, app: &mut App, position: i32) -> TextRange {
         self.text_layout
             .get_line_at_offset(app, TextPosition::new(position.max(0)))
@@ -58,39 +56,15 @@ impl TextBoundary for LineBoundary {
 /// platforms and editors when it comes to handling text editing keyboard
 /// shortcuts that move or delete word by word.
 #[derive(Clone)]
-pub struct WordBoundary {
+pub struct WordBoundary<T: TextLayoutMetrics> {
     text: InlineSpanRef,
-    layout: WordBoundaryLayout,
+    layout: T,
 }
 
-/// The render object that owns the laid-out paragraph a [`WordBoundary`] asks.
-#[derive(Clone)]
-enum WordBoundaryLayout {
-    Editable(RenderHandle<RenderEditable>),
-    Paragraph(RenderHandle<RenderParagraph>),
-}
-
-impl WordBoundary {
+impl<T: TextLayoutMetrics> WordBoundary<T> {
     /// Creates a [`WordBoundary`] with the text and layout information.
-    pub(crate) fn new(
-        text: InlineSpanRef,
-        paragraph: RenderHandle<RenderEditable>,
-    ) -> WordBoundary {
-        WordBoundary {
-            text,
-            layout: WordBoundaryLayout::Editable(paragraph),
-        }
-    }
-
-    /// Creates a [`WordBoundary`] over a [`RenderParagraph`]'s laid-out text.
-    pub(crate) fn for_paragraph(
-        text: InlineSpanRef,
-        paragraph: RenderHandle<RenderParagraph>,
-    ) -> WordBoundary {
-        WordBoundary {
-            text,
-            layout: WordBoundaryLayout::Paragraph(paragraph),
-        }
+    pub(crate) fn new(text: InlineSpanRef, layout: T) -> WordBoundary<T> {
+        WordBoundary { text, layout }
     }
 
     /// Returns a [`TextBoundary`] suitable for handling keyboard navigation
@@ -109,16 +83,10 @@ impl WordBoundary {
     }
 }
 
-impl TextBoundary for WordBoundary {
+impl<T: TextLayoutMetrics> TextBoundary for WordBoundary<T> {
     fn get_text_boundary_at(&self, app: &mut App, position: i32) -> TextRange {
-        match self.layout {
-            WordBoundaryLayout::Editable(paragraph) => {
-                paragraph.get_word_boundary(app, TextPosition::new(position.max(0)))
-            }
-            WordBoundaryLayout::Paragraph(paragraph) => {
-                paragraph.get_word_boundary(app, TextPosition::new(position.max(0)))
-            }
-        }
+        self.layout
+            .get_word_boundary(app, TextPosition::new(position.max(0)))
     }
 }
 

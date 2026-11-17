@@ -19,7 +19,9 @@ use waft_painting::{
     ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, TextPainter, TextScaler,
     TextWidthBasis,
 };
-use waft_services::{AnyTextSelectionDelegate, SelectionChangedCause, TextLayoutMetrics};
+use waft_services::{
+    AnyTextSelectionDelegate, SelectionChangedCause, TextLayoutMetrics, is_whitespace,
+};
 
 use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult, RenderBox, RenderBoxData};
 use crate::layer::{ClipRectLayer, ContainerLayer, LayerHandle, LayerLink, LeaderLayer};
@@ -1471,7 +1473,7 @@ impl RenderEditable {
         };
         debug_assert!(effective_offset >= 0);
         if effective_offset > 0
-            && code_unit_at(&plain, effective_offset).is_some_and(TextLayoutMetrics::is_whitespace)
+            && code_unit_at(&plain, effective_offset).is_some_and(is_whitespace)
         {
             if let Some(previous_word) = self.get_previous_word(app, word.start) {
                 match app.platform().target_platform() {
@@ -1546,7 +1548,7 @@ impl RenderEditable {
         let plain = self.plain_text(app);
         for i in range.start..range.end {
             if let Some(unit) = code_unit_at(&plain, i)
-                && !TextLayoutMetrics::is_whitespace(unit)
+                && !is_whitespace(unit)
             {
                 return false;
             }
@@ -1571,7 +1573,10 @@ impl RenderEditable {
     /// A [`WordBoundary`] over this render object's text and layout.
     ///
     /// Dart's `RenderEditable.wordBoundaries`, which forwards to the text painter's.
-    pub fn word_boundaries(self: RenderHandle<Self>, app: &App) -> WordBoundary {
+    pub fn word_boundaries(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> WordBoundary<RenderHandle<RenderEditable>> {
         WordBoundary::new(
             self.text(app).expect("RenderEditable always has text"),
             self,
@@ -2232,6 +2237,40 @@ impl RenderEditable {
                 None,
             );
         }
+    }
+}
+
+impl TextLayoutMetrics for RenderHandle<RenderEditable> {
+    fn get_line_at_offset(
+        self,
+        app: &mut App,
+        position: TextPosition,
+    ) -> waft_embedder::TextSelection {
+        RenderEditable::get_line_at_offset(self, app, position)
+    }
+
+    fn get_word_boundary(
+        self,
+        app: &mut App,
+        position: TextPosition,
+    ) -> waft_embedder::TextRange {
+        RenderEditable::get_word_boundary(self, app, position)
+    }
+
+    fn get_text_position_above(
+        self,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextPosition {
+        RenderEditable::get_text_position_above(self, app, position)
+    }
+
+    fn get_text_position_below(
+        self,
+        app: &mut App,
+        position: TextPosition,
+    ) -> TextPosition {
+        RenderEditable::get_text_position_below(self, app, position)
     }
 }
 

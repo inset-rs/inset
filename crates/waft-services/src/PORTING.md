@@ -4,10 +4,15 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 Only the app life cycle and the application exit of `ServicesBinding`, the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the text boundaries, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, predictive back events, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
 
+## text_layout_metrics.rs → text_layout_metrics.dart
+
+- Change: `TextLayoutMetrics` is a trait implemented by the copyable handle of the laid-out text, and `isWhitespace` / `isLineTerminator` are free functions.
+  Reason: language — reading a Rust layout needs the arena, so the receiver is the handle, and a trait has no static members.
+  Affect: callers call `get_line_at_offset` and the rest on a handle, and name the two classifiers as functions.
+
 ## Identical
 
 - text_editing.rs → text_editing.dart (re-export of embedder `TextSelection`)
-- text_layout_metrics.rs → text_layout_metrics.dart (`isWhitespace` / `isLineTerminator`)
 - text_boundary.rs → text_boundary.dart (`LineBoundary` needs layout, so it sits in rendering)
 
 ## binding.rs → binding.dart
