@@ -2345,8 +2345,8 @@ mod tests {
     };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
-        finds_one_widget, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_n_widgets,
+        finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -2396,6 +2396,7 @@ mod tests {
     const K_THREE_LINES: &str =
         "First line of text is\nSecond line goes until\nThird line of stuff";
     const K_MORE_THAN_FOUR_LINES: &str = "First line of text is\nSecond line goes until\nThird line of stuff\nFourth line won't display and ends at";
+    const ATWATER: &str = "Atwater Peel Sherbrooke Bonaventure";
 
     /// A tester on `platform` with flutter_test's fonts, so a `Text` measures as in Flutter's
     /// tests.
@@ -8853,5 +8854,164 @@ mod tests {
                 );
             }
         });
+    }
+    #[test]
+    fn custom_toolbar_test_android_text_selection_controls() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
+            let tester = &mut tester;
+            let controller = controller_with(tester, ATWATER);
+            let root = material_home(
+                theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .controller(controller.erase())
+                        .selection_controls(material_text_selection_controls()),
+                ),
+            );
+            tester.pump_widget(root);
+            let start = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(start + Offset::new(150.0, 9.0), 1);
+            tester.pump_by(Duration::from_millis(50));
+            tester.tap_at(start + Offset::new(150.0, 9.0), 2);
+            tester.pump_and_settle();
+
+            expect(
+                tester,
+                &find::by_type::<crate::text_button::TextButton>(),
+                finds_n_widgets(4),
+            );
+            expect(tester, &find::text("Cut"), finds_one_widget());
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Paste"), finds_one_widget());
+            expect(tester, &find::text("Select all"), finds_one_widget());
+        });
+    }
+
+    #[test]
+    fn custom_toolbar_test_cupertino_text_selection_controls() {
+        test_widgets(|_tester| {
+            let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
+            clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
+            let tester = &mut tester;
+            let controller = controller_with(tester, ATWATER);
+            let root = material_home(
+                theme(tester),
+                Center::new().child(
+                    TextField::new()
+                        .controller(controller.erase())
+                        .selection_controls(waft_cupertino::cupertino_text_selection_controls()),
+                ),
+            );
+            tester.pump_widget(root);
+            let start = tester.get_top_left(find::by_type::<TextField>());
+            tester.tap_at(start + Offset::new(150.0, 9.0), 1);
+            tester.pump_by(Duration::from_millis(50));
+            tester.tap_at(start + Offset::new(150.0, 9.0), 2);
+            tester.pump_and_settle();
+
+            expect(
+                tester,
+                &find::by_type::<waft_cupertino::CupertinoButton>(),
+                finds_n_widgets(3),
+            );
+        });
+    }
+
+    #[test]
+    fn double_tap_selects_word_and_first_tap_of_double_tap_moves_cursor_and_shows_toolbar() {
+        for platform in [
+            TargetPlatform::Android,
+            TargetPlatform::Fuchsia,
+            TargetPlatform::Linux,
+            TargetPlatform::Windows,
+        ] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |_tester| {
+                let (mut tester, clipboard) = tester_with_clipboard(platform);
+                clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
+                let tester = &mut tester;
+                let controller = controller_with(tester, ATWATER);
+                let root = material_home(
+                    theme(tester),
+                    Center::new().child(TextField::new().controller(controller.erase())),
+                );
+                tester.pump_widget(root);
+                let start = tester.get_top_left(find::by_type::<TextField>());
+
+                tester.tap_at(start + Offset::new(50.0, 9.0), 1);
+                tester.pump_by(Duration::from_millis(500));
+                tester.tap_at(start + Offset::new(150.0, 9.0), 2);
+                tester.pump_by(Duration::from_millis(50));
+                assert_eq!(
+                    selection(tester, controller.handle()),
+                    TextSelection::collapsed(9, TextAffinity::Downstream),
+                    "{platform:?}"
+                );
+                tester.tap_at(start + Offset::new(150.0, 9.0), 3);
+                tester.pump_and_settle();
+                assert_eq!(
+                    selection(tester, controller.handle()),
+                    TextSelection::new(8, 12),
+                    "{platform:?}"
+                );
+
+                let has_share = platform == TargetPlatform::Android;
+                expect(
+                    tester,
+                    &find::by_type::<crate::text_button::TextButton>(),
+                    finds_n_widgets(if has_share { 5 } else { 4 }),
+                );
+                for label in ["Cut", "Copy", "Paste", "Select all"] {
+                    expect(tester, &find::text(label), finds_one_widget());
+                }
+                expect(
+                    tester,
+                    &find::text("Share"),
+                    if has_share {
+                        finds_one_widget()
+                    } else {
+                        finds_nothing()
+                    },
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn text_selection_menu_hides_after_select_all_on_desktop() {
+        for platform in [TargetPlatform::Linux, TargetPlatform::Windows] {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, ATWATER);
+                let root = material_home(
+                    theme(tester),
+                    Material::new().child(TextField::new().controller(controller.erase())),
+                );
+                tester.pump_widget(root);
+                let select_all = "Select all";
+                expect(tester, &find::text(select_all), finds_nothing());
+                expect(tester, &find::text("Copy"), finds_nothing());
+
+                let at =
+                    Offset::new(10.0, 0.0) + text_offset_to_position(tester, ATWATER.len() as i32);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_SECONDARY_BUTTON);
+                tester.down(&mut gesture, at);
+                tester.pump();
+                tester.up(&gesture);
+                tester.pump_and_settle();
+
+                assert_eq!(
+                    selection(tester, controller.handle()),
+                    TextSelection::collapsed(ATWATER.len() as i32, TextAffinity::Upstream),
+                    "{platform:?}"
+                );
+                expect(tester, &find::text(select_all), finds_one_widget());
+
+                tester.tap(find::text(select_all));
+                tester.pump();
+                expect(tester, &find::text(select_all), finds_nothing());
+                expect(tester, &find::text("Copy"), finds_nothing());
+            });
+        }
     }
 }
