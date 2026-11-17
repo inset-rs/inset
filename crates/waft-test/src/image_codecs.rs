@@ -370,7 +370,11 @@ mod tests {
         assert_eq!(pixels.layout().size, [200, 150]);
         assert_eq!(&pixels.bytes()[..4], [255, 0, 0, 255]);
         let past = now(image.decode_pixels(1, None)).err().unwrap();
-        assert_eq!(past.kind, ImageErrorKind::Other, "a picture it does not have");
+        assert_eq!(
+            past.kind,
+            ImageErrorKind::Other,
+            "a picture it does not have"
+        );
         let encoded = now(codecs.encode_pixels(pixels, "image/png", Some(0.5)));
         assert_eq!(encoded.unwrap(), b"encoded");
         assert_eq!(

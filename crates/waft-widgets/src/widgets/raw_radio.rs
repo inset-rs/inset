@@ -19,7 +19,7 @@ use crate::framework::{
 use crate::widgets::basic::Semantics;
 use crate::widgets::focus_manager::{AnyFocusNode, FocusNodeRef};
 use crate::widgets::localizations::WidgetsLocalizations;
-use crate::widgets::radio_group::{AnyRadioGroupRegistry, RadioClient, RadioClientData};
+use crate::widgets::radio_group::{RadioClient, RadioClientData, RadioGroupRegistryRef};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
 use crate::widgets::toggleable::{
     AnyToggleableState, ToggleableStateMixin, ToggleableStateMixinData,
@@ -106,7 +106,7 @@ pub struct RawRadio<T: Clone + PartialEq + 'static> {
     /// The radio relies on [`group_registry`](Self::group_registry) to maintains the state for
     /// selection. If use in conjunction with a `RadioGroup` widget, use
     /// `RadioGroup::maybe_of` to get the group registry from the context.
-    pub group_registry: Option<AnyRadioGroupRegistry<T>>,
+    pub group_registry: Option<RadioGroupRegistryRef<T>>,
 }
 
 impl<T: Clone + PartialEq + 'static> RawRadio<T> {
@@ -121,7 +121,7 @@ impl<T: Clone + PartialEq + 'static> RawRadio<T> {
         toggleable: bool,
         focus_node: FocusNodeRef,
         autofocus: bool,
-        group_registry: Option<AnyRadioGroupRegistry<T>>,
+        group_registry: Option<RadioGroupRegistryRef<T>>,
         enabled: bool,
         builder: RadioBuilder,
     ) -> RawRadio<T> {
@@ -292,13 +292,13 @@ impl<T: Clone + PartialEq + 'static> State for RawRadioState<T> {
     fn init_state(self: Handle<Self>, app: &mut App) {
         // This has to be before the init state because the [ToggleableStateMixin]
         // expect the [value] is up-to-date when init its state.
-        let registry = self.widget(app).group_registry;
+        let registry = self.widget(app).group_registry.clone();
         self.set_registry(app, registry);
         ToggleableStateMixin::init_state(self, app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old_widget: &RawRadio<T>) {
-        let registry = self.widget(app).group_registry;
+        let registry = self.widget(app).group_registry.clone();
         self.set_registry(app, registry);
         self.animate_to_value(app); // The registry's group value may have changed
     }
@@ -419,7 +419,7 @@ mod tests {
 
     fn raw_radio(
         node: FocusNodeRef,
-        registry: Option<Handle<TestRegistry>>,
+        registry: Option<RadioGroupRegistryRef<u32>>,
         enabled: bool,
         toggleable: bool,
         captured: Rc<Cell<Option<AnyToggleableState>>>,
@@ -431,7 +431,7 @@ mod tests {
             toggleable,
             node,
             false,
-            registry.map(|registry| registry.as_radio_group_registry()),
+            registry,
             enabled,
             Rc::new(move |_app, _context, state| {
                 captured.set(Some(state));
@@ -475,7 +475,7 @@ mod tests {
             let build = |captured: &Rc<Cell<Option<AnyToggleableState>>>| {
                 raw_radio(
                     node.clone(),
-                    Some(registry.handle()),
+                    Some(registry.erase()),
                     true,
                     true,
                     Rc::clone(captured),
@@ -520,7 +520,7 @@ mod tests {
 
             tester.pump_widget(raw_radio(
                 node,
-                Some(registry.handle()),
+                Some(registry.erase()),
                 false,
                 true,
                 captured,
@@ -629,7 +629,7 @@ mod tests {
 
         tester.pump_widget(raw_radio(
             node,
-            Some(registry.handle()),
+            Some(registry.erase()),
             true,
             false,
             Rc::new(Cell::new(None)),
@@ -645,7 +645,7 @@ mod tests {
             let captured = Rc::new(Cell::new(None));
             let radio = raw_radio(
                 node,
-                Some(registry.handle()),
+                Some(registry.erase()),
                 true,
                 false,
                 captured.clone(),

@@ -303,22 +303,21 @@ impl WidgetTester {
         }
     }
 
-    /// A frame at the app's clock of every view that asked for one since the last, as a host
-    /// refreshes each screen that has a frame waiting, with the microtasks flushed before each
-    /// half and after the frame, as flutter_test's `pump` flushes them; then the checkpoint.
+    /// A frame at the app's clock of every view that asked for one since the last, pumped as the
+    /// shell runs one: a checkpoint before the frame, between its two halves and after it,
+    /// standing in for flutter_test's microtask flush, so an awaited continuation resumes in the
+    /// frame it would in a running app.
     fn frame_if_asked(&mut self) {
         self.in_pump = true;
-        {
-            let mut app = self.cell.borrow_mut();
-            let views = self.platform.take_frame_requests();
-            if !views.is_empty() {
-                app.drain_microtasks();
-                let now = app.clock();
-                SchedulerBinding::handle_begin_frame(&mut app, &views, Some(now));
-                app.drain_microtasks();
-                SchedulerBinding::handle_draw_frame(&mut app, &views);
-            }
-            app.drain_microtasks();
+        let (views, now) = {
+            let app = self.cell.borrow();
+            (self.platform.take_frame_requests(), app.clock())
+        };
+        self.cell.checkpoint();
+        if !views.is_empty() {
+            SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), &views, Some(now));
+            self.cell.checkpoint();
+            SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut(), &views);
         }
         self.cell.checkpoint();
         self.in_pump = false;

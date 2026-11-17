@@ -118,7 +118,7 @@ pub use os::DmabufBuffer;
 #[cfg(target_os = "windows")]
 pub use os::SharedTexture;
 #[cfg(target_os = "macos")]
-pub use os::{CoreVideoFrame, SurfaceBuffer};
+pub use os::{CoreVideoFrame, SurfaceBuffer, UserActivity};
 pub use platform::WinitPlatform;
 pub use system_requests::{NotificationActivationHandler, Reopen, ReopenHandler};
 pub use windows_os::Windows;

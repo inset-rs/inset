@@ -19,9 +19,9 @@ use waft_foundation::{
 use waft_painting::{AlignmentGeometry, AnyColor, Gradient, HSLColor, LinearGradient};
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    AnyRadioClient, AnyRadioGroupRegistry, AnyToggleableState, BuildContext, CustomPaint,
-    FocusNode, FocusNodeLeaf, FocusNodeRef, IntoWidget, KeyRef, RadioBuilder, RadioGroup,
-    RadioGroupRegistry, RawRadio, State, StateData, StatefulWidget, ToggleablePainter,
+    AnyRadioClient, AnyToggleableState, BuildContext, CustomPaint, FocusNode, FocusNodeLeaf,
+    FocusNodeRef, IntoWidget, KeyRef, RadioBuilder, RadioGroup, RadioGroupRegistry,
+    RadioGroupRegistryRef, RawRadio, State, StateData, StatefulWidget, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, WidgetRef, WidgetState, WidgetStateProperty,
     WidgetStatePropertyRef, WidgetStates,
 };
@@ -207,7 +207,7 @@ pub struct CupertinoRadio<T: Clone + PartialEq + 'static> {
     ///
     /// Unless provided, the [`BuildContext`] will be used to look up the ancestor
     /// [`RadioGroupRegistry`].
-    pub group_registry: Option<AnyRadioGroupRegistry<T>>,
+    pub group_registry: Option<RadioGroupRegistryRef<T>>,
     /// Whether this widget is interactive.
     ///
     /// If not provided, this widget will be interactable if one of the following is true:
@@ -336,7 +336,7 @@ impl<T: Clone + PartialEq + 'static> CupertinoRadio<T> {
     }
 
     /// Dart `CupertinoRadio(groupRegistry:)`.
-    pub fn group_registry(mut self, group_registry: AnyRadioGroupRegistry<T>) -> CupertinoRadio<T> {
+    pub fn group_registry(mut self, group_registry: RadioGroupRegistryRef<T>) -> CupertinoRadio<T> {
         self.group_registry = Some(group_registry);
         self
     }
@@ -400,8 +400,8 @@ impl<T: Clone + PartialEq + 'static> CupertinoRadioState<T> {
         RadioGroup::<T>::maybe_of(app, context).is_some()
     }
 
-    fn effective_registry(self: Handle<Self>, app: &mut App) -> AnyRadioGroupRegistry<T> {
-        if let Some(group_registry) = self.widget(app).group_registry {
+    fn effective_registry(self: Handle<Self>, app: &mut App) -> RadioGroupRegistryRef<T> {
+        if let Some(group_registry) = self.widget(app).group_registry.clone() {
             return group_registry;
         }
 
@@ -411,16 +411,15 @@ impl<T: Clone + PartialEq + 'static> CupertinoRadioState<T> {
         }
 
         // Handles deprecated API.
-        let registry = match app.get(self).internal_radio_registry.handle() {
+        let registry = match app.get(self).internal_radio_registry.as_ref().cloned() {
             Some(registry) => registry,
             None => {
                 let registry = app.create(RadioRegistry { state: self });
-                let handle = registry.handle();
-                app.get_mut(self).internal_radio_registry = Some(registry);
-                handle
+                app.get_mut(self).internal_radio_registry = Some(registry.clone());
+                registry
             }
         };
-        registry.as_radio_group_registry()
+        registry.erase()
     }
 
     /// Dart's `effectiveMouseCursor`, built from the widget's cursor.

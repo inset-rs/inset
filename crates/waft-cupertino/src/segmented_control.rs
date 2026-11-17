@@ -23,13 +23,12 @@ use waft_rendering::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{MouseCursor, SystemMouseCursors};
 use waft_widgets::{
-    ActionRef, Actions, AnyFocusNode, AnyRadioGroupRegistry, BuildContext, Center,
-    DefaultTextStyle, Directionality, Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey,
-    IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, MouseRegion,
-    MultiChildRenderObjectWidget, Padding, RadioClient, RadioClientData, RadioGroup,
-    RenderObjectWidget, Semantics, State, StateData, StatefulWidget, TickerProviderStateMixin,
-    TickerProviderStateMixinData, UnconstrainedBox, VoidCallbackAction, VoidCallbackIntent,
-    WidgetRef,
+    ActionRef, Actions, AnyFocusNode, BuildContext, Center, DefaultTextStyle, Directionality,
+    Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey, IconTheme, IconThemeData,
+    IntoWidget, KeyEventResult, KeyRef, MouseRegion, MultiChildRenderObjectWidget, Padding,
+    RadioClient, RadioClientData, RadioGroup, RadioGroupRegistryRef, RenderObjectWidget, Semantics,
+    State, StateData, StatefulWidget, TickerProviderStateMixin, TickerProviderStateMixinData,
+    UnconstrainedBox, VoidCallbackAction, VoidCallbackIntent, WidgetRef,
 };
 
 use crate::theme::CupertinoTheme;
@@ -352,7 +351,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> SegmentButtonState<T> {
         }
     }
 
-    fn registry_for_widget(self: Handle<Self>, app: &mut App) -> Option<AnyRadioGroupRegistry<T>> {
+    fn registry_for_widget(self: Handle<Self>, app: &mut App) -> Option<RadioGroupRegistryRef<T>> {
         let context = self.context(app);
         if self.widget(app).enabled {
             RadioGroup::<T>::maybe_of(app, context)
