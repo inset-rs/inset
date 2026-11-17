@@ -12,8 +12,8 @@ use std::rc::Rc;
 use waft_foundation::{App, Listener};
 use waft_material::{
     FilledButton, Icons, MaterialBanner, MaterialBannerClosedReason, OutlinedButton,
-    ScaffoldMessenger, SnackBar, SnackBarAction, SnackBarBehavior, TextButton, Tooltip,
-    show_bottom_sheet, show_modal_bottom_sheet,
+    ScaffoldMessenger, ShowModalBottomSheet, SnackBar, SnackBarAction, SnackBarBehavior,
+    TextButton, Tooltip, show_bottom_sheet,
 };
 use waft_painting::{EdgeInsetsGeometry, TextSpan};
 use waft_rendering::MainAxisSize;
@@ -132,29 +132,7 @@ fn modal_sheet_button(context: BuildContext) -> WidgetRef {
     FilledButton::new(
         Some(Listener::new(move |app: &mut App| {
             // Dart's defaults for every argument but the builder.
-            show_modal_bottom_sheet(
-                app,
-                context,
-                sheet(MODAL_SHEET_TEXT, "Close sheet"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-                SCROLL_CONTROL_DISABLED_MAX_HEIGHT_RATIO,
-                false,
-                true,
-                true,
-                None,
-                false,
-                None,
-                None,
-                None,
-                None,
-            );
+            ShowModalBottomSheet::new(sheet(MODAL_SHEET_TEXT, "Close sheet")).show(app, context);
         })),
         Some(Text::new("Modal sheet")),
     )

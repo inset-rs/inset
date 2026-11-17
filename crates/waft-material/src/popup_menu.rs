@@ -5773,38 +5773,19 @@ mod tests {
                                 vec![PopupMenuEntryRef::new(
                                     PopupMenuItem::new(Some(Text::new("ACTION")))
                                         .on_tap(Listener::new(move |app| {
-                                            drop(crate::bottom_sheet::show_modal_bottom_sheet(
-                                                app,
-                                                context,
-                                                Rc::new(|_app, _context| {
-                                                    SizedBox::new()
-                                                        .height(200.0)
-                                                        .child(
-                                                            Center::new().child(Text::new(
+                                            drop(
+                                                crate::bottom_sheet::ShowModalBottomSheet::new(
+                                                    Rc::new(|_app, _context| {
+                                                        SizedBox::new()
+                                                            .height(200.0)
+                                                            .child(Center::new().child(Text::new(
                                                                 "ModalBottomSheet",
-                                                            )),
-                                                        )
-                                                        .into_widget()
-                                                }),
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                                false,
-                                                9.0 / 16.0,
-                                                false,
-                                                true,
-                                                true,
-                                                None,
-                                                false,
-                                                None,
-                                                None,
-                                                None,
-                                                None,
-                                            ));
+                                                            )))
+                                                            .into_widget()
+                                                    }),
+                                                )
+                                                .show(app, context),
+                                            );
                                         }))
                                         .value(10),
                                 )]
