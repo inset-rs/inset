@@ -13,8 +13,10 @@ use web_time::Instant;
 
 use crate::clipboard::Clipboard;
 use crate::file_dialogs::FileDialogs;
+use crate::files::Files;
 use crate::fonts::FontSource;
 use crate::geometry::{Color, Offset, Rect};
+use crate::http::HttpClient;
 use crate::menus::{DockMenu, MenuBar, PopupMenus, TrayIcons};
 use crate::notifications::Notifications;
 use crate::opener::Opener;
@@ -793,6 +795,21 @@ pub trait Platform: Any {
 
     /// The system's file dialogs, or `None` where the system has none.
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
+        None
+    }
+
+    /// The system's HTTP client, or `None` where the host has none. A client sends every method,
+    /// streams bodies both ways, follows redirects as the request asks, and cancels a transfer
+    /// dropped mid-way; `NetworkImage` fetches through it, and an app may as well. A host that
+    /// carries the system's session honours its proxy and its certificates.
+    fn http(&self) -> Option<&dyn HttpClient> {
+        None
+    }
+
+    /// The system's file system, or `None` where the host has none, as a browser tab has none.
+    /// Every path an app reads or writes goes through it, a picked file's among them
+    /// ([`PickedFile::read_all`](crate::PickedFile::read_all)); `FileImage` reads through it.
+    fn files(&self) -> Option<&dyn Files> {
         None
     }
 

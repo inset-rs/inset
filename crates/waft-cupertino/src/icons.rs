@@ -7514,7 +7514,9 @@ mod tests {
         binding.install_fonts(&mut app, |fonts| {
             waft_embedder::set_default_font_manager(
                 fonts,
-                Box::new(waft_embedder::SystemFontSource::platform()),
+                Box::new(waft_embedder::SystemFontSource::new(
+                    valo_system_fonts::fontmgr::platform(),
+                )),
                 &families,
             );
         });

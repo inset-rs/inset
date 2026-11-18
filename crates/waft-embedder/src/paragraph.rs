@@ -2094,7 +2094,9 @@ mod layout_tests {
         let mut fonts = FontCollection::new();
         crate::set_default_font_manager(
             &mut fonts,
-            Box::new(crate::SystemFontSource::platform()),
+            Box::new(crate::SystemFontSource::new(
+                valo_system_fonts::fontmgr::platform(),
+            )),
             &crate::InertPlatform.default_font_families(),
         );
         let mut builder = ParagraphBuilder::new(ParagraphStyle::new());

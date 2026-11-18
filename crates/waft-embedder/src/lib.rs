@@ -17,11 +17,13 @@ mod composition;
 mod cue;
 mod drag_drop;
 mod file_dialogs;
+mod files;
 mod fonts;
 mod fragment_program;
 mod fragment_shader;
 mod geometry;
 mod hardware_buffers;
+mod http;
 mod image;
 pub mod image_codecs;
 mod key;
@@ -76,6 +78,10 @@ pub use file_dialogs::{
     FileWriter, FolderEntriesFuture, FolderEntry, FolderHandle, FolderOptions, OpenOptions,
     PickedFile, PickedFolder, SaveOptions,
 };
+pub use files::{
+    File, FileKind, FileMetadataFuture, FileOperationFuture, Files, ListFilesFuture, ListedEntry,
+    Metadata, OpenFileFuture, OpenMode, ReadFileFuture, WriteFileFuture,
+};
 pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
     default_font_families, set_default_font_manager,
@@ -87,6 +93,10 @@ pub use fragment_shader::{
 };
 pub use geometry::*;
 pub use hardware_buffers::{HardwareBuffer, HardwareBufferAllocator, HardwareBufferUsage};
+pub use http::{
+    Body, BodyReadAllFuture, BodyReadFuture, BodyStream, BodyTrailersFuture, HttpClient, HttpError,
+    HttpFuture, RedirectPolicy, SendOptions,
+};
 pub use image::{
     ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition,
 };

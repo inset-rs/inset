@@ -349,7 +349,9 @@ impl Platform for AndroidPlatform {
 
     /// The platform's fonts, as its own configuration lists them.
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
-        Some(Box::new(SystemFontSource::platform()))
+        Some(Box::new(SystemFontSource::new(
+            valo_system_fonts::fontmgr::platform(),
+        )))
     }
 
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {

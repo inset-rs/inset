@@ -8,6 +8,7 @@
 use std::fmt::{self, Debug};
 use std::future::Future;
 use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,13 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use waft_embedder::{
-    ImageCodec, ImageDecodeError, ImageFrame, ImageRepetition, Locale, Size, TargetPlatform,
+    Body, ImageCodec, ImageDecodeError, ImageFrame, ImageRepetition, Locale, SendOptions, Size,
+    TargetPlatform,
 };
 use waft_foundation::{App, Handle, Listener, Timer};
 
 use crate::basic_types::TextDirection;
 use crate::image_cache::{ImageCache, ImageCacheKey};
-use crate::image_stream::{ImageInfo, ImageStream, ImageStreamCompleter};
+use crate::image_stream::{ImageChunkEvent, ImageInfo, ImageStream, ImageStreamCompleter};
 use waft_foundation::Ref;
 
 /// Bytes on their way from a bundle. Dart's `Future<ByteData>`.
@@ -325,6 +327,302 @@ impl ImageProvider for MemoryImage {
             .downcast_ref::<MemoryImageKey>()
             .expect("MemoryImage must load its resolved key");
         decode_into_completer(app, key.bytes.for_codec(), key.scale)
+    }
+}
+
+/// Decodes an image from a URL. Flutter `NetworkImage`.
+///
+/// The bytes come from the platform's HTTP client ([`Platform::http`](waft_embedder::Platform::http)),
+/// which is `NSURLSession` on Apple's systems and `fetch` in a browser; an app may give the
+/// request headers and a scale. The image is cached by URL and scale, so every widget showing
+/// the same picture shares one fetch and one decode.
+#[derive(Clone, Debug)]
+pub struct NetworkImage {
+    /// The URL to fetch the image from.
+    pub url: String,
+    /// Linear pixels per logical point in the decoded image.
+    pub scale: f64,
+    /// The HTTP headers to send with the request.
+    pub headers: Option<http::HeaderMap>,
+}
+
+impl NetworkImage {
+    /// Creates a provider for the image at `url` at the natural scale.
+    pub fn new(url: impl Into<String>) -> NetworkImage {
+        NetworkImage {
+            url: url.into(),
+            scale: 1.0,
+            headers: None,
+        }
+    }
+
+    /// Dart `NetworkImage(scale:)`.
+    pub fn scale(mut self, scale: f64) -> NetworkImage {
+        self.scale = scale;
+        self
+    }
+
+    /// The headers the request carries, as Dart's `headers` map.
+    pub fn headers(mut self, headers: http::HeaderMap) -> NetworkImage {
+        self.headers = Some(headers);
+        self
+    }
+}
+
+/// The URL and scale that name one fetched image in the cache.
+#[derive(Clone, Debug, PartialEq)]
+struct NetworkImageKey {
+    url: String,
+    scale: f64,
+}
+
+impl Hash for NetworkImageKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.url.hash(state);
+        hash_scale(self.scale, state);
+    }
+}
+
+impl ImageProvider for NetworkImage {
+    fn key(&self, _configuration: &ImageConfiguration) -> ImageCacheKey {
+        ImageCacheKey::new(NetworkImageKey {
+            url: self.url.clone(),
+            scale: self.scale,
+        })
+    }
+
+    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Ref<ImageStreamCompleter> {
+        let key = key
+            .downcast_ref::<NetworkImageKey>()
+            .expect("NetworkImage must load its resolved key");
+        let completer = ImageStreamCompleter::new(app);
+        let platform = app.platform();
+        let Some(client) = platform.http() else {
+            completer.report_error(
+                app,
+                ImageDecodeError::Failed(
+                    "this host has no HTTP client (Platform::http)".to_owned(),
+                ),
+            );
+            return completer;
+        };
+        let Ok(uri) = key.url.parse::<http::Uri>() else {
+            completer.report_error(
+                app,
+                ImageDecodeError::Failed(format!("the URL is not one: {}", key.url)),
+            );
+            return completer;
+        };
+        let mut request = http::Request::builder().method(http::Method::GET).uri(uri);
+        if let Some(headers) = &self.headers {
+            for (name, value) in headers {
+                request = request.header(name, value);
+            }
+        }
+        let Ok(request) = request.body(Body::empty()) else {
+            completer.report_error(
+                app,
+                ImageDecodeError::Failed(format!("the request for {} is not one", key.url)),
+            );
+            return completer;
+        };
+        let response = client.send(request, SendOptions::default());
+        let scale = key.scale;
+        let url = key.url.clone();
+        let retained = completer.keep(app);
+        // Not held: dropping the task does not cancel it, and the completer carries the answer.
+        let _loading = app.spawn(async move |async_app| {
+            let mut response = match response.await {
+                Ok(response) => response,
+                Err(error) => {
+                    let completer = retained.handle();
+                    async_app.update(move |app| {
+                        if !app.is_disposed(completer) {
+                            completer
+                                .report_error(app, ImageDecodeError::Failed(error.to_string()));
+                        }
+                    });
+                    return;
+                }
+            };
+            let expected = response
+                .body()
+                .length()
+                .and_then(|length| usize::try_from(length).ok());
+            if response.status() != http::StatusCode::OK {
+                let status = response.status();
+                // Read it out, as Dart drains a response it does not want, so that the
+                // connection may serve another request.
+                let _ = response.body_mut().read_all().await;
+                let completer = retained.handle();
+                let url = url.clone();
+                async_app.update(move |app| {
+                    if !app.is_disposed(completer) {
+                        completer.report_error(
+                            app,
+                            ImageDecodeError::Failed(format!(
+                                "the server answered {status} for {url}"
+                            )),
+                        );
+                    }
+                });
+                return;
+            }
+            let mut bytes = Vec::with_capacity(expected.unwrap_or(0));
+            let mut chunk = vec![0; 64 * 1024];
+            loop {
+                match response.body_mut().read(&mut chunk).await {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        bytes.extend_from_slice(&chunk[..read]);
+                        let event = ImageChunkEvent {
+                            cumulative_bytes_loaded: bytes.len(),
+                            expected_total_bytes: expected,
+                        };
+                        let completer = retained.handle();
+                        async_app.update(move |app| {
+                            if !app.is_disposed(completer) {
+                                completer.report_image_chunk_event(app, event);
+                            }
+                        });
+                    }
+                    Err(error) => {
+                        let completer = retained.handle();
+                        async_app.update(move |app| {
+                            if !app.is_disposed(completer) {
+                                completer
+                                    .report_error(app, ImageDecodeError::Failed(error.to_string()));
+                            }
+                        });
+                        return;
+                    }
+                }
+            }
+            let completer = retained.handle();
+            async_app.update(move |app| {
+                if app.is_disposed(completer) {
+                    return;
+                }
+                if bytes.is_empty() {
+                    completer
+                        .report_error(app, ImageDecodeError::Failed(format!("{url} is empty")));
+                } else {
+                    decode_into(app, completer, Arc::from(bytes), scale);
+                }
+            });
+        });
+        completer
+    }
+}
+
+/// Decodes the image at a path. Flutter `FileImage`.
+///
+/// The bytes are read through the platform's file system
+/// ([`Platform::files`](waft_embedder::Platform::files)); the cache names the image by its path
+/// and scale.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileImage {
+    /// The path the image is read from.
+    pub path: PathBuf,
+    /// Linear pixels per logical point in the decoded image.
+    pub scale: f64,
+}
+
+impl FileImage {
+    /// Creates a provider for the image at `path` at the natural scale.
+    pub fn new(path: impl Into<PathBuf>) -> FileImage {
+        FileImage {
+            path: path.into(),
+            scale: 1.0,
+        }
+    }
+
+    /// Dart `FileImage(scale:)`.
+    pub fn scale(mut self, scale: f64) -> FileImage {
+        self.scale = scale;
+        self
+    }
+
+    /// The path as a string, for an error that names the file.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// One file at one scale.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct FileImageKey {
+    path: PathBuf,
+    scale_bits: u64,
+}
+
+impl ImageProvider for FileImage {
+    fn key(&self, _configuration: &ImageConfiguration) -> ImageCacheKey {
+        ImageCacheKey::new(FileImageKey {
+            path: self.path.clone(),
+            scale_bits: if self.scale == 0.0 {
+                0
+            } else {
+                self.scale.to_bits()
+            },
+        })
+    }
+
+    fn load_image(&self, app: &mut App, key: &ImageCacheKey) -> Ref<ImageStreamCompleter> {
+        let key = key
+            .downcast_ref::<FileImageKey>()
+            .expect("FileImage must load its resolved key");
+        let completer = ImageStreamCompleter::new(app);
+        let platform = app.platform();
+        let Some(files) = platform.files() else {
+            completer.report_error(
+                app,
+                ImageDecodeError::Failed(
+                    "this host has no file system (Platform::files)".to_owned(),
+                ),
+            );
+            return completer;
+        };
+        let reading = files.read(&key.path);
+        let scale = self.scale;
+        let path = key.path.clone();
+        let retained = completer.keep(app);
+        let _reading = app.spawn(async move |async_app| {
+            let bytes = match reading.await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    let completer = retained.handle();
+                    let path = path.clone();
+                    async_app.update(move |app| {
+                        if !app.is_disposed(completer) {
+                            completer.report_error(
+                                app,
+                                ImageDecodeError::Failed(format!("{}: {error}", path.display())),
+                            );
+                        }
+                    });
+                    return;
+                }
+            };
+            let completer = retained.handle();
+            async_app.update(move |app| {
+                if app.is_disposed(completer) {
+                    return;
+                }
+                if bytes.is_empty() {
+                    completer.report_error(
+                        app,
+                        ImageDecodeError::Failed(format!(
+                            "{} is empty and cannot be loaded as an image",
+                            path.display()
+                        )),
+                    );
+                } else {
+                    decode_into(app, completer, Arc::from(bytes), scale);
+                }
+            });
+        });
+        completer
     }
 }
 
@@ -686,7 +984,9 @@ impl ImagePlayback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image_stream::ImageStreamListener;
     use waft_embedder::TargetPlatform;
+    use waft_test::{MemoryFiles, MockHttpClient, MockResponse, TestPlatform};
 
     use crate::basic_types::TextDirection;
 
@@ -821,5 +1121,289 @@ mod tests {
             panic!("a bundle holding its bytes answers at once");
         };
         assert_eq!(bytes, b"one");
+    }
+
+    /// A codec that draws a still 2 x 2 image of one colour.
+    struct StillCodec;
+
+    impl ImageCodec for StillCodec {
+        fn frame_count(&self) -> u32 {
+            1
+        }
+
+        fn repetition(&self) -> ImageRepetition {
+            ImageRepetition::Once
+        }
+
+        fn next_frame(&mut self) -> waft_embedder::ImageFrameFuture<'_> {
+            Box::pin(std::future::ready(Ok(ImageFrame {
+                image: waft_embedder::test_support::solid_image([2, 2], [1, 2, 3, 255]),
+                duration: Duration::ZERO,
+            })))
+        }
+    }
+
+    /// An app whose host has `http` and `files`, and decodes every image to [`StillCodec`].
+    fn app_with(
+        http: Option<MockHttpClient>,
+        files: Option<MemoryFiles>,
+    ) -> Rc<waft_foundation::AppCell> {
+        let mut platform = TestPlatform::new().on(TargetPlatform::MacOS);
+        if let Some(http) = http {
+            platform = platform.with_http(Rc::new(http));
+        }
+        if let Some(files) = files {
+            platform = platform.with_files(Rc::new(files));
+        }
+        let platform = platform.with_image_codec(|_bytes| {
+            Box::pin(std::future::ready(Ok(
+                Box::new(StillCodec) as Box<dyn ImageCodec>
+            )))
+        });
+        waft_foundation::AppCell::with_platform(Rc::new(platform))
+    }
+
+    /// Runs checkpoints until `done` says the image arrived or failed.
+    fn settle(cell: &Rc<waft_foundation::AppCell>, done: &dyn Fn() -> bool) {
+        for _ in 0..20 {
+            cell.checkpoint();
+            if done() {
+                return;
+            }
+        }
+        panic!("the image did not settle");
+    }
+
+    #[test]
+    fn a_network_image_reports_each_chunk_with_the_length_the_head_named() {
+        let url = "https://example.test/photo.png";
+        let chunks = vec![b"abcd".to_vec(), b"efgh".to_vec(), b"ij".to_vec()];
+        let client =
+            MockHttpClient::new().answering(url, MockResponse::new().chunks(chunks.clone()));
+        let cell = app_with(Some(client), None);
+        let provider = NetworkImage::new(url).scale(2.0);
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let events = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let image: Rc<std::cell::RefCell<Option<ImageInfo>>> = Rc::default();
+        let failed = Rc::new(std::cell::RefCell::new(None));
+        {
+            let mut app = cell.borrow_mut();
+            let record = Rc::clone(&events);
+            let arrived = Rc::clone(&image);
+            let slot = Rc::clone(&failed);
+            stream.add_listener(
+                &mut app,
+                ImageStreamListener::new(Rc::new(move |_app, info, _| {
+                    *arrived.borrow_mut() = Some(info.clone());
+                }))
+                .on_chunk(Rc::new(move |_app, event| record.borrow_mut().push(*event)))
+                .on_error(Rc::new(move |_app, error| {
+                    *slot.borrow_mut() = Some(error.clone());
+                })),
+            );
+        }
+        let done = {
+            let image = Rc::clone(&image);
+            let failed = Rc::clone(&failed);
+            move || image.borrow().is_some() || failed.borrow().is_some()
+        };
+        settle(&cell, &done);
+        assert!(failed.borrow().is_none(), "{:?}", failed.borrow());
+        assert_eq!(
+            events.borrow().as_slice(),
+            &[
+                ImageChunkEvent {
+                    cumulative_bytes_loaded: 4,
+                    expected_total_bytes: Some(10),
+                },
+                ImageChunkEvent {
+                    cumulative_bytes_loaded: 8,
+                    expected_total_bytes: Some(10),
+                },
+                ImageChunkEvent {
+                    cumulative_bytes_loaded: 10,
+                    expected_total_bytes: Some(10),
+                },
+            ]
+        );
+        assert_eq!(image.borrow().as_ref().unwrap().scale, 2.0);
+    }
+
+    #[test]
+    fn a_network_image_that_is_not_ok_fails_and_leaves_the_cache_untracked() {
+        let url = "https://example.test/missing.png";
+        let client = MockHttpClient::new()
+            .answering(url, MockResponse::new().status(http::StatusCode::NOT_FOUND));
+        let cell = app_with(Some(client), None);
+        let provider = NetworkImage::new(url);
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let failed: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        {
+            let mut app = cell.borrow_mut();
+            let slot = Rc::clone(&failed);
+            stream.add_listener(
+                &mut app,
+                ImageStreamListener::new(Rc::new(|_app, _info, _| {})).on_error(Rc::new(
+                    move |_app, error| {
+                        *slot.borrow_mut() = Some(error.to_string());
+                    },
+                )),
+            );
+        }
+        settle(&cell, &|| failed.borrow().is_some());
+        assert!(failed.borrow().as_ref().unwrap().contains("404"));
+        let mut app = cell.borrow_mut();
+        let cache = ImageCache::instance(&mut app);
+        assert_eq!(cache.pending_image_count(&app), 0);
+        assert!(!cache.contains_key(&app, &provider.key(&ImageConfiguration::EMPTY)));
+    }
+
+    #[test]
+    fn two_network_images_of_the_same_url_and_scale_share_one_request() {
+        let url = "https://example.test/photo.png";
+        let client =
+            MockHttpClient::new().answering(url, MockResponse::new().body(b"pixels".to_vec()));
+        let cell = app_with(Some(client.clone()), None);
+        let first = {
+            let mut app = cell.borrow_mut();
+            NetworkImage::new(url)
+                .headers(http::HeaderMap::from_iter([(
+                    http::header::ACCEPT,
+                    http::HeaderValue::from_static("image/png"),
+                )]))
+                .resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let first_completer = {
+            let app = cell.borrow();
+            first.completer(&app)
+        };
+        settle(&cell, &|| {
+            let app = cell.borrow();
+            first_completer
+                .map(|completer| completer.current_image(&app).is_some())
+                .unwrap_or(false)
+        });
+        let second = {
+            let mut app = cell.borrow_mut();
+            NetworkImage::new(url).resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let second_completer = {
+            let app = cell.borrow();
+            second.completer(&app)
+        };
+        assert_eq!(first_completer, second_completer);
+        assert_eq!(client.asked().len(), 1);
+        assert_eq!(client.asked()[0].headers[http::header::ACCEPT], "image/png");
+    }
+
+    #[test]
+    fn an_image_with_no_http_client_fails_with_a_clear_error() {
+        let cell = app_with(None, None);
+        let provider = NetworkImage::new("https://example.test/a.png");
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let failed: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        {
+            let mut app = cell.borrow_mut();
+            let slot = Rc::clone(&failed);
+            stream.add_listener(
+                &mut app,
+                ImageStreamListener::new(Rc::new(|_app, _info, _| {})).on_error(Rc::new(
+                    move |_app, error| {
+                        *slot.borrow_mut() = Some(error.to_string());
+                    },
+                )),
+            );
+        }
+        settle(&cell, &|| failed.borrow().is_some());
+        assert!(failed.borrow().as_ref().unwrap().contains("no HTTP client"));
+    }
+
+    #[test]
+    fn a_file_image_reads_through_the_platforms_files_and_caches_by_path_and_scale() {
+        let files = MemoryFiles::new().with_file("/photo.png", b"pixels");
+        let cell = app_with(None, Some(files));
+        let provider = FileImage::new("/photo.png").scale(2.0);
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let image: Rc<std::cell::RefCell<Option<ImageInfo>>> = Rc::default();
+        {
+            let mut app = cell.borrow_mut();
+            let arrived = Rc::clone(&image);
+            stream.add_listener(
+                &mut app,
+                ImageStreamListener::new(Rc::new(move |_app, info, _| {
+                    *arrived.borrow_mut() = Some(info.clone());
+                })),
+            );
+        }
+        settle(&cell, &|| image.borrow().is_some());
+        assert_eq!(image.borrow().as_ref().unwrap().scale, 2.0);
+        let first_completer = {
+            let app = cell.borrow();
+            stream.completer(&app)
+        };
+        let second = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        assert_eq!(first_completer, {
+            let app = cell.borrow();
+            second.completer(&app)
+        });
+    }
+
+    #[test]
+    fn an_empty_file_fails_and_leaves_the_cache_untracked() {
+        let files = MemoryFiles::new().with_file("/empty.png", b"");
+        let cell = app_with(None, Some(files));
+        let provider = FileImage::new("/empty.png");
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let failed: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        {
+            let mut app = cell.borrow_mut();
+            let slot = Rc::clone(&failed);
+            stream.add_listener(
+                &mut app,
+                ImageStreamListener::new(Rc::new(|_app, _info, _| {})).on_error(Rc::new(
+                    move |_app, error| {
+                        *slot.borrow_mut() = Some(error.to_string());
+                    },
+                )),
+            );
+        }
+        settle(&cell, &|| failed.borrow().is_some());
+        assert!(failed.borrow().as_ref().unwrap().contains("empty"));
+        let mut app = cell.borrow_mut();
+        let cache = ImageCache::instance(&mut app);
+        assert_eq!(cache.pending_image_count(&app), 0);
+        assert!(!cache.contains_key(&app, &provider.key(&ImageConfiguration::EMPTY)));
+    }
+
+    #[test]
+    fn two_file_images_of_the_same_path_and_scale_are_one_key() {
+        let one = FileImage::new("/a.png");
+        let two = FileImage::new("/a.png");
+        assert_eq!(
+            one.key(&ImageConfiguration::EMPTY),
+            two.key(&ImageConfiguration::EMPTY)
+        );
+        assert_ne!(
+            one.key(&ImageConfiguration::EMPTY),
+            one.clone().scale(2.0).key(&ImageConfiguration::EMPTY)
+        );
     }
 }

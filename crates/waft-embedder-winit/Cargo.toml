@@ -20,6 +20,7 @@ test-support = []
 [dependencies]
 waft-embedder.workspace = true
 valo.workspace = true
+valo-system-fonts.workspace = true
 valo-codec.workspace = true
 # The steps of a clip's path, handed to Core Animation as a mask.
 valo-geometry.workspace = true
@@ -182,5 +183,6 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 # `os/macos`, `os/windows`, `os/linux/wayland` and `os/linux/dmabuf` (libwayland's proxies, GBM,
 # DRM and dma-buf ioctls), `os/linux/local_time` (the C library's `localtime_r`) and the tests'
 # AppKit support, for a local event monitor, alone allow it.
+
 [lints.rust]
 unsafe_code = "deny"

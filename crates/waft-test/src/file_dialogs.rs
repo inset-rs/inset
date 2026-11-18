@@ -459,7 +459,10 @@ mod tests {
         let Some(mut picked) = now(dialogs.open_file(None, OpenOptions::default())).unwrap() else {
             panic!("a pick");
         };
-        assert_eq!(now(picked.read_all()).unwrap(), b"hello");
+        assert_eq!(
+            now(picked.read_all(&crate::MemoryFiles::new())).unwrap(),
+            b"hello"
+        );
         let PickedFile::Handle(handle) = &picked else {
             panic!("a handle");
         };

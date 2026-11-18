@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+valo-system-fonts.workspace = true
 waft-animation.workspace = true
 waft-embedder.workspace = true
 waft-foundation.workspace = true

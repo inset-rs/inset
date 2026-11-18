@@ -78,6 +78,25 @@ pub type ImageErrorListener = Rc<ImageErrorCallback>;
 
 type ImageErrorCallback = dyn Fn(&mut App, &ImageDecodeError);
 
+/// Called as an image's bytes arrive, before it is whole.
+pub type ImageChunkListener = Rc<ImageChunkCallback>;
+
+type ImageChunkCallback = dyn Fn(&mut App, &ImageChunkEvent);
+
+/// An immutable notification of image bytes that have been incrementally loaded. Flutter
+/// `ImageChunkEvent`.
+///
+/// A provider that reads a body in pieces reports one after each piece: a network image's
+/// bytes over the wire, or a file's from disk. The expected total is what lets a listener show
+/// how far along the load is; it is not the decoded image's size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageChunkEvent {
+    /// The bytes received so far.
+    pub cumulative_bytes_loaded: usize,
+    /// How many bytes the whole image is expected to take, when the source said.
+    pub expected_total_bytes: Option<usize>,
+}
+
 /// What a caller wants to hear about an image. Flutter `ImageStreamListener`.
 ///
 /// Without an error listener a failure is silent here, where Dart's would reach
@@ -87,6 +106,8 @@ type ImageErrorCallback = dyn Fn(&mut App, &ImageDecodeError);
 pub struct ImageStreamListener {
     /// Called for each frame, including one that had already arrived.
     pub on_image: ImageListener,
+    /// Called as each piece of the image's bytes arrives.
+    pub on_chunk: Option<ImageChunkListener>,
     /// Called instead when the image failed.
     pub on_error: Option<ImageErrorListener>,
 }
@@ -94,6 +115,7 @@ pub struct ImageStreamListener {
 /// Callback identities without owning them, for a subscription that removes itself.
 pub(crate) struct WeakImageStreamListener {
     on_image: std::rc::Weak<ImageCallback>,
+    on_chunk: Option<std::rc::Weak<ImageChunkCallback>>,
     on_error: Option<std::rc::Weak<ImageErrorCallback>>,
 }
 
@@ -101,6 +123,10 @@ impl WeakImageStreamListener {
     pub(crate) fn upgrade(&self) -> Option<ImageStreamListener> {
         Some(ImageStreamListener {
             on_image: self.on_image.upgrade()?,
+            on_chunk: match &self.on_chunk {
+                Some(callback) => Some(callback.upgrade()?),
+                None => None,
+            },
             on_error: match &self.on_error {
                 Some(callback) => Some(callback.upgrade()?),
                 None => None,
@@ -113,6 +139,7 @@ impl ImageStreamListener {
     pub(crate) fn downgrade(&self) -> WeakImageStreamListener {
         WeakImageStreamListener {
             on_image: Rc::downgrade(&self.on_image),
+            on_chunk: self.on_chunk.as_ref().map(Rc::downgrade),
             on_error: self.on_error.as_ref().map(Rc::downgrade),
         }
     }
@@ -121,8 +148,15 @@ impl ImageStreamListener {
     pub fn new(on_image: ImageListener) -> ImageStreamListener {
         ImageStreamListener {
             on_image,
+            on_chunk: None,
             on_error: None,
         }
+    }
+
+    /// Dart `ImageStreamListener(onChunk:)`.
+    pub fn on_chunk(mut self, on_chunk: ImageChunkListener) -> ImageStreamListener {
+        self.on_chunk = Some(on_chunk);
+        self
     }
 
     /// Dart `ImageStreamListener(onError:)`.
@@ -131,10 +165,15 @@ impl ImageStreamListener {
         self
     }
 
-    /// Whether both halves are the same callbacks as `other`'s, which is how a listener is
-    /// found again to remove it.
+    /// Whether every callback is the same as `other`'s, which is how a listener is found again
+    /// to remove it.
     fn is(&self, other: &ImageStreamListener) -> bool {
         Rc::ptr_eq(&self.on_image, &other.on_image)
+            && match (&self.on_chunk, &other.on_chunk) {
+                (None, None) => true,
+                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+                _ => false,
+            }
             && match (&self.on_error, &other.on_error) {
                 (None, None) => true,
                 (Some(left), Some(right)) => Rc::ptr_eq(left, right),
@@ -335,6 +374,26 @@ impl ImageStreamCompleter {
         // this pass — the same rule the change notifiers follow.
         for listener in app.get(self).listeners.clone() {
             (listener.on_image)(app, &image, false);
+        }
+    }
+
+    /// Tells every listener with a chunk callback about bytes that arrived. Flutter
+    /// `reportImageChunkEvent`.
+    pub fn report_image_chunk_event(self: Handle<Self>, app: &mut App, event: ImageChunkEvent) {
+        debug_assert!(!app.is_disposed(self));
+        if app.get(self).listeners.is_empty() {
+            return;
+        }
+        // A copy, so a listener that adds or removes one while being called does not disturb
+        // this pass.
+        let listeners: Vec<ImageChunkListener> = app
+            .get(self)
+            .listeners
+            .iter()
+            .filter_map(|listener| listener.on_chunk.clone())
+            .collect();
+        for listener in listeners {
+            listener(app, &event);
         }
     }
 

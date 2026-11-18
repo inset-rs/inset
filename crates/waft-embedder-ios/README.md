@@ -9,7 +9,7 @@ What is there:
 - Metrics: the view's bounds and safe area in physical pixels, the docked keyboard as `view_insets`, the user's appearance and languages, and the local time zone (`waft-embedder-apple`'s `local_time`).
 - Input: touches and the Apple Pencil as pointers; a hardware keyboard's presses as `KeyData`, handed back to UIKit where the framework leaves them.
 - Text input: the system's keyboards, their autocorrection, suggestions and marked text, through a `UITextInput` field per connection, configured from the field's configuration as Flutter's iOS embedding configures its own.
-- The general pasteboard, document pickers, opening links and files, the files and links the app is opened with, notifications, AVFoundation's players, media assets and cameras, Image I/O's codecs, `IOSurface` buffers.
+- The general pasteboard, document pickers, opening links and files, the files and links the app is opened with, HTTP over `NSURLSession` and the file system on the host's threads, notifications, AVFoundation's players, media assets and cameras, Image I/O's codecs, `IOSurface` buffers.
 
 What is not, and how an app sees it:
 

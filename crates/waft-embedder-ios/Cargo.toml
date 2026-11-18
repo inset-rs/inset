@@ -23,6 +23,7 @@ waft-embedder.workspace = true
 # media, Image I/O's codecs and the notification center, which macOS shares.
 waft-embedder-apple = { workspace = true, default-features = false }
 valo.workspace = true
+valo-system-fonts.workspace = true
 valo-codec.workspace = true
 # The software decoder, behind `image-software`, for the images Image I/O does not take.
 valo-codec-software = { version = "0.26.0", optional = true }
@@ -61,5 +62,6 @@ objc2-foundation = { version = "0.3", features = ["NSRange"] }
 # UIKit's classes, delegates and notices, Core Animation's display link and the pasteboard's
 # blocks need `unsafe`, which the workspace forbids; here it is denied instead, and the modules
 # that define a class or call such an API alone allow it, each saying why.
+
 [lints.rust]
 unsafe_code = "deny"

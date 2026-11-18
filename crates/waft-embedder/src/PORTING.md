@@ -37,6 +37,64 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a canvas here belongs to no view, and the embedder holds no implicit view whose metrics a canvas could read.
   Affect: the caller says which view's ratio the shadow is drawn at; a render object passes its own view's.
 
+## http.rs → dart:io `HttpClient`
+
+- Change: HTTP is an optional service on `Platform` (`Platform::http`), reached as `app.platform().http()`, where Dart's `HttpClient` is a global any code may make.
+  Reason: layering — a framework crate holds no platform, and a host may have no client at all, as a host without a network stack.
+  Affect: a provider or an app checks for `None` and reports its own error instead of calling a global client.
+
+- Change: the request and response values are the `http` crate's (`Request`, `Response`, `Method`, `StatusCode`, `HeaderMap`, `Uri`), and a body is Waft's `Body` over a `BodyStream`, where Dart's client has its own request and response types and a body is a `Stream<List<int>>`.
+  Reason: vocabulary — one set of HTTP values for every platform's client and the framework.
+  Affect: headers are appended to a `HeaderMap` and a body is read with a future rather than listened to.
+
+- Change: `HttpClient::send` answers a future of the response once its head arrives, its body still streaming; dropping the future or the response cancels the transfer.
+  Reason: language — a future is the cancellation point here, where Dart cancels through `HttpClientRequest.abort`.
+  Affect: a caller reads `response.body_mut().read_all()` after the head, and dropping an unwanted response stops its download.
+
+- Change: a request body on Apple's systems is read whole before the request is sent, where `NSURLSession` would otherwise need an `NSInputStream`.
+  Reason: platform — Waft's body reads through futures, which an `NSInputStream` cannot drive without blocking.
+  Affect: an upload is held in memory on Apple; the interface still streams a request body for a host whose client can.
+
+- Change: redirect policy and timeout are per request (`SendOptions`), where Dart sets `followRedirects`, `maxRedirects` and `connectionTimeout` on the client.
+  Reason: language — a client here is shared and immutable, so what differs between calls travels with the call.
+  Affect: each call names its policy, and two requests to one client may differ.
+
+- Change: a failure is an `HttpError` naming an invalid URL, a refusal, a connection, TLS, a timeout, too many redirects or a protocol failure, where Dart throws `SocketException`, `HandshakeException`, `HttpException` and others.
+  Reason: language — a Rust error is matched rather than caught.
+  Affect: a caller matches `HttpError` and writes one error path.
+
+- Change: the browser's client follows redirects and applies the page's CORS rules and proxy; `RedirectPolicy` and `SendOptions::timeout` are not applied there, and `fetch` exposes no trailers.
+  Reason: platform — `fetch` decides redirects and offers no per-request timeout or trailers.
+  Affect: on the web a redirect limit is the browser's, a timeout is the browser's, and `BodyStream::trailers` answers `None`.
+
+## files.rs → dart:io `File` / `RandomAccessFile`
+
+- Change: the file system is an optional service on `Platform` (`Platform::files`), reached as `app.platform().files()`, where dart:io's `File` and `Directory` are globals.
+  Reason: layering — reading a path is the host's, and a page has no file system at all.
+  Affect: an app checks for `None`; a host without files cannot read a path.
+
+- Change: every file operation answers a future, including a whole-file `read` and `write`, and there is no synchronous read or write, where dart:io has `readAsBytesSync` and `writeAsBytesSync`.
+  Reason: language — no framework call blocks the main thread, and a platform's own asynchronous file IO is awaited.
+  Affect: a caller awaits each read and write; a synchronous caller has no counterpart.
+
+- Change: an opened file is a `File` read and written at an offset, with a cursor that the `read`/`write` pair advances and `read_at`/`write_at` leave alone, where `RandomAccessFile` has `setPosition` and a position property.
+  Reason: language — the cursor is the file's own state here, not a value a caller sets.
+  Affect: seek by choosing an offset on each call; there is no position to read back.
+
+- Change: `OpenMode` renames Dart's `FileMode.read`, `write`, `append`, `writeOnly` and `writeOnlyAppend` in snake case, and `appends` means the cursor starts at the end rather than that every write is forced to the end.
+  Reason: language — the modes are Rust values, and a write at an offset after opening in append mode is allowed, as Dart allows it.
+  Affect: opening in an append mode places the cursor at the end; a later write at an offset stays at that offset.
+
+- Change: `metadata` and `list` answer `Metadata` and `ListedEntry` values, where dart:io answers `FileStat` and `FileSystemEntity` with their own methods.
+  Reason: language — plain values cross a host boundary unchanged.
+  Affect: a listing is a `Vec` of names, paths and kinds; a stat is a struct.
+
+## file_dialogs.rs → `file_selector` `XFile`
+
+- Change: `PickedFile::read_all` takes the platform's `Files` and reads a path through it, where `XFile` reads a path itself.
+  Reason: layering — a picked path is still a path, and the file system that reads it is the platform's.
+  Affect: a caller passes `app.platform().files()`; a host with no file system cannot read a picked path.
+
 ## fragment_program.rs, fragment_shader.rs → dart:ui `FragmentProgram`, `FragmentShader`, the uniform slots and `UniformArray` (`painting.dart`), engine `lib/ui/painting/fragment_program.cc`, `fragment_shader.cc`
 Ported against Flutter `9c427b5d7b`.
 

@@ -15,6 +15,7 @@ image-apple = ["dep:valo-codec-apple"]
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 waft-embedder.workspace = true
+http.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
 valo-codec-apple = { version = "0.26.0", optional = true }
@@ -28,7 +29,7 @@ wgpu.workspace = true
 block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRange", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "NSTimeZone", "NSUserDefaults", "block2"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRange", "NSRunLoop", "NSURL", "NSURLError", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSValue", "NSProcessInfo", "NSTimeZone", "NSUserDefaults", "block2"] }
 # The UTI a pasteboard names a MIME type by.
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }
 # Notifications, a notification's time as a calendar date, and its image as the PNG file an
@@ -69,5 +70,6 @@ pollster.workspace = true
 # forbids; here it is denied instead, and `composition`, `hardware_buffers`, `gpu_interop`,
 # `media`, `image_codecs`, `caption_appearance`, `notifications` and `local_time` (the C library's
 # `localtime_r`) alone allow it.
+
 [lints.rust]
 unsafe_code = "deny"

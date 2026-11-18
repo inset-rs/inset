@@ -3,8 +3,9 @@
 //! (`image_codecs`); `IOSurface`s, the hardware buffers (`hardware_buffers`), and Metal's textures
 //! over them on the app's GPU device (`gpu_interop`); Core Animation's compositor of composition
 //! layers (`composition`) and its clock beside the host's (`media_time`); AVFoundation's players
-//! and cameras (`media`), and Media Accessibility's caption settings (`caption_appearance`); the
-//! notification center (`notifications`); the local time zone, from the C library
+//! and cameras (`media`), and Media Accessibility's caption settings (`caption_appearance`); HTTP
+//! over `NSURLSession` (`http`) and the file system on Grand Central Dispatch's threads (`files`);
+//! the notification center (`notifications`); the local time zone, from the C library
 //! (`local_time`); and for their pasteboards, the UTIs the framework's MIME
 //! types are named by (`pasteboard_types`), the app's futures run on its main thread on behalf of
 //! the system (`app_futures`), and the file a promised file's bytes are written into
@@ -19,8 +20,10 @@ pub mod answer;
 pub mod app_futures;
 pub mod caption_appearance;
 pub mod composition;
+pub mod files;
 pub mod gpu_interop;
 pub mod hardware_buffers;
+pub mod http;
 pub mod image_codecs;
 pub mod local_time;
 pub mod media;

@@ -22,10 +22,9 @@ use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
-use std::task::{Context, Poll, Waker};
 
 use crate::ViewId;
+use crate::files::Files;
 
 /// The system's file dialogs. `parent` is the view whose window a dialog belongs to, which the
 /// system shows it on, as a sheet where it has them (macOS); without one it stands alone.
@@ -260,23 +259,18 @@ impl PickedFile {
         }
     }
 
-    /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path is read on a thread of
-    /// its own, a handle from its start to its end, and a stream through, which uses it up.
-    pub fn read_all(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>> + '_>> {
+    /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path through the platform's
+    /// file system, a handle from its start to its end, and a stream through, which uses it up.
+    pub fn read_all<'a>(
+        &'a mut self,
+        files: &'a dyn Files,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>> + 'a>> {
         match self {
-            PickedFile::Path(path) => Box::pin(read_path(path.clone())),
+            PickedFile::Path(path) => files.read(path),
             PickedFile::Handle(handle) => Box::pin(read_handle(&**handle)),
             PickedFile::Stream(stream) => Box::pin(read_stream(&mut **stream)),
         }
     }
-}
-
-async fn read_path(path: PathBuf) -> io::Result<Vec<u8>> {
-    let (answer, read) = one_shot();
-    std::thread::Builder::new()
-        .name("waft-read-picked-file".to_owned())
-        .spawn(move || answer.give(std::fs::read(path)))?;
-    read.await
 }
 
 async fn read_handle(handle: &dyn FileHandle) -> io::Result<Vec<u8>> {
@@ -303,54 +297,51 @@ async fn read_stream(stream: &mut dyn FileStream) -> io::Result<Vec<u8>> {
     }
 }
 
-/// An answer given once, from any thread, and the future that waits for it.
-fn one_shot<T>() -> (Answer<T>, Answered<T>) {
-    let shared = Arc::new(Mutex::new((None, None)));
-    (Answer(Arc::clone(&shared)), Answered(shared))
-}
-
-type Shared<T> = Arc<Mutex<(Option<io::Result<T>>, Option<Waker>)>>;
-
-struct Answer<T>(Shared<T>);
-
-impl<T> Answer<T> {
-    fn give(self, value: io::Result<T>) {
-        let waker = {
-            let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            shared.0 = Some(value);
-            shared.1.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-}
-
-struct Answered<T>(Shared<T>);
-
-impl<T> Future for Answered<T> {
-    type Output = io::Result<T>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<T>> {
-        let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        match shared.0.take() {
-            Some(value) => Poll::Ready(value),
-            None if Arc::strong_count(&self.0) == 1 => {
-                Poll::Ready(Err(io::Error::other("the read ended without an answer")))
-            }
-            None => {
-                shared.1 = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::task::{Context, Poll, Waker};
 
     use super::*;
+    use crate::files::{
+        FileMetadataFuture, FileOperationFuture, ListFilesFuture, OpenFileFuture, ReadFileFuture,
+        WriteFileFuture,
+    };
+
+    /// The platform's file system in these tests: the machine's, read at once, so a path is
+    /// read without a thread of the framework's.
+    struct Disk;
+
+    impl Files for Disk {
+        fn read(&self, path: &std::path::Path) -> ReadFileFuture {
+            let bytes = std::fs::read(path);
+            Box::pin(std::future::ready(bytes))
+        }
+
+        fn write(&self, _path: &std::path::Path, _bytes: &[u8]) -> WriteFileFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+
+        fn open(&self, _path: &std::path::Path, _mode: crate::OpenMode) -> OpenFileFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+
+        fn metadata(&self, _path: &std::path::Path) -> FileMetadataFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+
+        fn list(&self, _path: &std::path::Path) -> ListFilesFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+
+        fn rename(&self, _from: &std::path::Path, _to: &std::path::Path) -> FileOperationFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+
+        fn delete(&self, _path: &std::path::Path) -> FileOperationFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+    }
 
     /// A handle over bytes in memory, read a few at a time.
     struct Bytes(RefCell<Vec<u8>>);
@@ -402,17 +393,17 @@ mod tests {
     #[test]
     fn a_handle_is_read_whole_in_pieces() {
         let mut picked = PickedFile::Handle(Box::new(Bytes(RefCell::new(b"hello, file".to_vec()))));
-        assert_eq!(now(picked.read_all()).unwrap(), b"hello, file");
+        assert_eq!(now(picked.read_all(&Disk)).unwrap(), b"hello, file");
     }
 
     #[test]
-    fn a_path_is_read_whole_on_a_thread() {
+    fn a_path_is_read_through_the_platforms_files() {
         let path = std::env::temp_dir().join(format!("waft-read-all-{}", std::process::id()));
         std::fs::write(&path, b"on disk").unwrap();
         let mut picked = PickedFile::Path(path.clone());
-        assert_eq!(now(picked.read_all()).unwrap(), b"on disk");
+        assert_eq!(now(picked.read_all(&Disk)).unwrap(), b"on disk");
         std::fs::remove_file(path).unwrap();
         let mut missing = PickedFile::Path(PathBuf::from("/no/such/waft/file"));
-        assert!(now(missing.read_all()).is_err());
+        assert!(now(missing.read_all(&Disk)).is_err());
     }
 }

@@ -176,6 +176,16 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `Platform::file_dialogs`, `FileDialogs::open_file`, `open_files`, `open_folder`, `save_file`, `OpenOptions`, `FolderOptions`, `SaveOptions`, `FileType`, `PickedFile`, `FileHandle`, `FileWriter`, `FileStream`, `PickedFolder`, `FolderHandle`, `FolderEntry`, `FileDialogError`
 - Show the system's own panel, as a sheet on the parent view's window where the system has sheets; answer a path where the system gives one and the system's handle where it gives none, opening each pick as it is answered; grant writing only to a pick the app asked to write, and to a save's one file; answer `None` where the system has no file dialogs, and an error where it could not show one.
 
+**HTTP**
+- `Platform::http`, `HttpClient::send`, `Body`, `BodyStream`, `SendOptions`, `RedirectPolicy`, `HttpError`, the `http` crate's `Request`, `Response`, `Method`, `StatusCode`, `HeaderMap`, `Uri`
+- Send every method with the headers the app gives, answer the response once its head arrives with the body still streaming, honour the request's redirect policy and timeout, cancel a transfer whose future or response is dropped, and answer `None` where the host has no client. The client is the system's where it has one — `NSURLSession` on Apple's systems, `fetch` in a browser, the engine's asynchronous HTTP on a WebAssembly component — so the system's proxy, certificates and connection reuse apply. `NetworkImage` fetches through it.
+
+**Files**
+- `Platform::files`, `Files::read`, `write`, `open`, `metadata`, `list`, `rename`, `delete`, `File`, `OpenMode`, `Metadata`, `FileKind`, `ListedEntry`
+- Read a path whole, write one whole, open one to read and write at an offset and stream, answer what a path is, what a folder holds, and rename and delete, each through a future; run blocking file work off the main thread on the host's threads, and answer `None` where the host has no file system, as a browser tab has none. `FileImage` and a picked path read through it; picked files are read by `PickedFile::read_all`, which takes it.
+
+Windows' and Linux's HTTP clients, Android's, and an image cache on disk are not built yet: their hosts answer `None` for HTTP and files until then.
+
 **Opening**
 - `Platform::opener`, `Opener::open_link`, `open_file`, `reveal_file`, `can_open_link`, `OpenFuture`, `OpenError`
 - Open each in the app the system gives it, and answer `NoApp` where the system says none takes it; share a file through the system where another app cannot read it by its path; answer `can_open_link` only where the system answers for every scheme, or for the schemes the app declared, and `None` otherwise; fail what the system has no counterpart for, such as revealing a file on a phone.

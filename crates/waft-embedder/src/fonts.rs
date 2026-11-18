@@ -40,14 +40,6 @@ impl SystemFontSource {
         }
     }
 
-    /// Over this platform's own font manager.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn platform() -> SystemFontSource {
-        SystemFontSource {
-            fonts: SystemFonts::load(),
-        }
-    }
-
     /// The languages character fallback prefers, BCP 47, most preferred first (Flutter's
     /// `PlatformDispatcher.locales`).
     pub fn set_locales(&mut self, locales: Vec<String>) {

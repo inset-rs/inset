@@ -224,6 +224,9 @@ impl<T> Drop for Task<T> {
 
 #[cfg(test)]
 mod tests {
+    // A test starts the worker the host would, to cross a thread boundary for real.
+    #![allow(clippy::disallowed_methods)]
+
     use std::cell::Cell;
     use std::future::poll_fn;
     use std::rc::Rc;
