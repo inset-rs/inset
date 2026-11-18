@@ -29,9 +29,8 @@ pub trait HttpClient {
     /// read; dropping the future before then cancels the request.
     ///
     /// A redirect that resends the request's body — a 307 or a 308, or a 301 or a 302 of any
-    /// method but POST — is followed only by a client
-    /// that can send the body again: one that holds it, or [`Body::try_clone`] answered `Some`
-    /// for it. A client that streams the body, as a WebAssembly component's does, answers the
+    /// method but POST — is followed only by a client that can send the body again: one that
+    /// holds it, or [`Body::try_clone`] answered `Some` for it. A client that streams the body, as a WebAssembly component's does, answers the
     /// redirect response instead, so the app can decide what to do with a body that is gone.
     fn send(&self, request: Request<Body>, options: SendOptions) -> HttpFuture;
 }
