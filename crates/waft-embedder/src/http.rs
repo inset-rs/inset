@@ -106,10 +106,10 @@ pub enum RedirectPolicy {
     ///
     /// A redirect that keeps the request's method resends its body too (a 307 or a 308, and a
     /// 301 or a 302 of any method but POST, as fetch and RFC 9110 have it; a 303, and a 301 or a
-    /// 302 of a POST, become a GET with no body): a client follows it when it holds
-    /// the body, or [`Body::try_clone`] answers `Some` for it; otherwise it answers the redirect
-    /// response as it is, rather than sending a request whose body is missing, and leaves the
-    /// decision to the app.
+    /// 302 of a POST, become a GET with no body): a client follows it when it holds the body, or
+    /// [`Body::try_clone`] answers `Some` for it; otherwise it answers the redirect response as
+    /// it is, rather than sending a request whose body is missing, and leaves the decision to
+    /// the app.
     Follow {
         /// How many redirects may be followed.
         max: usize,
