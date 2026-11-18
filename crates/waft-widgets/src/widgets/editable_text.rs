@@ -7229,7 +7229,9 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
+        // The line's height is its font's, so the test uses flutter_test's fonts rather than
+        // whichever font this machine answers with.
+        PaintingBinding::instance(&mut app).install_flutter_test_fonts(&mut app);
         let controller = app.create(BoxesController {
             change_notifier: ChangeNotifierData::new(),
             text_editing_controller: TextEditingControllerData::new(

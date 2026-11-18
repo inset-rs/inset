@@ -2682,9 +2682,11 @@ mod tests {
         let after = editable
             .get_rect_for_composing_range(&mut app, cjk)
             .expect("systemFontsDidChange rebuilds the painter against the new face");
+        // The fallback face's ascent and descent replace the primary font's around
+        // .notdef. The advance alone cannot tell them apart: both .notdef and a CJK glyph
+        // are an em wide on some systems, so the whole box is compared.
         assert_ne!(
-            before.width(),
-            after.width(),
+            before, after,
             "the CJK glyph replaces .notdef once its face is available"
         );
     }
