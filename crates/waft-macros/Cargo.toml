@@ -9,6 +9,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[package.metadata.waft]
+# A proc macro that writes each target's entry point.
+platform = true
+
 [lib]
 proc-macro = true
 

@@ -2,13 +2,16 @@
 //! phone, a desktop and a browser is the platform's, which answers at run time; a `cfg` on the
 //! target in framework code is a platform check in the wrong layer.
 //!
-//! The crates this scans are the framework's: every crate in `crates/` but those named in
-//! `platform-guard-exempt-crates.txt`, which CI's thread check reads too. Test code is read out,
-//! since a test may be about one target. The few Flutter-shaped exceptions are named below with
-//! why they are not a platform in framework code.
+//! The crates this scans are the framework's: every crate in `crates/` whose manifest does not
+//! say it is a platform. A platform says so itself, with `[package.metadata.waft] platform =
+//! true`, and CI's thread check reads the same flag. Test code is read out, since a test may be
+//! about one target. The few Flutter-shaped exceptions are named below with why they are not a
+//! platform in framework code.
 
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// The lines where a target switch is Flutter's own, not a platform check in the framework: a
 /// file and the text its line holds. Each names one switch, so a new one in the same file is
@@ -45,15 +48,10 @@ fn no_framework_crate_switches_on_the_target() {
         .parent()
         .expect("the repository root")
         .to_owned();
-    let exempt = exempt_crates(&root);
+    let platforms = platform_crates(&root);
     let mut hits = Vec::new();
     for crate_dir in crate_dirs(&root.join("crates")) {
-        let name = crate_dir
-            .file_name()
-            .expect("a crate folder's name")
-            .to_string_lossy()
-            .into_owned();
-        if exempt.contains(&name) {
+        if platforms.contains(&crate_dir) {
             continue;
         }
         let src = crate_dir.join("src");
@@ -73,14 +71,30 @@ fn no_framework_crate_switches_on_the_target() {
     );
 }
 
-/// The crates the guard leaves alone, one name a line, comments read out.
-fn exempt_crates(root: &Path) -> Vec<String> {
-    fs::read_to_string(root.join("platform-guard-exempt-crates.txt"))
-        .expect("the guard's list of exempt crates")
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
+/// The crates whose manifest says it is a platform: `[package.metadata.waft] platform = true`.
+fn platform_crates(root: &Path) -> Vec<PathBuf> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .current_dir(root)
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .output()
+        .expect("cargo metadata runs");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: Value = serde_json::from_slice(&output.stdout).expect("cargo metadata's JSON");
+    let crates = root.join("crates");
+    metadata["packages"]
+        .as_array()
+        .expect("cargo metadata's packages")
+        .iter()
+        .filter(|package| package["metadata"]["waft"]["platform"].as_bool() == Some(true))
+        .filter_map(|package| package["manifest_path"].as_str())
+        .filter_map(|manifest| Path::new(manifest).parent())
+        .filter(|directory| directory.starts_with(&crates))
+        .map(Path::to_owned)
         .collect()
 }
 

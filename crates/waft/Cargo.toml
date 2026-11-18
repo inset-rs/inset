@@ -9,6 +9,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[package.metadata.waft]
+# The application entry and its tools, which choose a host or run outside one.
+platform = true
+
 # The kits, for the test that their globs and the facade's never clash. A path and no version,
 # so `cargo publish` leaves them out: the published facade depends on no kit.
 [dev-dependencies]

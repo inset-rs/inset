@@ -10,6 +10,10 @@ readme = "README.md"
 keywords.workspace = true
 categories.workspace = true
 
+[package.metadata.waft]
+# A platform: its threads and target code are its own.
+platform = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }

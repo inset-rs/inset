@@ -10,6 +10,10 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
+[package.metadata.waft]
+# The application entry and its tools, which choose a host or run outside one.
+platform = true
+
 [[bin]]
 name = "cargo-waft"
 path = "src/main.rs"

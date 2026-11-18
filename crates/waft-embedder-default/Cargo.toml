@@ -9,6 +9,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[package.metadata.waft]
+# A platform: its threads and target code are its own.
+platform = true
+
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))'.dependencies]
 waft-embedder-winit.workspace = true
 
