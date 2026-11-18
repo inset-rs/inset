@@ -25,6 +25,7 @@ pub mod refresh;
 pub mod reorderable_list_view;
 pub mod search;
 pub mod segments;
+pub mod selection;
 pub mod selection_controls;
 pub mod sliders;
 pub mod steppers;
