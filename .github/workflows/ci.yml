@@ -37,12 +37,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - name: Check
-        run: cargo check --workspace --all-targets
+      # Clippy compiles every crate for this target, so what does not build here is caught; it is
+      # `cargo check` and more, so there is no check of its own.
       - name: Lint
         run: cargo clippy --workspace --all-targets
+      # Only the tests whose answer may differ on this system: the platforms' own crates
+      # (`[package.metadata.waft] platform = true`), `waft-embedder`, where the system's fonts
+      # meet the framework, and the examples, which run this system's renderer and fonts. The
+      # framework's other crates switch on no target (the thread check and the layering guard
+      # hold them to it), so macOS's run answers for them.
       - name: Tests
-        run: cargo test --workspace --no-fail-fast
+        shell: bash
+        run: cargo test $(.github/platform-test-packages.sh) --no-fail-fast
 
   linux:
     runs-on: ubuntu-latest
@@ -54,16 +60,18 @@ jobs:
       # which open no window on this host, but libxcb is linked by winit's X11 backend.
       # `mesa-vulkan-drivers` is its software Vulkan device for the rendering tests, and
       # `fonts-noto-cjk` the fallback face the system-font test waits for.
+      # A mirror that stalls on one package held this step for 17 minutes: a stuck download times
+      # out after 30 seconds and is tried again, rather than waiting on apt's default.
       - name: System packages
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt_net="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=5"
+          sudo apt-get $apt_net update
+          sudo apt-get $apt_net install -y --no-install-recommends \
             libxcb1-dev libx11-dev libxkbcommon-dev libwayland-dev \
             libdbus-1-dev libfontconfig1-dev \
             libgl1-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
             fonts-noto-cjk
-      - name: Check
-        run: cargo check --workspace --all-targets
+      # As on Windows: clippy builds everything, and the tests are the ones this system can change.
       - name: Lint
         run: cargo clippy --workspace --all-targets
       - name: Tests
@@ -71,7 +79,7 @@ jobs:
         # parallel runs of it segfaulted before that and have not been retried on this host. Run
         # one test at a time until a Linux run says parallel is safe.
         run: |
-          cargo test --workspace --no-fail-fast --exclude winui_gallery
+          cargo test $(.github/platform-test-packages.sh winui_gallery) --no-fail-fast
           RUST_TEST_THREADS=1 cargo test -p winui_gallery --no-fail-fast --test all
           cargo test -p winui_gallery --no-fail-fast \
             --lib --bins --test anchored_flyout --test navigation_scroll_viewport --test scroll_tab_viewer
