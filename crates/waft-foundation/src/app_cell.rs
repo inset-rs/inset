@@ -131,11 +131,12 @@ impl AppCell {
         self.elapse_to_with(target, TimerMode::EachPeriod);
     }
 
-    /// Moves the App clock to `target`, firing the timers that came due while the app was away
-    /// once each, their [`tick`](crate::Timer::tick) jumping over the periods that passed: what
-    /// Dart's VM timer queue does when the event loop reaches a timer late (`timer_impl.dart`,
-    /// `_runTimers`). The shell calls this as platform time passes; a test that wants each period
-    /// calls [`elapse`](Self::elapse).
+    /// Moves the App clock to `target`, then fires the timers that came due while the app was
+    /// away once each, their [`tick`](crate::Timer::tick) jumping over the periods that passed:
+    /// what Dart's VM timer queue does when the event loop reaches a timer late
+    /// (`timer_impl.dart`, `_runTimers`). A timer made or re-armed by those callbacks is measured
+    /// from `target` and waits for the next call. The shell calls this as platform time passes; a
+    /// test that wants each period calls [`elapse`](Self::elapse).
     ///
     /// # Panics
     ///
@@ -150,6 +151,9 @@ impl AppCell {
         }
         self.checkpoint();
         self.borrow_mut().begin_timer_turn();
+        if mode == TimerMode::CatchUp {
+            self.borrow_mut().advance_clock_to(target);
+        }
         let mut fired = 0usize;
         loop {
             let fired_one = self.borrow_mut().fire_next_due(target, mode);
