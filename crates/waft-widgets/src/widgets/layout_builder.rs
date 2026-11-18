@@ -85,8 +85,7 @@ impl LayoutBuilder {
         self
     }
 
-    /// The tree node: a render object widget with its own element, outside the `IntoWidget`
-    /// kinds.
+    /// The tree node: a `LayoutBuilder` is its own tree node, which [`IntoWidget`] converts.
     pub fn into_widget(self) -> WidgetRef {
         Rc::new(self)
     }
@@ -673,6 +672,25 @@ mod tests {
             .height(50.0)
             .child(child)
             .into_widget()
+    }
+
+    /// A `LayoutBuilder` is a widget wherever one is taken, as Dart's `Widget` is: `Focus::new`
+    /// takes it without the inherent `into_widget` being called.
+    #[test]
+    fn a_layout_builder_goes_wherever_a_widget_is_taken() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let seen: Seen = Rc::default();
+        let seen_in_builder = Rc::clone(&seen);
+        let focused = crate::widgets::focus_scope::Focus::new(LayoutBuilder::new(
+            move |_app, _context, constraints| {
+                seen_in_builder.borrow_mut().push(constraints.constraints());
+                SizedBox::square(Some(10.0)).into_widget()
+            },
+        ));
+        let harness = Harness::mount(&mut app, focused.into_widget());
+        harness.pump(&mut app);
+        assert_eq!(seen.borrow().len(), 1, "the builder ran under the focus");
     }
 
     #[test]

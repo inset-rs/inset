@@ -119,9 +119,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust closure cannot name itself, and one that held its own listener strongly would be a ring of `Rc`s that outlives its removal, where Dart's `late` local names the closure and the collector frees it.
   Affect: a self-removing listener holds a weak copy of itself and removes what that upgrades to; once nothing else holds the listener, the upgrade answers `None`.
 
+## Not ported
+
+- collections.rs: `listEquals`, `setEquals` and `mapEquals`, because Rust's `==` already compares slices, `HashSet`s, `HashMap`s and `Option`s by their contents, which is what they exist for in Dart, where `==` on a `List` is identity.
+
 ## Deferred
 
-- collections.rs: `listEquals`, `setEquals` and `mapEquals`. Trigger: the first caller that compares two whole collections, rather than the loop each widget writes today.
 - date_time.rs: `parse` / `tryParse`, `difference`. Trigger: a caller that parses a date or measures between two (`difference` would return a `SignedDuration`).
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.

@@ -74,7 +74,8 @@ impl<T: ?Sized + NotificationTarget> NotificationListener<T> {
         self
     }
 
-    /// The tree node: a `ProxyWidget` with its own element, outside the `IntoWidget` kinds.
+    /// The tree node: a `NotificationListener` is its own tree node, which [`IntoWidget`]
+    /// converts.
     pub fn into_widget(self) -> WidgetRef {
         Rc::new(self)
     }
