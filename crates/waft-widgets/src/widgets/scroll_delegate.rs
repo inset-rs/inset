@@ -9,16 +9,23 @@
 
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::hash::Hasher;
 use std::rc::Rc;
 
-use waft_foundation::{App, Key, ValueKey};
+use waft_foundation::{App, Handle, Key, Listener, ValueKey};
 
-use crate::framework::{BuildContext, IntoWidget, KeyRef, WidgetRef};
-use crate::widgets::automatic_keep_alive::AutomaticKeepAlive;
+use waft_rendering::{AnySelectable, SelectionRegistrar, SelectionRegistrarRef};
+
+use crate::framework::{
+    BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
+};
+use crate::widgets::automatic_keep_alive::{
+    AutomaticKeepAlive, AutomaticKeepAliveClientMixin, AutomaticKeepAliveClientMixinData,
+};
 use crate::widgets::basic::{IndexedSemantics, KeyedSubtree, RepaintBoundary};
+use crate::widgets::selection_container::{SelectionContainer, SelectionRegistrarScope};
 
 /// Signature for a function that creates a widget for a given index, e.g., in a list, but may
 /// return `None`.
@@ -255,11 +262,228 @@ fn unsalt(key: &KeyRef) -> KeyRef {
     }
 }
 
+/// Keeps alive the children whose selectables have a selection.
+///
+/// `_SelectionKeepAlive` in Dart: a registrar for one sliver child that stays between the parent
+/// registrar and the selectables below it, so a selection off screen keeps its child alive.
+struct SelectionKeepAlive {
+    key: Option<KeyRef>,
+    child: WidgetRef,
+}
+
+impl SelectionKeepAlive {
+    fn new<K>(child: impl IntoWidget<K>) -> SelectionKeepAlive {
+        SelectionKeepAlive {
+            key: None,
+            child: child.into_widget(),
+        }
+    }
+}
+
+impl Debug for SelectionKeepAlive {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SelectionKeepAlive").finish_non_exhaustive()
+    }
+}
+
+impl StatefulWidget for SelectionKeepAlive {
+    type State = SelectionKeepAliveState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_state(&self) -> SelectionKeepAliveState {
+        SelectionKeepAliveState {
+            state: StateData::new(),
+            keep_alive: AutomaticKeepAliveClientMixinData::new(),
+            selectables_with_selections: None,
+            selectable_attachments: None,
+            registrar: None,
+            want_keep_alive: false,
+        }
+    }
+}
+
+struct SelectionKeepAliveState {
+    state: StateData<SelectionKeepAlive>,
+    keep_alive: AutomaticKeepAliveClientMixinData,
+    selectables_with_selections: Option<HashSet<AnySelectable>>,
+    selectable_attachments: Option<HashMap<AnySelectable, Listener>>,
+    registrar: Option<SelectionRegistrarRef>,
+    want_keep_alive: bool,
+}
+
+impl SelectionKeepAliveState {
+    fn registrar_handle(
+        self: Handle<Self>,
+        app: &App,
+    ) -> Option<waft_rendering::AnySelectionRegistrar> {
+        app.get(self)
+            .registrar
+            .as_ref()
+            .map(|registrar| registrar.handle())
+    }
+
+    fn listens_to(self: Handle<Self>, selectable: AnySelectable) -> Listener {
+        Listener::new(move |app| {
+            let add = selectable.value(app).has_selection();
+            SelectionKeepAliveState::update_selectables_with_selections(self, app, selectable, add);
+        })
+    }
+
+    fn update_selectables_with_selections(
+        self: Handle<Self>,
+        app: &mut App,
+        selectable: AnySelectable,
+        add: bool,
+    ) {
+        let has_selection = selectable.value(app).has_selection();
+        {
+            let this = app.get_mut(self);
+            if add {
+                debug_assert!(has_selection);
+                this.selectables_with_selections
+                    .get_or_insert_with(HashSet::new)
+                    .insert(selectable);
+            } else if let Some(selectables) = &mut this.selectables_with_selections {
+                selectables.remove(&selectable);
+            }
+        }
+        let want = app
+            .get(self)
+            .selectables_with_selections
+            .as_ref()
+            .is_some_and(|selectables| !selectables.is_empty());
+        self.set_want_keep_alive(app, want);
+    }
+
+    fn set_want_keep_alive(self: Handle<Self>, app: &mut App, value: bool) {
+        if app.get(self).want_keep_alive != value {
+            app.get_mut(self).want_keep_alive = value;
+            self.update_keep_alive(app);
+        }
+    }
+}
+
+impl State for SelectionKeepAliveState {
+    type Widget = SelectionKeepAlive;
+    crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        AutomaticKeepAliveClientMixin::init_state(self, app);
+    }
+
+    fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
+        let new_registrar = SelectionContainer::maybe_of(app, self.context(app));
+        let current = self.registrar_handle(app);
+        let new_handle = new_registrar.as_ref().map(|registrar| registrar.handle());
+        if current == new_handle {
+            return;
+        }
+        let attachments: Vec<AnySelectable> = app
+            .get(self)
+            .selectable_attachments
+            .as_ref()
+            .map(|attachments| attachments.keys().copied().collect())
+            .unwrap_or_default();
+        if let Some(registrar) = current {
+            for selectable in &attachments {
+                registrar.remove(app, *selectable);
+            }
+        }
+        app.get_mut(self).registrar = new_registrar;
+        if let Some(registrar) = self.registrar_handle(app) {
+            for selectable in &attachments {
+                registrar.add(app, *selectable);
+            }
+        }
+    }
+
+    fn deactivate(self: Handle<Self>, app: &mut App) {
+        AutomaticKeepAliveClientMixin::deactivate(self, app);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        let attachments = app.get_mut(self).selectable_attachments.take();
+        if let Some(attachments) = attachments {
+            let registrar = self.registrar_handle(app);
+            for (selectable, listener) in attachments {
+                if let Some(registrar) = registrar {
+                    registrar.remove(app, selectable);
+                }
+                selectable.remove_listener(app, &listener);
+            }
+        }
+        app.get_mut(self).selectables_with_selections = None;
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let _ = AutomaticKeepAliveClientMixin::build(self, app);
+        if self.registrar_handle(app).is_none() {
+            let child = self.widget(app).child.clone();
+            return child;
+        }
+        let child = self.widget(app).child.clone();
+        SelectionRegistrarScope::new(self.as_selection_registrar().keep(app), child).into_widget()
+    }
+}
+
+impl AutomaticKeepAliveClientMixin for SelectionKeepAliveState {
+    fn automatic_keep_alive_client_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &AutomaticKeepAliveClientMixinData {
+        &app.get(self).keep_alive
+    }
+
+    fn automatic_keep_alive_client_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut AutomaticKeepAliveClientMixinData {
+        &mut app.get_mut(self).keep_alive
+    }
+
+    fn want_keep_alive(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).want_keep_alive
+    }
+}
+
+impl SelectionRegistrar for SelectionKeepAliveState {
+    fn add(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+        let attachment = self.listens_to(selectable);
+        selectable.add_listener(app, attachment.clone());
+        app.get_mut(self)
+            .selectable_attachments
+            .get_or_insert_with(HashMap::new)
+            .insert(selectable, attachment);
+        self.registrar_handle(app)
+            .expect("a sliver child with selectables is under a selection container")
+            .add(app, selectable);
+        if selectable.value(app).has_selection() {
+            self.update_selectables_with_selections(app, selectable, true);
+        }
+    }
+
+    fn remove(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+        let Some(attachments) = app.get_mut(self).selectable_attachments.as_mut() else {
+            return;
+        };
+        let attachment = attachments
+            .remove(&selectable)
+            .expect("the selectable was attached");
+        selectable.remove_listener(app, &attachment);
+        self.registrar_handle(app)
+            .expect("a sliver child with selectables is under a selection container")
+            .remove(app, selectable);
+        self.update_selectables_with_selections(app, selectable, false);
+    }
+}
+
 /// Wraps a built child the way both delegates do: a repaint boundary, an [`IndexedSemantics`],
 /// an [`AutomaticKeepAlive`], then a [`KeyedSubtree`] carrying the salted key.
 ///
-/// Flutter puts a `_SelectionKeepAlive` inside the `AutomaticKeepAlive`; that waits (see
-/// `PORTING.md`).
+/// Flutter puts a [`SelectionKeepAlive`] inside the `AutomaticKeepAlive`.
 fn wrap_child(
     child: WidgetRef,
     index: i32,
@@ -283,7 +507,7 @@ fn wrap_child(
             .into_widget();
     }
     if add_automatic_keep_alives {
-        child = AutomaticKeepAlive::new(child).into_widget();
+        child = AutomaticKeepAlive::new(SelectionKeepAlive::new(child)).into_widget();
     }
     let subtree = KeyedSubtree::new(child);
     match key {

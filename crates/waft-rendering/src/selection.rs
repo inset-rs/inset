@@ -159,6 +159,8 @@ struct SelectableVTable {
     size: fn(&mut App, HandleId) -> Size,
     bounding_boxes: fn(&mut App, HandleId) -> Vec<Rect>,
     dispose_selectable: fn(&mut App, HandleId),
+    add_listener: fn(&mut App, HandleId, Listener),
+    remove_listener: fn(&mut App, HandleId, &Listener),
 }
 
 impl SelectableVTable {
@@ -178,6 +180,12 @@ impl SelectableVTable {
             size: |app, id| A::size(resolve(id), app),
             bounding_boxes: |app, id| A::bounding_boxes(resolve(id), app),
             dispose_selectable: |app, id| A::dispose_selectable(resolve(id), app),
+            add_listener: |app, id, listener| {
+                ListenableObject::add_listener(resolve::<A>(id), app, listener)
+            },
+            remove_listener: |app, id, listener| {
+                ListenableObject::remove_listener(resolve::<A>(id), app, listener)
+            },
         }
     }
 }
@@ -249,6 +257,17 @@ impl AnySelectable {
     /// See [`Selectable::dispose_selectable`].
     pub fn dispose_selectable(self, app: &mut App) {
         (self.vtable.dispose_selectable)(app, self.id)
+    }
+
+    /// Registers `listener` with the selectable's [`Listenable`], as Dart's
+    /// `selectable.addListener`.
+    pub fn add_listener(self, app: &mut App, listener: Listener) {
+        (self.vtable.add_listener)(app, self.id, listener)
+    }
+
+    /// Removes `listener` from the selectable, as Dart's `selectable.removeListener`.
+    pub fn remove_listener(self, app: &mut App, listener: &Listener) {
+        (self.vtable.remove_listener)(app, self.id, listener)
     }
 }
 

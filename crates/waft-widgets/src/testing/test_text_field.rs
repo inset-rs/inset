@@ -18,7 +18,7 @@ use crate::{
     KeyRef, Semantics, SizedBox, State, StateData, StatefulWidget, TextEditingController,
     TextEditingControllerRef, TextSelectionControls, TextSelectionGestureDetectorBuilder,
     TextSelectionGestureDetectorBuilderData, TextSelectionGestureDetectorBuilderDelegate,
-    TextSelectionHandleType, WidgetRef,
+    TextSelectionHandleControls, TextSelectionHandleType, WidgetRef,
 };
 
 /// A minimal wrapper around [`EditableText`] for use in widget tests.
@@ -408,7 +408,13 @@ impl TextSelectionControls for TestTextSelectionHandleControls {
     fn get_handle_size(&self, _text_line_height: f64) -> Size {
         Size::ZERO
     }
+
+    fn as_text_selection_handle_controls(&self) -> Option<&dyn TextSelectionHandleControls> {
+        Some(self)
+    }
 }
+
+impl TextSelectionHandleControls for TestTextSelectionHandleControls {}
 
 /// A [`TestTextField`]'s selection controls: test handles that take no room.
 pub fn test_text_selection_handle_controls() -> Rc<dyn TextSelectionControls> {

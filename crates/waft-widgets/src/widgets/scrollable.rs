@@ -6,8 +6,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::Curve;
-use waft_embedder::{Clip, Offset};
-use waft_foundation::{App, CompleterFuture, Handle, HandleId, Listener, OptionRetained, wait_all};
+use waft_embedder::{Clip, Offset, Rect};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, HandleId, Listenable,
+    Listener, OptionRetained, PRECISION_ERROR_TOLERANCE, Ref, wait_all,
+};
 use waft_gestures::{
     DeviceGestureSettings, Drag, DragDownDetails, DragEndDetails, DragGestureRecognizer,
     DragStartBehavior, DragStartDetails, DragUpdateDetails, GestureBinding,
@@ -15,9 +18,16 @@ use waft_gestures::{
 };
 use waft_painting::{
     Axis, AxisDirection, axis_direction_is_reversed, axis_direction_to_axis, flip_axis,
+    transform_point,
 };
-use waft_rendering::{AnyRenderObject, HitTestBehavior, RenderIgnorePointer, ViewportOffsetRef};
-use waft_scheduler::{Ticker, TickerCallback, TickerProvider, TickerProviderObject};
+use waft_rendering::{
+    AnyRenderObject, AnySelectable, HitTestBehavior, RenderIgnorePointer, SelectedContentRange,
+    SelectionEvent, SelectionEventType, SelectionGeometry, SelectionHandler, SelectionRegistrar,
+    SelectionRegistrarRef, SelectionResult, ViewportOffsetRef,
+};
+use waft_scheduler::{
+    FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProvider, TickerProviderObject,
+};
 use waft_services::{HardwareKeyboard, RestorationBucket, RestorationData, RestorationManager};
 
 use crate::framework::{
@@ -45,9 +55,17 @@ use crate::widgets::scroll_physics::ScrollPhysicsRef;
 use crate::widgets::scroll_position::{
     AnyScrollPosition, ScrollPositionAlignmentPolicy, ScrollPositionRef,
 };
-use crate::widgets::scrollable_helpers::{ScrollIncrementCalculator, ScrollableDetails};
+use crate::widgets::scrollable_helpers::{
+    EdgeDraggingAutoScroller, ScrollIncrementCalculator, ScrollableDetails,
+};
+use crate::widgets::selectable_region::{
+    MultiSelectableSelectionContainerDelegate, MultiSelectableSelectionContainerDelegateBase,
+    MultiSelectableSelectionContainerDelegateData,
+};
+use crate::widgets::selection_container::{
+    SelectionContainer, SelectionContainerDelegate, SelectionContainerDelegateData,
+};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
-use waft_foundation::Ref;
 
 /// Signature used by [`Scrollable`] to build the viewport through which the
 /// scrollable content is displayed.
@@ -1222,7 +1240,7 @@ impl State for ScrollableState {
         let state = app.get(self);
         let result = ScrollableScope {
             scrollable: self,
-            position,
+            position: position.clone(),
             child: PointerListener::new()
                 .on_pointer_signal(Rc::new(move |app: &mut App, event| {
                     self.received_pointer_signal(app, &event);
@@ -1243,7 +1261,18 @@ impl State for ScrollableState {
         }
         .into_widget();
 
-        self.build_chrome(app, context, result)
+        let result = self.build_chrome(app, context, result);
+        // Selection is only enabled when there is a parent registrar.
+        match SelectionContainer::maybe_of(app, context) {
+            Some(registrar) => ScrollableSelectionHandler {
+                state: self,
+                position,
+                registrar,
+                child: result,
+            }
+            .into_widget(),
+            None => result,
+        }
     }
 }
 
@@ -1253,6 +1282,826 @@ impl Debug for ScrollableState {
             .field("position", &self.position)
             .field("effective physics", &self.physics)
             .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// ScrollableSelectionHandler
+
+/// Dart's `_ScrollableSelectionHandler`: the [`SelectionContainer`] a [`Scrollable`] builds when
+/// there is a [`SelectionRegistrar`] above it, so the subtree's selectables are its delegate's.
+#[derive(Debug)]
+struct ScrollableSelectionHandler {
+    state: Handle<ScrollableState>,
+    position: ScrollPositionRef,
+    registrar: SelectionRegistrarRef,
+    child: WidgetRef,
+}
+
+impl StatefulWidget for ScrollableSelectionHandler {
+    type State = ScrollableSelectionHandlerState;
+
+    fn create_state(&self) -> ScrollableSelectionHandlerState {
+        ScrollableSelectionHandlerState {
+            state: StateData::new(),
+            selection_delegate: None,
+        }
+    }
+}
+
+/// The state of a [`ScrollableSelectionHandler`].
+struct ScrollableSelectionHandlerState {
+    state: StateData<ScrollableSelectionHandler>,
+    selection_delegate: Option<Ref<ScrollableSelectionContainerDelegate>>,
+}
+
+impl ScrollableSelectionHandlerState {
+    fn selection_delegate(
+        self: Handle<Self>,
+        app: &App,
+    ) -> Handle<ScrollableSelectionContainerDelegate> {
+        app.get(self)
+            .selection_delegate
+            .as_ref()
+            .expect("the delegate is created in init_state")
+            .handle()
+    }
+}
+
+impl State for ScrollableSelectionHandlerState {
+    type Widget = ScrollableSelectionHandler;
+    crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let widget = self.widget(app);
+        let (state, position) = (widget.state, widget.position.clone());
+        let delegate = ScrollableSelectionContainerDelegate::new(app, state, position);
+        app.get_mut(self).selection_delegate = Some(delegate);
+    }
+
+    fn did_update_widget(
+        self: Handle<Self>,
+        app: &mut App,
+        old_widget: &ScrollableSelectionHandler,
+    ) {
+        let position = self.widget(app).position.clone();
+        if old_widget.position != position {
+            self.selection_delegate(app).set_position(app, position);
+        }
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        let delegate = self.selection_delegate(app);
+        MultiSelectableSelectionContainerDelegate::dispose(delegate, app);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let delegate = self.selection_delegate(app).keep(app).into_erased();
+        let widget = self.widget(app);
+        SelectionContainer::new(delegate, widget.child.clone())
+            .registrar(widget.registrar.clone())
+            .into_widget()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// ScrollableSelectionContainerDelegate
+
+/// The zero width and height of the drag target a selection edge makes: a pointer drag is a
+/// single point.
+const K_DEFAULT_DRAG_TARGET_SIZE: f64 = 0.0;
+
+/// An eyeballed value for a smooth scrolling speed.
+const K_DEFAULT_SELECT_TO_SCROLL_VELOCITY_SCALAR: f64 = 30.0;
+
+/// Dart's `_ScrollableSelectionContainerDelegate`: it keeps each selectable's recorded scroll
+/// offset, so a selectable that scrolled into the selection is brought up to date with the edge
+/// events it missed, and it scrolls the viewport when the selection is dragged past its edge.
+struct ScrollableSelectionContainerDelegate {
+    selection_container_delegate: SelectionContainerDelegateData,
+    multi_selectable_selection_container_delegate: MultiSelectableSelectionContainerDelegateData,
+    /// The scrollable whose viewport the selection scrolls.
+    state: Handle<ScrollableState>,
+    /// The position the delegate listens to and jumps; Dart's `_position`.
+    position: ScrollPositionRef,
+    auto_scroller: Ref<EdgeDraggingAutoScroller>,
+    scheduled_layout_change: bool,
+    current_drag_start_related_to_origin: Option<Offset>,
+    current_drag_end_related_to_origin: Option<Offset>,
+    /// The scrollable only auto scrolls if the selection starts in the scrollable.
+    selection_starts_in_scrollable: bool,
+    /// The scroll offset each selectable last received a start edge at.
+    selectable_start_edge_update_records: Vec<(AnySelectable, f64)>,
+    /// The scroll offset each selectable last received an end edge at.
+    selectable_end_edge_update_records: Vec<(AnySelectable, f64)>,
+}
+
+impl ScrollableSelectionContainerDelegate {
+    fn new(
+        app: &mut App,
+        state: Handle<ScrollableState>,
+        position: ScrollPositionRef,
+    ) -> Ref<ScrollableSelectionContainerDelegate> {
+        let auto_scroller = EdgeDraggingAutoScroller::new(
+            app,
+            state,
+            None,
+            K_DEFAULT_SELECT_TO_SCROLL_VELOCITY_SCALAR,
+        );
+        let delegate = app.create(ScrollableSelectionContainerDelegate {
+            selection_container_delegate: SelectionContainerDelegateData::new(),
+            multi_selectable_selection_container_delegate:
+                MultiSelectableSelectionContainerDelegateData::new(),
+            state,
+            position,
+            auto_scroller,
+            scheduled_layout_change: false,
+            current_drag_start_related_to_origin: None,
+            current_drag_end_related_to_origin: None,
+            selection_starts_in_scrollable: false,
+            selectable_start_edge_update_records: Vec::new(),
+            selectable_end_edge_update_records: Vec::new(),
+        });
+        delegate
+            .position(app)
+            .add_listener(app, schedule_layout_change_listener(delegate.handle()));
+        delegate
+    }
+
+    fn position(self: Handle<Self>, app: &App) -> ScrollPositionRef {
+        app.get(self).position.clone()
+    }
+
+    /// Dart's `position =` setter: listen to the new position instead.
+    fn set_position(self: Handle<Self>, app: &mut App, other: ScrollPositionRef) {
+        if app.get(self).position == other {
+            return;
+        }
+        let old = self.position(app);
+        old.remove_listener(app, &schedule_layout_change_listener(self));
+        app.get_mut(self).position = other;
+        self.position(app)
+            .add_listener(app, schedule_layout_change_listener(self));
+    }
+
+    fn auto_scroller(self: Handle<Self>, app: &App) -> Handle<EdgeDraggingAutoScroller> {
+        app.get(self).auto_scroller.handle()
+    }
+
+    /// Dart's `_scheduleLayoutChange`: the layout is only accurate a frame after a scroll.
+    fn schedule_layout_change(self: Handle<Self>, app: &mut App) {
+        if app.get(self).scheduled_layout_change {
+            return;
+        }
+        app.get_mut(self).scheduled_layout_change = true;
+        SchedulerBinding::add_post_frame_callback(
+            app,
+            FrameCallback::handle_method(self, run_scheduled_layout_change_callback),
+            None,
+        );
+    }
+
+    /// Dart's `layoutDidChange` branch of the scheduled post-frame callback.
+    fn run_scheduled_layout_change(self: Handle<Self>, app: &mut App) {
+        if !app.get(self).scheduled_layout_change {
+            return;
+        }
+        app.get_mut(self).scheduled_layout_change = false;
+        MultiSelectableSelectionContainerDelegate::layout_did_change(self, app);
+    }
+
+    fn scrollable_render_box(self: Handle<Self>, app: &App) -> waft_rendering::AnyRenderBox {
+        let state = app.get(self).state;
+        state
+            .context(app)
+            .find_render_object(app)
+            .and_then(|object| object.as_box())
+            .expect("a Scrollable's render object is a RenderBox")
+    }
+
+    fn delta_to_scroll_origin(self: Handle<Self>, app: &App) -> Offset {
+        app.get(self).state.delta_to_scroll_origin(app)
+    }
+
+    /// Dart's `_inferPositionRelatedToOrigin`.
+    fn infer_position_related_to_origin(
+        self: Handle<Self>,
+        app: &App,
+        global_position: Offset,
+    ) -> Offset {
+        let scrollable_box = self.scrollable_render_box(app);
+        let local_position = scrollable_box.global_to_local(app, global_position, None);
+        if !app.get(self).selection_starts_in_scrollable {
+            // If the selection starts outside the scrollable, selecting across its boundary
+            // selects the whole content in it: a point outside moves to the origin or to
+            // infinity.
+            if local_position.dy() < 0.0 || local_position.dx() < 0.0 {
+                return scrollable_box.local_to_global(app, Offset::ZERO, None);
+            }
+            let size = scrollable_box.size(app);
+            if local_position.dy() > size.height() || local_position.dx() > size.width() {
+                return Offset::INFINITE;
+            }
+        }
+        let delta_to_origin = self.delta_to_scroll_origin(app);
+        scrollable_box.local_to_global(
+            app,
+            local_position.translate(delta_to_origin.dx(), delta_to_origin.dy()),
+            None,
+        )
+    }
+
+    /// Dart's `_updateDragLocationsFromGeometries`: infer the drag start and end from the
+    /// selected edges' geometries, after a select-word or select-all that no drag made.
+    fn update_drag_locations_from_geometries(
+        self: Handle<Self>,
+        app: &mut App,
+        force_update_start: bool,
+        force_update_end: bool,
+    ) {
+        let delta_to_origin = self.delta_to_scroll_origin(app);
+        let scrollable_box = self.scrollable_render_box(app);
+        let transform = scrollable_box.as_object().get_transform_to(app, None);
+        let data = self.multi_selectable_selection_container_delegate_data(app);
+        let start_index = data.current_selection_start_index;
+        let end_index = data.current_selection_end_index;
+        let selectables = data.selectables.clone();
+        let current_drag_start = app.get(self).current_drag_start_related_to_origin;
+        let current_drag_end = app.get(self).current_drag_end_related_to_origin;
+        if start_index != -1 && (current_drag_start.is_none() || force_update_start) {
+            let selectable = selectables[start_index as usize];
+            let geometry = selectable.value(app);
+            debug_assert!(geometry.has_selection());
+            let start = geometry
+                .start_selection_point
+                .expect("a selectable with a selection has a start point");
+            let child_transform =
+                selectable.get_transform_to(app, Some(scrollable_box.as_object()));
+            let local_drag_start = transform_point(
+                &child_transform,
+                start.local_position + Offset::new(0.0, -start.line_height / 2.0),
+            );
+            let drag_start = transform_point(&transform, local_drag_start + delta_to_origin);
+            app.get_mut(self).current_drag_start_related_to_origin = Some(drag_start);
+        }
+        if end_index != -1 && (current_drag_end.is_none() || force_update_end) {
+            let selectable = selectables[end_index as usize];
+            let geometry = selectable.value(app);
+            debug_assert!(geometry.has_selection());
+            let end = geometry
+                .end_selection_point
+                .expect("a selectable with a selection has an end point");
+            let child_transform =
+                selectable.get_transform_to(app, Some(scrollable_box.as_object()));
+            let local_drag_end = transform_point(
+                &child_transform,
+                end.local_position + Offset::new(0.0, -end.line_height / 2.0),
+            );
+            let drag_end = transform_point(&transform, local_drag_end + delta_to_origin);
+            app.get_mut(self).current_drag_end_related_to_origin = Some(drag_end);
+        }
+    }
+
+    /// Dart's `_jumpToEdge`: scroll the edge the event moved back into the viewport.
+    fn jump_to_edge(self: Handle<Self>, app: &mut App, is_extent: bool) {
+        let data = self.multi_selectable_selection_container_delegate_data(app);
+        let selectable = if is_extent {
+            data.selectables[data.current_selection_end_index as usize]
+        } else {
+            data.selectables[data.current_selection_start_index as usize]
+        };
+        let geometry = selectable.value(app);
+        let (edge, line_height) = if is_extent {
+            (
+                geometry.end_selection_point,
+                geometry.end_selection_point.map(|point| point.line_height),
+            )
+        } else {
+            (
+                geometry.start_selection_point,
+                geometry
+                    .start_selection_point
+                    .map(|point| point.line_height),
+            )
+        };
+        let (Some(edge), Some(line_height)) = (edge, line_height) else {
+            return;
+        };
+        let scrollable_box = self.scrollable_render_box(app);
+        let transform = selectable.get_transform_to(app, Some(scrollable_box.as_object()));
+        let edge_offset = transform_point(&transform, edge.local_position);
+        let size = scrollable_box.size(app);
+        let scrollable_rect = Rect::from_ltwh(0.0, 0.0, size.width(), size.height());
+        let state = app.get(self).state;
+        let position = self.position(app);
+        match state.axis_direction(app) {
+            AxisDirection::Up => {
+                let edge_bottom = edge_offset.dy();
+                let edge_top = edge_offset.dy() - line_height;
+                if edge_bottom >= scrollable_rect.bottom && edge_top <= scrollable_rect.top {
+                    return;
+                }
+                if edge_bottom > scrollable_rect.bottom {
+                    position.jump_to(
+                        app,
+                        position.pixels(app) + scrollable_rect.bottom - edge_bottom,
+                    );
+                    return;
+                }
+                if edge_top < scrollable_rect.top {
+                    position.jump_to(app, position.pixels(app) + scrollable_rect.top - edge_top);
+                }
+            }
+            AxisDirection::Right => {
+                let edge = edge_offset.dx();
+                if edge >= scrollable_rect.right && edge <= scrollable_rect.left {
+                    return;
+                }
+                if edge > scrollable_rect.right {
+                    position.jump_to(app, position.pixels(app) + edge - scrollable_rect.right);
+                    return;
+                }
+                if edge < scrollable_rect.left {
+                    position.jump_to(app, position.pixels(app) + edge - scrollable_rect.left);
+                }
+            }
+            AxisDirection::Down => {
+                let edge_bottom = edge_offset.dy();
+                let edge_top = edge_offset.dy() - line_height;
+                if edge_bottom >= scrollable_rect.bottom && edge_top <= scrollable_rect.top {
+                    return;
+                }
+                if edge_bottom > scrollable_rect.bottom {
+                    position.jump_to(
+                        app,
+                        position.pixels(app) + edge_bottom - scrollable_rect.bottom,
+                    );
+                    return;
+                }
+                if edge_top < scrollable_rect.top {
+                    position.jump_to(app, position.pixels(app) + edge_top - scrollable_rect.top);
+                }
+            }
+            AxisDirection::Left => {
+                let edge = edge_offset.dx();
+                if edge >= scrollable_rect.right && edge <= scrollable_rect.left {
+                    return;
+                }
+                if edge > scrollable_rect.right {
+                    position.jump_to(app, position.pixels(app) + scrollable_rect.right - edge);
+                    return;
+                }
+                if edge < scrollable_rect.left {
+                    position.jump_to(app, position.pixels(app) + scrollable_rect.left - edge);
+                }
+            }
+        }
+    }
+
+    /// Dart's `_globalPositionInScrollable`.
+    fn global_position_in_scrollable(
+        self: Handle<Self>,
+        app: &App,
+        global_position: Offset,
+    ) -> bool {
+        let scrollable_box = self.scrollable_render_box(app);
+        let local_position = scrollable_box.global_to_local(app, global_position, None);
+        let size = scrollable_box.size(app);
+        Rect::from_ltwh(0.0, 0.0, size.width(), size.height()).contains(local_position)
+    }
+
+    /// Dart's `_dragTargetFromEvent`.
+    fn drag_target_from_event(self: Handle<Self>, event: &SelectionEvent) -> Rect {
+        let global_position = match event {
+            SelectionEvent::StartEdgeUpdate {
+                global_position, ..
+            }
+            | SelectionEvent::EndEdgeUpdate {
+                global_position, ..
+            } => *global_position,
+            _ => panic!("a selection edge update names an edge"),
+        };
+        Rect::from_center(
+            global_position,
+            K_DEFAULT_DRAG_TARGET_SIZE,
+            K_DEFAULT_DRAG_TARGET_SIZE,
+        )
+    }
+
+    fn record_start(self: Handle<Self>, app: &mut App, selectable: AnySelectable, offset: f64) {
+        record(
+            &mut app.get_mut(self).selectable_start_edge_update_records,
+            selectable,
+            offset,
+        );
+    }
+
+    fn record_end(self: Handle<Self>, app: &mut App, selectable: AnySelectable, offset: f64) {
+        record(
+            &mut app.get_mut(self).selectable_end_edge_update_records,
+            selectable,
+            offset,
+        );
+    }
+}
+
+fn record(records: &mut Vec<(AnySelectable, f64)>, selectable: AnySelectable, offset: f64) {
+    match records.iter_mut().find(|(held, _)| *held == selectable) {
+        Some((_, held_offset)) => *held_offset = offset,
+        None => records.push((selectable, offset)),
+    }
+}
+
+fn recorded_offset(records: &[(AnySelectable, f64)], selectable: AnySelectable) -> Option<f64> {
+    records
+        .iter()
+        .find_map(|(held, offset)| (*held == selectable).then_some(*offset))
+}
+
+fn remove_record(records: &mut Vec<(AnySelectable, f64)>, selectable: AnySelectable) {
+    records.retain(|(held, _)| *held != selectable);
+}
+
+fn schedule_layout_change_listener(this: Handle<ScrollableSelectionContainerDelegate>) -> Listener {
+    Listener::handle_method(this, schedule_layout_change_listener_body)
+}
+
+fn schedule_layout_change_listener_body(
+    this: Handle<ScrollableSelectionContainerDelegate>,
+    app: &mut App,
+) {
+    this.schedule_layout_change(app);
+}
+
+fn run_scheduled_layout_change_callback(
+    this: Handle<ScrollableSelectionContainerDelegate>,
+    app: &mut App,
+    _time_stamp: Duration,
+) {
+    this.run_scheduled_layout_change(app);
+}
+
+impl SelectionContainerDelegate for ScrollableSelectionContainerDelegate {
+    fn selection_container_delegate_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &SelectionContainerDelegateData {
+        &app.get(self).selection_container_delegate
+    }
+
+    fn selection_container_delegate_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SelectionContainerDelegateData {
+        &mut app.get_mut(self).selection_container_delegate
+    }
+}
+
+impl MultiSelectableSelectionContainerDelegate for ScrollableSelectionContainerDelegate {
+    crate::multi_selectable_selection_container_delegate_accessors!();
+
+    fn did_change_selectables(self: Handle<Self>, app: &mut App) {
+        let selectables = self
+            .multi_selectable_selection_container_delegate_data(app)
+            .selectables
+            .clone();
+        app.get_mut(self)
+            .selectable_start_edge_update_records
+            .retain(|(selectable, _)| selectables.contains(selectable));
+        app.get_mut(self)
+            .selectable_end_edge_update_records
+            .retain(|(selectable, _)| selectables.contains(selectable));
+        MultiSelectableSelectionContainerDelegateBase::did_change_selectables(self, app);
+    }
+
+    fn handle_clear_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let data = app.get_mut(self);
+        data.selectable_start_edge_update_records.clear();
+        data.selectable_end_edge_update_records.clear();
+        data.current_drag_start_related_to_origin = None;
+        data.current_drag_end_related_to_origin = None;
+        data.selection_starts_in_scrollable = false;
+        MultiSelectableSelectionContainerDelegateBase::handle_clear_selection(self, app, event)
+    }
+
+    fn handle_selection_edge_update(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let (global_position, is_end, granularity) = match event {
+            SelectionEvent::StartEdgeUpdate {
+                global_position,
+                granularity,
+            } => (*global_position, false, *granularity),
+            SelectionEvent::EndEdgeUpdate {
+                global_position,
+                granularity,
+            } => (*global_position, true, *granularity),
+            _ => panic!("a selection edge update names an edge"),
+        };
+        if app.get(self).current_drag_end_related_to_origin.is_none()
+            && app.get(self).current_drag_start_related_to_origin.is_none()
+        {
+            debug_assert!(!app.get(self).selection_starts_in_scrollable);
+            let starts = self.global_position_in_scrollable(app, global_position);
+            app.get_mut(self).selection_starts_in_scrollable = starts;
+        }
+        let delta_to_origin = self.delta_to_scroll_origin(app);
+        let related_to_origin = self.infer_position_related_to_origin(app, global_position);
+        if is_end {
+            app.get_mut(self).current_drag_end_related_to_origin = Some(related_to_origin);
+        } else {
+            app.get_mut(self).current_drag_start_related_to_origin = Some(related_to_origin);
+        }
+        let offset = related_to_origin.translate(-delta_to_origin.dx(), -delta_to_origin.dy());
+        let event = if is_end {
+            SelectionEvent::for_end(offset, Some(granularity))
+        } else {
+            SelectionEvent::for_start(offset, Some(granularity))
+        };
+        let result = MultiSelectableSelectionContainerDelegateBase::handle_selection_edge_update(
+            self, app, &event,
+        );
+
+        // The result may be pending if one of the selectable children is also a scrollable; the
+        // parent scrollable then waits for the child to finish scrolling.
+        if result == SelectionResult::Pending {
+            self.auto_scroller(app).stop_auto_scroll(app);
+            return result;
+        }
+        if app.get(self).selection_starts_in_scrollable {
+            // Paged scrollables (like a PageView) disallow this; edge scrolling there flips to
+            // an adjacent page instead of revealing more content.
+            let allow = app
+                .get(self)
+                .state
+                .resolved_physics(app)
+                .is_none_or(|physics| physics.allow_selection_edge_scrolling());
+            if !allow {
+                self.auto_scroller(app).stop_auto_scroll(app);
+                return result;
+            }
+            let drag_target = self.drag_target_from_event(&event);
+            self.auto_scroller(app)
+                .start_auto_scroll_if_necessary(app, drag_target);
+            if self.auto_scroller(app).scrolling(app) {
+                return SelectionResult::Pending;
+            }
+        }
+        result
+    }
+
+    fn handle_select_all(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        debug_assert!(!app.get(self).selection_starts_in_scrollable);
+        let result =
+            MultiSelectableSelectionContainerDelegateBase::handle_select_all(self, app, event);
+        let data = self.multi_selectable_selection_container_delegate_data(app);
+        debug_assert_eq!(
+            data.current_selection_start_index == -1,
+            data.current_selection_end_index == -1
+        );
+        if data.current_selection_start_index != -1 {
+            self.update_drag_locations_from_geometries(app, true, true);
+        }
+        result
+    }
+
+    fn handle_select_word(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let global_position = match event {
+            SelectionEvent::SelectWord { global_position } => *global_position,
+            _ => panic!("a select-word event names a position"),
+        };
+        let starts = self.global_position_in_scrollable(app, global_position);
+        app.get_mut(self).selection_starts_in_scrollable = starts;
+        let result =
+            MultiSelectableSelectionContainerDelegateBase::handle_select_word(self, app, event);
+        self.update_drag_locations_from_geometries(app, true, true);
+        result
+    }
+
+    fn handle_granularly_extend_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let result =
+            MultiSelectableSelectionContainerDelegateBase::handle_granularly_extend_selection(
+                self, app, event,
+            );
+        let is_end = matches!(
+            event,
+            SelectionEvent::GranularlyExtendSelection { is_end: true, .. }
+        );
+        // The geometry of an edge outside the viewport may not be valid; only the edge this
+        // event updated is sure to be accurate.
+        self.update_drag_locations_from_geometries(app, !is_end, is_end);
+        if app.get(self).selection_starts_in_scrollable {
+            self.jump_to_edge(app, is_end);
+        }
+        result
+    }
+
+    fn handle_directionally_extend_selection(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let result =
+            MultiSelectableSelectionContainerDelegateBase::handle_directionally_extend_selection(
+                self, app, event,
+            );
+        let is_end = matches!(
+            event,
+            SelectionEvent::DirectionallyExtendSelection { is_end: true, .. }
+        );
+        self.update_drag_locations_from_geometries(app, !is_end, is_end);
+        if app.get(self).selection_starts_in_scrollable {
+            self.jump_to_edge(app, is_end);
+        }
+        result
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        app.get_mut(self)
+            .selectable_start_edge_update_records
+            .clear();
+        app.get_mut(self).selectable_end_edge_update_records.clear();
+        app.get_mut(self).scheduled_layout_change = false;
+        self.auto_scroller(app).stop_auto_scroll(app);
+        let position = self.position(app);
+        position.remove_listener(app, &schedule_layout_change_listener(self));
+        MultiSelectableSelectionContainerDelegateBase::dispose(self, app);
+    }
+
+    fn ensure_child_updated(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+        let new_record = app.get(self).state.position(app).pixels(app);
+        let previous_start_record = recorded_offset(
+            &app.get(self).selectable_start_edge_update_records,
+            selectable,
+        );
+        if let Some(current_start) = app.get(self).current_drag_start_related_to_origin
+            && (previous_start_record.is_none()
+                || (new_record - previous_start_record.expect("checked just now")).abs()
+                    > PRECISION_ERROR_TOLERANCE)
+        {
+            // Make sure the selectable has up to date events.
+            let delta_to_origin = self.delta_to_scroll_origin(app);
+            let start_offset =
+                current_start.translate(-delta_to_origin.dx(), -delta_to_origin.dy());
+            selectable
+                .dispatch_selection_event(app, &SelectionEvent::for_start(start_offset, None));
+            // Track the synthesized start event, so it is not synthesized again.
+            self.record_start(
+                app,
+                selectable,
+                app.get(self).state.position(app).pixels(app),
+            );
+        }
+        let previous_end_record = recorded_offset(
+            &app.get(self).selectable_end_edge_update_records,
+            selectable,
+        );
+        if let Some(current_end) = app.get(self).current_drag_end_related_to_origin
+            && (previous_end_record.is_none()
+                || (new_record - previous_end_record.expect("checked just now")).abs()
+                    > PRECISION_ERROR_TOLERANCE)
+        {
+            let delta_to_origin = self.delta_to_scroll_origin(app);
+            let end_offset = current_end.translate(-delta_to_origin.dx(), -delta_to_origin.dy());
+            selectable.dispatch_selection_event(app, &SelectionEvent::for_end(end_offset, None));
+            self.record_end(
+                app,
+                selectable,
+                app.get(self).state.position(app).pixels(app),
+            );
+        }
+    }
+
+    fn dispatch_selection_event_to_child(
+        self: Handle<Self>,
+        app: &mut App,
+        selectable: AnySelectable,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        let pixels = app.get(self).state.position(app).pixels(app);
+        match event.ty() {
+            SelectionEventType::StartEdgeUpdate => {
+                self.record_start(app, selectable, pixels);
+                MultiSelectableSelectionContainerDelegate::ensure_child_updated(
+                    self, app, selectable,
+                );
+            }
+            SelectionEventType::EndEdgeUpdate => {
+                self.record_end(app, selectable, pixels);
+                MultiSelectableSelectionContainerDelegate::ensure_child_updated(
+                    self, app, selectable,
+                );
+            }
+            SelectionEventType::GranularlyExtendSelection
+            | SelectionEventType::DirectionallyExtendSelection => {
+                MultiSelectableSelectionContainerDelegate::ensure_child_updated(
+                    self, app, selectable,
+                );
+                self.record_start(app, selectable, pixels);
+                self.record_end(app, selectable, pixels);
+            }
+            SelectionEventType::Clear => {
+                remove_record(
+                    &mut app.get_mut(self).selectable_end_edge_update_records,
+                    selectable,
+                );
+                remove_record(
+                    &mut app.get_mut(self).selectable_start_edge_update_records,
+                    selectable,
+                );
+            }
+            SelectionEventType::SelectAll
+            | SelectionEventType::SelectWord
+            | SelectionEventType::SelectParagraph => {
+                self.record_end(app, selectable, pixels);
+                self.record_start(app, selectable, pixels);
+            }
+        }
+        MultiSelectableSelectionContainerDelegateBase::dispatch_selection_event_to_child(
+            self, app, selectable, event,
+        )
+    }
+}
+
+impl SelectionHandler for ScrollableSelectionContainerDelegate {
+    fn value(self: Handle<Self>, app: &App) -> SelectionGeometry {
+        MultiSelectableSelectionContainerDelegateBase::value(self, app)
+    }
+
+    fn push_handle_layers(
+        self: Handle<Self>,
+        app: &mut App,
+        start_handle: Option<Ref<waft_rendering::LayerLink>>,
+        end_handle: Option<Ref<waft_rendering::LayerLink>>,
+    ) {
+        MultiSelectableSelectionContainerDelegateBase::push_handle_layers(
+            self,
+            app,
+            start_handle,
+            end_handle,
+        );
+    }
+
+    fn selected_content(self: Handle<Self>, app: &App) -> Option<waft_rendering::SelectedContent> {
+        MultiSelectableSelectionContainerDelegateBase::selected_content(self, app)
+    }
+
+    fn selection(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
+        MultiSelectableSelectionContainerDelegateBase::selection(self, app)
+    }
+
+    fn dispatch_selection_event(
+        self: Handle<Self>,
+        app: &mut App,
+        event: &SelectionEvent,
+    ) -> SelectionResult {
+        MultiSelectableSelectionContainerDelegateBase::dispatch_selection_event(self, app, event)
+    }
+
+    fn content_length(self: Handle<Self>, app: &App) -> usize {
+        MultiSelectableSelectionContainerDelegateBase::content_length(self, app)
+    }
+}
+
+impl SelectionRegistrar for ScrollableSelectionContainerDelegate {
+    fn add(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+        MultiSelectableSelectionContainerDelegateBase::add(self, app, selectable);
+    }
+
+    fn remove(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+        MultiSelectableSelectionContainerDelegateBase::remove(self, app, selectable);
+    }
+}
+
+impl ChangeNotifier for ScrollableSelectionContainerDelegate {
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self
+            .multi_selectable_selection_container_delegate
+            .change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self
+            .multi_selectable_selection_container_delegate
+            .change_notifier
     }
 }
 
@@ -1858,6 +2707,671 @@ mod tests {
             tester.up(&gesture);
             // After a hold longer than 2 frames, previous velocity is lost.
             assert_eq!(scroll_velocity(tester), 0.0);
+        });
+    }
+
+    // ---- selection ----
+    //
+    // `scrollable_selection_test.dart`'s cases. Dart's first cases wrap the list in a
+    // `MaterialApp` and a `SelectionArea` with `materialTextSelectionControls`, which this crate
+    // cannot name; they run here under a `TestWidgetsApp` in the text style `MaterialApp` gives
+    // a bare `Text` (`selectable_region_test.dart`'s `_materialDefaultTextStyle`), and a
+    // `SelectableRegion` with `testTextSelectionHandleControls`, so the items are as tall and
+    // the offsets Dart's.
+
+    use waft_embedder::{FontWeight, TextPosition};
+    use waft_gestures::K_PRIMARY_BUTTON;
+    use waft_painting::TextStyle;
+    use waft_rendering::{RenderHandle, RenderParagraph};
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
+
+    use crate::testing::{TestWidgetsApp, expect, finds_nothing, finds_one_widget};
+    use crate::widgets::basic::Center;
+    use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf};
+    use crate::widgets::page_view::{PageController, PageView};
+    use crate::widgets::scroll_physics::NeverScrollableScrollPhysics;
+    use crate::widgets::scroll_view::ListView;
+    use crate::widgets::selectable_region::SelectableRegion;
+    use crate::widgets::text::Text;
+
+    /// `scrollable_selection_test.dart`'s `textOffsetToPosition`: the global position of the
+    /// caret at `offset` in `paragraph`.
+    fn text_offset_to_position(
+        tester: &WidgetTester,
+        paragraph: RenderHandle<RenderParagraph>,
+        offset: i32,
+    ) -> Offset {
+        tester.update(|app| {
+            let caret = Rect::from_ltwh(0.0, 0.0, 2.0, 20.0);
+            let local_offset =
+                paragraph.get_offset_for_caret(app, TextPosition::new(offset), caret);
+            paragraph.as_box().local_to_global(app, local_offset, None)
+        })
+    }
+
+    /// The text style `MaterialApp` gives a `Text` with no `Material` above it.
+    fn material_default_text_style() -> TextStyle {
+        TextStyle::new()
+            .font_size(48.0)
+            .font_family("monospace")
+            .font_weight(FontWeight::W900)
+    }
+
+    /// `TestWidgetsApp(home: SelectableRegion(selectionControls:
+    /// testTextSelectionHandleControls, child: child))`.
+    fn selectable_region_app<K: 'static>(
+        child: impl IntoWidget<K>,
+        text_style: Option<TextStyle>,
+    ) -> TestWidgetsApp {
+        let app = TestWidgetsApp::new();
+        let app = match text_style {
+            Some(text_style) => app.text_style(text_style),
+            None => app,
+        };
+        app.home(SelectableRegion::new(
+            crate::testing::test_text_selection_handle_controls(),
+            child,
+        ))
+    }
+
+    /// `ListView.builder(itemCount: 100, itemBuilder: … Text('Item $index'))`.
+    fn item_list() -> crate::widgets::scroll_view::ListViewBuilder {
+        ListView::builder(|_app, _context, index| {
+            Some(Text::new(format!("Item {index}")).into_widget())
+        })
+        .item_count(100)
+    }
+
+    /// The paragraph showing `text`.
+    fn paragraph_showing(tester: &WidgetTester, text: &str) -> RenderHandle<RenderParagraph> {
+        let paragraphs = tester.all::<RenderParagraph>();
+        tester.update(|app| {
+            *paragraphs
+                .iter()
+                .find(|paragraph| paragraph.text(app).to_plain_text(true, true) == text)
+                .unwrap_or_else(|| panic!("a paragraph showing {text}"))
+        })
+    }
+
+    /// `paragraph.selections[0]`, as its base and extent.
+    fn paragraph_selection(
+        tester: &WidgetTester,
+        paragraph: RenderHandle<RenderParagraph>,
+    ) -> (i32, i32) {
+        tester.update(|app| {
+            let selections = paragraph.selections(app);
+            (selections[0].base_offset, selections[0].extent_offset)
+        })
+    }
+
+    fn new_scroll_controller(tester: &WidgetTester) -> Ref<ScrollController> {
+        tester.update(|app| ScrollController::new(app, 0.0, true, None, None, None))
+    }
+
+    // scrollable_selection_test.dart 'mouse can select multiple widgets'.
+    #[test]
+    fn mouse_can_select_multiple_widgets() {
+        test_widgets(|tester| {
+            tester.pump_widget(selectable_region_app(
+                item_list().build(),
+                Some(material_default_text_style()),
+            ));
+            tester.pump_and_settle();
+
+            let paragraph_1 = paragraph_showing(tester, "Item 0");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_1, 2);
+            tester.down(&mut gesture, at);
+            tester.pump();
+
+            let at = text_offset_to_position(tester, paragraph_1, 4);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            assert_eq!(paragraph_selection(tester, paragraph_1), (2, 4));
+
+            let paragraph_2 = paragraph_showing(tester, "Item 1");
+            let at = text_offset_to_position(tester, paragraph_2, 5);
+            tester.move_to(&mut gesture, at, true);
+            // Should select the rest of paragraph 1.
+            assert_eq!(paragraph_selection(tester, paragraph_1), (2, 6));
+            assert_eq!(paragraph_selection(tester, paragraph_2), (0, 5));
+
+            let paragraph_3 = paragraph_showing(tester, "Item 3");
+            let at = text_offset_to_position(tester, paragraph_3, 3);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_1), (2, 6));
+            assert_eq!(paragraph_selection(tester, paragraph_2), (0, 6));
+            assert_eq!(paragraph_selection(tester, paragraph_3), (0, 3));
+
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // scrollable_selection_test.dart 'select to scroll forward'.
+    #[test]
+    fn select_to_scroll_forward() {
+        test_widgets(|tester| {
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(selectable_region_app(
+                item_list().build().controller(controller.erase()),
+                Some(material_default_text_style()),
+            ));
+            tester.pump_and_settle();
+
+            let paragraph_1 = paragraph_showing(tester, "Item 0");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_1, 2);
+            tester.down(&mut gesture, at);
+            tester.pump();
+            let offset = |tester: &WidgetTester| tester.update(|app| controller.offset(app));
+            assert_eq!(offset(tester), 0.0);
+            let mut previous_offset = offset(tester);
+
+            // Scrollable only auto scroll if the drag passes the boundary.
+            let at = tester.get_bottom_right(find::by_type::<ListView>()) + Offset::new(0.0, 20.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            assert!(offset(tester) > previous_offset);
+            previous_offset = offset(tester);
+
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            assert!(offset(tester) > previous_offset);
+
+            // Scroll to the end.
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert_eq!(offset(tester), 4200.0);
+            for index in [99, 98, 97, 96] {
+                let paragraph = paragraph_showing(tester, &format!("Item {index}"));
+                assert_eq!(paragraph_selection(tester, paragraph), (0, 7));
+            }
+
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // scrollable_selection_test.dart 'select to scroll backward'.
+    #[test]
+    fn select_to_scroll_backward() {
+        test_widgets(|tester| {
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(selectable_region_app(
+                item_list().build().controller(controller.erase()),
+                Some(material_default_text_style()),
+            ));
+            tester.pump_and_settle();
+
+            tester.update(|app| controller.jump_to(app, 4000.0));
+            tester.pump_and_settle();
+
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = tester.get_center(find::by_type::<ListView>());
+            tester.down(&mut gesture, at);
+            tester.pump();
+            let offset = |tester: &WidgetTester| tester.update(|app| controller.offset(app));
+            assert_eq!(offset(tester), 4000.0);
+            let mut previous_offset = offset(tester);
+
+            let at = tester.get_top_left(find::by_type::<ListView>()) + Offset::new(0.0, -20.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            assert!(offset(tester) < previous_offset);
+            previous_offset = offset(tester);
+
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            assert!(offset(tester) < previous_offset);
+
+            // Scroll to the beginning.
+            tester.pump_and_settle_by(Duration::from_secs(1));
+            assert_eq!(offset(tester), 0.0);
+            for index in 0..4 {
+                let paragraph = paragraph_showing(tester, &format!("Item {index}"));
+                assert_eq!(paragraph_selection(tester, paragraph), (6, 0));
+            }
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // scrollable_selection_test.dart 'preserve selection when out of view.'.
+    #[test]
+    fn preserve_selection_when_out_of_view() {
+        test_widgets(|tester| {
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(selectable_region_app(
+                item_list().build().controller(controller.erase()),
+                Some(material_default_text_style()),
+            ));
+
+            tester.update(|app| controller.jump_to(app, 2000.0));
+            tester.pump_and_settle();
+            expect(tester, &find::text("Item 50"), finds_one_widget());
+            let paragraph_50 = paragraph_showing(tester, "Item 50");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_50, 2);
+            tester.down(&mut gesture, at);
+            tester.pump();
+            let at = text_offset_to_position(tester, paragraph_50, 4);
+            tester.move_to(&mut gesture, at, true);
+            tester.up(&gesture);
+            assert_eq!(paragraph_selection(tester, paragraph_50), (2, 4));
+
+            tester.update(|app| controller.jump_to(app, 0.0));
+            tester.pump_and_settle();
+            expect(tester, &find::text("Item 50"), finds_nothing());
+
+            tester.update(|app| controller.jump_to(app, 2000.0));
+            tester.pump_and_settle();
+            expect(tester, &find::text("Item 50"), finds_one_widget());
+            let paragraph_50 = paragraph_showing(tester, "Item 50");
+            assert_eq!(paragraph_selection(tester, paragraph_50), (2, 4));
+
+            tester.update(|app| controller.jump_to(app, 4000.0));
+            tester.pump_and_settle();
+            expect(tester, &find::text("Item 50"), finds_nothing());
+
+            tester.update(|app| controller.jump_to(app, 2000.0));
+            tester.pump_and_settle();
+            expect(tester, &find::text("Item 50"), finds_one_widget());
+            let paragraph_50 = paragraph_showing(tester, "Item 50");
+            assert_eq!(paragraph_selection(tester, paragraph_50), (2, 4));
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    /// `keyboard_utils.dart`'s `sendKeyCombination` for `trigger` with one modifier held.
+    fn send_key_combination(
+        tester: &mut WidgetTester,
+        modifier: (PhysicalKeyboardKey, LogicalKeyboardKey),
+        trigger: (PhysicalKeyboardKey, LogicalKeyboardKey),
+    ) {
+        tester.send_key_down_event(modifier.0, modifier.1);
+        tester.send_key_down_event(trigger.0, trigger.1);
+        tester.send_key_up_event(trigger.0, trigger.1);
+        tester.pump();
+        tester.send_key_up_event(modifier.0, modifier.1);
+    }
+
+    /// Dart's 'can select all' cases, with `modifier` and A.
+    fn can_select_all(
+        tester: &mut WidgetTester,
+        modifier: (PhysicalKeyboardKey, LogicalKeyboardKey),
+    ) {
+        let node = tester.update(FocusNode::new);
+        tester.pump_widget(
+            TestWidgetsApp::new()
+                .text_style(material_default_text_style())
+                .home(
+                    SelectableRegion::new(
+                        crate::testing::test_text_selection_handle_controls(),
+                        item_list().build(),
+                    )
+                    .focus_node(node.erase()),
+                ),
+        );
+        tester.pump_and_settle();
+        tester.update(|app| node.handle().request_focus(app, None));
+        send_key_combination(
+            tester,
+            modifier,
+            (PhysicalKeyboardKey::KEY_A, LogicalKeyboardKey::KEY_A),
+        );
+        tester.pump();
+
+        for i in 0..13 {
+            let paragraph = paragraph_showing(tester, &format!("Item {i}"));
+            let length = format!("Item {i}").len() as i32;
+            assert_eq!(paragraph_selection(tester, paragraph), (0, length));
+        }
+        expect(tester, &find::text("Item 13"), finds_nothing());
+    }
+
+    // scrollable_selection_test.dart 'can select all non-Apple'.
+    #[test]
+    fn can_select_all_non_apple() {
+        let variant = TargetPlatformVariant::new([
+            TargetPlatform::Android,
+            TargetPlatform::Windows,
+            TargetPlatform::Linux,
+            TargetPlatform::Fuchsia,
+        ]);
+        test_widgets_variant(variant, |tester| {
+            can_select_all(
+                tester,
+                (
+                    PhysicalKeyboardKey::CONTROL_LEFT,
+                    LogicalKeyboardKey::CONTROL_LEFT,
+                ),
+            );
+        });
+    }
+
+    // scrollable_selection_test.dart 'can select all - Apple'.
+    #[test]
+    fn can_select_all_apple() {
+        let variant = TargetPlatformVariant::new([TargetPlatform::IOS, TargetPlatform::MacOS]);
+        test_widgets_variant(variant, |tester| {
+            can_select_all(
+                tester,
+                (
+                    PhysicalKeyboardKey::META_LEFT,
+                    LogicalKeyboardKey::META_LEFT,
+                ),
+            );
+        });
+    }
+
+    // scrollable_selection_test.dart 'automatic edge scrolling respects
+    // NeverScrollableScrollPhysics'.
+    #[test]
+    fn automatic_edge_scrolling_respects_never_scrollable_scroll_physics() {
+        test_widgets(|tester| {
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(selectable_region_app(
+                item_list()
+                    .build()
+                    .controller(controller.erase())
+                    .physics(Rc::new(NeverScrollableScrollPhysics::new())),
+                None,
+            ));
+            tester.pump_and_settle();
+
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = tester.get_center(find::text("Item 0"));
+            tester.down(&mut gesture, at);
+            tester.pump();
+            let offset = |tester: &WidgetTester| tester.update(|app| controller.offset(app));
+            assert_eq!(offset(tester), 0.0);
+
+            // Drag past the bottom of the scrollable; this would normally trigger edge
+            // auto-scroll.
+            let at = tester.get_bottom_right(find::by_type::<ListView>()) + Offset::new(0.0, 40.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+
+            // The scroll position must not have advanced.
+            assert_eq!(offset(tester), 0.0);
+
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(offset(tester), 0.0);
+
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            assert_eq!(offset(tester), 0.0);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // scrollable_selection_test.dart 'paged scrollable does not flip pages during selection,
+    // but text still gets selected'.
+    #[test]
+    fn paged_scrollable_does_not_flip_pages_during_selection_but_text_still_gets_selected() {
+        test_widgets(|tester| {
+            let controller = tester.update(PageController::default);
+            tester.pump_widget(selectable_region_app(
+                PageView::builder(|_app, _context, index| {
+                    Some(
+                        Center::new()
+                            .child(Text::new(format!("Page {index}")))
+                            .into_widget(),
+                    )
+                })
+                .item_count(5)
+                .build()
+                .controller(controller.clone()),
+                None,
+            ));
+            tester.pump_and_settle();
+            let page = |tester: &WidgetTester| tester.update(|app| controller.page(app));
+            assert_eq!(page(tester), Some(0.0));
+
+            let page_0 = paragraph_showing(tester, "Page 0");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = tester.get_center(find::text("Page 0"));
+            tester.down(&mut gesture, at);
+            tester.pump();
+            assert_eq!(page(tester), Some(0.0));
+
+            // Hold the drag past the right edge; without the fix this keeps flipping pages
+            // toward page 1.
+            let at = tester.get_bottom_right(find::by_type::<PageView>()) + Offset::new(40.0, 0.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+
+            // The page did not flip, but the page's text was still selected.
+            assert_eq!(page(tester), Some(0.0));
+            assert!(!tester.update(|app| page_0.selections(app)).is_empty());
+
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            assert_eq!(page(tester), Some(0.0));
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // scrollable_selection_test.dart 'mouse selection drag still edge auto-scrolls a non
+    // page-snapping scrollable'.
+    #[test]
+    fn mouse_selection_drag_still_edge_auto_scrolls_a_non_page_snapping_scrollable() {
+        test_widgets(|tester| {
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(selectable_region_app(
+                ListView::builder(|_app, _context, index| {
+                    Some(
+                        Center::new()
+                            .child(Text::new(format!("Item {index}")))
+                            .into_widget(),
+                    )
+                })
+                .item_count(100)
+                .build()
+                .controller(controller.erase())
+                .scroll_direction(Axis::Horizontal),
+                None,
+            ));
+            tester.pump_and_settle();
+            let offset = |tester: &WidgetTester| tester.update(|app| controller.offset(app));
+            assert_eq!(offset(tester), 0.0);
+
+            let paragraph_0 = paragraph_showing(tester, "Item 0");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_0, 2);
+            tester.down(&mut gesture, at);
+            tester.pump();
+            assert_eq!(offset(tester), 0.0);
+
+            // Drag past the right edge to kick off auto-scroll.
+            let at = tester.get_bottom_right(find::by_type::<ListView>()) + Offset::new(40.0, 0.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
+            assert!(offset(tester) > 0.0);
+
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    /// `scrollable_selection_test.dart`'s `selectPastNestedListEdge`: drag-selects past the edge
+    /// of a `ListView` nested in a `PageView` along `axis`, and checks the `ListView` edge
+    /// scrolls while the `PageView` stays on its page.
+    fn select_past_nested_list_edge(tester: &mut WidgetTester, axis: Axis) {
+        let page_controller = tester.update(PageController::default);
+        let list_controller = new_scroll_controller(tester);
+        tester.pump_widget(selectable_region_app(
+            PageView::new()
+                .scroll_direction(axis)
+                .controller(page_controller.clone())
+                .children([
+                    ListView::builder(|_app, _context, index| {
+                        Some(
+                            Center::new()
+                                .child(Text::new(format!("Item {index}")))
+                                .into_widget(),
+                        )
+                    })
+                    .item_count(100)
+                    .build()
+                    .scroll_direction(axis)
+                    .controller(list_controller.erase())
+                    .into_widget(),
+                    Center::new().child(Text::new("Second page")).into_widget(),
+                ]),
+            None,
+        ));
+        tester.pump_and_settle();
+        let page = |tester: &WidgetTester| tester.update(|app| page_controller.page(app));
+        let list_offset = |tester: &WidgetTester| tester.update(|app| list_controller.offset(app));
+        assert_eq!(page(tester), Some(0.0));
+        assert_eq!(list_offset(tester), 0.0);
+
+        let item_0 = paragraph_showing(tester, "Item 0");
+        let page_box = tester.get_rect(find::by_type::<PageView>());
+        let target = match axis {
+            Axis::Vertical => Offset::new(page_box.center().dx(), page_box.bottom + 40.0),
+            Axis::Horizontal => Offset::new(page_box.right + 40.0, page_box.center().dy()),
+        };
+
+        let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+        let at = text_offset_to_position(tester, item_0, 2);
+        tester.down(&mut gesture, at);
+        tester.pump();
+        tester.move_to(&mut gesture, target, true);
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
+
+        // The inner ListView edge scrolled, but the PageView did not flip pages.
+        assert!(list_offset(tester) > 0.0);
+        assert_eq!(page(tester), Some(0.0));
+
+        tester.up(&gesture);
+        tester.pump_and_settle();
+        tester.remove_pointer(&gesture);
+    }
+
+    // scrollable_selection_test.dart 'vertical ListView inside a PageView still edge scrolls
+    // during selection'.
+    #[test]
+    fn vertical_list_view_inside_a_page_view_still_edge_scrolls_during_selection() {
+        test_widgets(|tester| select_past_nested_list_edge(tester, Axis::Vertical));
+    }
+
+    // scrollable_selection_test.dart 'horizontal ListView inside a PageView still edge scrolls
+    // during selection'.
+    #[test]
+    fn horizontal_list_view_inside_a_page_view_still_edge_scrolls_during_selection() {
+        test_widgets(|tester| select_past_nested_list_edge(tester, Axis::Horizontal));
+    }
+
+    // scrollable_selection_test.dart 'keyboard selection should auto scroll - vertical'.
+    #[test]
+    fn keyboard_selection_should_auto_scroll_vertical() {
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let node = tester.update(FocusNode::new);
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(
+                TestWidgetsApp::new()
+                    .text_style(material_default_text_style())
+                    .home(
+                        SelectableRegion::new(
+                            crate::testing::test_text_selection_handle_controls(),
+                            item_list().build().controller(controller.erase()),
+                        )
+                        .focus_node(node.erase()),
+                    ),
+            );
+            tester.pump_and_settle();
+            let paragraph_9 = paragraph_showing(tester, "Item 9");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_9, 2);
+            tester.down(&mut gesture, at);
+            let at = text_offset_to_position(tester, paragraph_9, 4) + Offset::new(0.0, 5.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump_and_settle();
+            tester.up(&gesture);
+            tester.pump();
+            let start_end = |tester: &WidgetTester, paragraph: RenderHandle<RenderParagraph>| {
+                tester.update(|app| {
+                    let selections = paragraph.selections(app);
+                    assert_eq!(selections.len(), 1);
+                    (selections[0].start(), selections[0].end())
+                })
+            };
+            let offset = |tester: &WidgetTester| tester.update(|app| controller.offset(app));
+            assert_eq!(start_end(tester, paragraph_9), (2, 4));
+            assert_eq!(offset(tester), 0.0);
+
+            let shift = (
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            );
+            let arrow_down = (
+                PhysicalKeyboardKey::ARROW_DOWN,
+                LogicalKeyboardKey::ARROW_DOWN,
+            );
+            for (index, expected_offset) in [(10, 0.0), (11, 0.0), (12, 24.0), (13, 72.0)] {
+                send_key_combination(tester, shift, arrow_down);
+                tester.pump();
+                let paragraph = paragraph_showing(tester, &format!("Item {index}"));
+                assert_eq!(start_end(tester, paragraph), (0, 4));
+                assert_eq!(offset(tester), expected_offset);
+            }
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // scrollable_selection_test.dart 'selection starts outside of the scrollable'.
+    #[test]
+    fn selection_starts_outside_of_the_scrollable() {
+        test_widgets(|tester| {
+            let controller = new_scroll_controller(tester);
+            tester.pump_widget(selectable_region_app(
+                crate::widgets::basic::Column::new().children([
+                    Text::new("Item 0").into_widget(),
+                    SizedBox::new()
+                        .height(400.0)
+                        .child(
+                            ListView::builder(|_app, _context, index| {
+                                Some(Text::new(format!("Inner item {index}")).into_widget())
+                            })
+                            .item_count(100)
+                            .build()
+                            .controller(controller.erase()),
+                        )
+                        .into_widget(),
+                    Text::new("Item 1").into_widget(),
+                ]),
+                Some(material_default_text_style()),
+            ));
+            tester.pump_and_settle();
+
+            tester.update(|app| controller.jump_to(app, 1000.0));
+            tester.pump_and_settle();
+            let paragraph_0 = paragraph_showing(tester, "Item 0");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_0, 2);
+            tester.down(&mut gesture, at);
+            let paragraph_1 = paragraph_showing(tester, "Item 1");
+            let at = text_offset_to_position(tester, paragraph_1, 2) + Offset::new(0.0, 5.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump_and_settle();
+            tester.up(&gesture);
+
+            // The entire scrollable should be selected.
+            assert_eq!(paragraph_selection(tester, paragraph_0), (2, 6));
+            assert_eq!(paragraph_selection(tester, paragraph_1), (0, 2));
+            let inner_paragraph = paragraph_showing(tester, "Inner item 20");
+            assert_eq!(paragraph_selection(tester, inner_paragraph), (0, 13));
+            // Should not scroll the inner scrollable.
+            assert_eq!(tester.update(|app| controller.offset(app)), 1000.0);
+            tester.remove_pointer(&gesture);
         });
     }
 }

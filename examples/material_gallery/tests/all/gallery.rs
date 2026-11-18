@@ -12,6 +12,7 @@ use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
 use material_gallery_lib::pages::home::INDEX_TITLE;
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
+use material_gallery_lib::pages::selection::{CARD_TEXT, INTRO};
 use material_gallery_lib::pages::steppers::LAST_ACTION;
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
 use waft_embedder::{Brightness, Offset, Size, TargetPlatform};
@@ -328,6 +329,16 @@ fn every_entry_opens_by_a_direct_push() {
             fixture.go_back();
             assert!(!fixture.page_open(), "{entry:?} came back off");
         }
+    });
+}
+
+/// The selection page opens over the index and shows the paragraphs its area wraps.
+#[test]
+fn the_selection_page_opens_over_its_selectable_texts() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Selection);
+        fixture.expect_shown(INTRO);
+        fixture.expect_shown(CARD_TEXT);
     });
 }
 

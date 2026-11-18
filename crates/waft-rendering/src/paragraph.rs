@@ -35,7 +35,7 @@ use crate::selection::{
     SelectionRegistrarRef, SelectionResult, SelectionStatus, SelectionUtils, TextGranularity,
     TextSelectionHandleType,
 };
-use crate::text_boundary::WordBoundary;
+use crate::text_boundary::{LineBoundary, WordBoundary};
 use crate::{RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin};
 use waft_services::{CharacterBoundary, DocumentBoundary, ParagraphBoundary, TextBoundary};
 
@@ -3171,7 +3171,7 @@ impl SelectableFragment {
             TextGranularity::Word => {
                 let paragraph = app.get(self).paragraph;
                 let text = paragraph.text(app);
-                let boundary = WordBoundary::for_paragraph(text, paragraph);
+                let boundary = WordBoundary::new(text, FragmentTextLayout(self));
                 (
                     self.move_beyond_text_boundary_at_direction(
                         app,
@@ -3195,7 +3195,7 @@ impl SelectableFragment {
                 )
             }
             TextGranularity::Line => {
-                let boundary = FragmentLineBoundary { fragment: self };
+                let boundary = LineBoundary::new(FragmentTextLayout(self));
                 (
                     self.move_to_text_boundary_at_direction(app, targeted_edge, forward, &boundary),
                     SelectionResult::End,
@@ -3503,34 +3503,7 @@ fn global_to_paragraph(
     waft_painting::transform_point(&inverse, global_position)
 }
 
-/// The fragment's own line boundary: Dart's `LineBoundary(this)` in `_SelectableFragment`.
-struct FragmentLineBoundary {
-    fragment: Handle<SelectableFragment>,
-}
-
-impl TextBoundary for FragmentLineBoundary {
-    fn get_text_boundary_at(&self, app: &mut App, position: i32) -> TextRange {
-        let selection = self
-            .fragment
-            .get_line_at_offset(app, TextPosition::new(position.max(0)));
-        selection.range()
-    }
-}
-
 impl SelectableFragment {
-    fn get_line_at_offset(
-        self: Handle<Self>,
-        app: &mut App,
-        position: TextPosition,
-    ) -> TextSelection {
-        let range = app.get(self).range;
-        let line = app.get(self).paragraph.get_line_at_offset(app, position);
-        TextSelection::new(
-            line.base_offset.clamp(range.start, range.end),
-            line.extent_offset.clamp(range.start, range.end),
-        )
-    }
-
     fn bounding_boxes(self: Handle<Self>, app: &mut App) -> Vec<Rect> {
         if let Some(cached) = &app.get(self).cached_bounding_boxes {
             return cached.clone();
@@ -3560,6 +3533,43 @@ impl SelectableFragment {
         };
         app.get_mut(self).cached_bounding_boxes = Some(rects.clone());
         rects
+    }
+}
+
+/// The fragment as [`TextLayoutMetrics`](waft_services::TextLayoutMetrics): the orphan rule
+/// keeps the trait off `Handle<SelectableFragment>`, which names a foreign handle.
+#[derive(Clone, Copy)]
+struct FragmentTextLayout(Handle<SelectableFragment>);
+
+impl waft_services::TextLayoutMetrics for FragmentTextLayout {
+    fn get_line_at_offset(self, app: &mut App, position: TextPosition) -> TextSelection {
+        let range = app.get(self.0).range;
+        let line = app.get(self.0).paragraph.get_line_at_offset(app, position);
+        TextSelection::new(
+            line.base_offset.clamp(range.start, range.end),
+            line.extent_offset.clamp(range.start, range.end),
+        )
+    }
+
+    fn get_word_boundary(self, app: &mut App, position: TextPosition) -> TextRange {
+        let paragraph = app.get(self.0).paragraph;
+        paragraph.get_word_boundary(app, position)
+    }
+
+    fn get_text_position_above(self, app: &mut App, position: TextPosition) -> TextPosition {
+        let position = app
+            .get(self.0)
+            .paragraph
+            .get_text_position_above(app, position);
+        self.0.clamp_text_position(app, position)
+    }
+
+    fn get_text_position_below(self, app: &mut App, position: TextPosition) -> TextPosition {
+        let position = app
+            .get(self.0)
+            .paragraph
+            .get_text_position_below(app, position);
+        self.0.clamp_text_position(app, position)
     }
 }
 

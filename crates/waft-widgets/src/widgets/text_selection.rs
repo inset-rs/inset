@@ -48,7 +48,7 @@ use waft_scheduler::{
 };
 use waft_services::{
     AnyTextSelectionDelegate, Clipboard, HapticFeedback, HardwareKeyboard, LogicalKeyboardKey,
-    SelectionChangedCause, ServicesBinding, TextLayoutMetrics, TextSelectionDelegate,
+    SelectionChangedCause, ServicesBinding, TextSelectionDelegate, is_line_terminator,
 };
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
@@ -4847,11 +4847,11 @@ fn paragraph_leading(text: &str, position: i32) -> Option<i32> {
     let mut index = position;
     if index > 1 && units[index as usize] == 0x0A && units[index as usize - 1] == 0x0D {
         index -= 2;
-    } else if TextLayoutMetrics::is_line_terminator(units[index as usize] as i32) {
+    } else if is_line_terminator(units[index as usize] as i32) {
         index -= 1;
     }
     while index > 0 {
-        if TextLayoutMetrics::is_line_terminator(units[index as usize] as i32) {
+        if is_line_terminator(units[index as usize] as i32) {
             return Some(index + 1);
         }
         index -= 1;
@@ -4868,7 +4868,7 @@ fn paragraph_trailing(text: &str, position: i32) -> Option<i32> {
         return Some(0);
     }
     let mut index = position;
-    while !TextLayoutMetrics::is_line_terminator(units[index as usize] as i32) {
+    while !is_line_terminator(units[index as usize] as i32) {
         index += 1;
         if index == units.len() as i32 {
             return Some(index);

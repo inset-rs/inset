@@ -429,6 +429,46 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — `PointerEvent.respond` is omitted on signal events (waft-gestures records it).
   Affect: an embedder that would scroll the page itself is not told the scrollable took the event.
 
+## platform_selectable_region_context_menu.rs → platform_selectable_region_context_menu.dart
+
+- Change: `PlatformSelectableRegionContextMenu` is the non-web stub alone: every member and its `build` throw where Dart throws `UnimplementedError`.
+  Reason: platform — the context menu is a web platform view, and there is no web host that implements it.
+  Affect: an app on a non-web host never builds one; a web host has nothing to build yet.
+
+## widgets/selectable_region.rs → selectable_region.dart (`MultiSelectableSelectionContainerDelegate`, `StaticSelectionContainerDelegate`)
+
+- Change: Dart's two classes are traits over their field bags, the bodies an override reaches as `super` live on `MultiSelectableSelectionContainerDelegateBase` and `StaticSelectionContainerDelegateBase`, `PlainStaticSelectionContainerDelegate` is Dart's instantiable `StaticSelectionContainerDelegate()`, and a leaf writes the `*_accessors!`, `static_selection_container_delegate_overrides!` and `SelectionHandler` / `SelectionRegistrar` macros.
+  Reason: language — no class inheritance, and a trait and a struct cannot share a name.
+  Affect: an app that extends `StaticSelectionContainerDelegate` implements the trait over its own bags and forwards the inherited members with the macros, where Dart writes `extends StaticSelectionContainerDelegate`; `SelectableRegion` builds `PlainStaticSelectionContainerDelegate` where Dart writes `StaticSelectionContainerDelegate()`.
+
+- Change: `compareOrder` is a method taking the app, not a getter returning a `Comparator<Selectable>`.
+  Reason: language — a selectable's bounding boxes are read through `&mut App`, which the comparator a getter returned could not carry.
+  Affect: a subclass overrides `compare_order(self, app, a, b)` where Dart overrides `compareOrder`.
+
+## widgets/selectable_region.rs → selectable_region.dart (`SelectableRegion`)
+
+- Change: a region whose `selectionControls` do not mix in `TextSelectionHandleControls` shows no toolbar.
+  Reason: language — the overlay's own toolbar asks the deprecated `TextSelectionDelegate` members (`textEditingValue`, `cutSelection`, `pasteText`, …), which the region does not implement.
+  Affect: `contextMenuBuilder` is a region's only toolbar; the platform controls, which are handle controls, and Material's `SelectionArea` are unaffected.
+
+- Change: the process-text and share items of a region's menu are absent.
+  Reason: platform — the host has no text-processing service or share sheet.
+  Affect: a region's menu holds Copy and Select All, where an Android host would add a Share item.
+
+- Change: the deprecated `TextSelectionDelegate` implementation, `_updateSelectionStatus`'s `textEditingValue`, `SelectionListener`, `SelectionDetails` and `SelectionListenerNotifier` are not ported.
+  Reason: language — the delegate's members exist only for the deprecated toolbar and the platform's text input channel, which the port does not use; the listener classes wait for their tests' needs.
+  Affect: `SelectableRegionState` is not a `TextSelectionDelegate` and no `SelectionListener` reports a region's selection details; `onSelectionChanged` and `contextMenuButtonItems` give what those would.
+
+- Change: the browser's own context menu is not wired: the region does not attach `PlatformSelectableRegionContextMenu` on focus, detach it on blur, or wrap its child in one, and `BrowserContextMenu` is not ported.
+  Reason: platform — both serve the browser's own context menu, a DOM view the web host would own, and there is no web host.
+  Affect: a region builds the same tree and takes the same focus path on every platform, with no browser-menu integration where Flutter's web region has one.
+
+## widgets/text.rs → text.dart (selection)
+
+- Change: the text delegate records where each fragment of the paragraph after its first starts in it when the selectables change, where Dart reads it from the fragment's first box while it computes the range.
+  Reason: language — `Selectable::bounding_boxes` and `RenderParagraph::get_position_for_offset` take `&mut App` here, and `SelectionHandler::selection` has `&App`.
+  Affect: none in left-to-right text: a fragment's first box starts at its first character whatever the layout, and the paragraph rebuilds its fragments, and so the record, whenever its text changes; a right-to-left fragment re-wrapped by a relayout may report the start Dart read before the relayout.
+
 ## widgets/scroll_view.rs → scroll_view.dart
 
 - Change: the physics a primary scroll view implies is substituted in `build`, not stored on the widget.
@@ -752,8 +792,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## Deferred
 
+- platform_selectable_region_context_menu_web.dart: the web context menu, a registered platform view over a DOM element. Trigger: a web host.
+- scrollable.rs: scrollable_selection_test.dart's horizontal and reversed variants, double- and triple-click drags, handle-drag scrolls, the two padding cases and the 'Complex cases' after 'selection starts outside of the scrollable'. Trigger: the next edit of the scrollable's selection delegate.
+- selectable_region.rs: selectable_region_test.dart's cases beyond the mouse, spy, keyboard-granular and handle-drag ones ported (double- and triple-click drags, shift-click, directional extension, the toolbar and magnifier cases, onSelectionChanged, SelectionListener). Trigger: the next edit of `SelectableRegion`'s gestures or actions; `SelectionListener`.
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
-- selection_container_test.dart: all seven cases build a `MultiSelectableSelectionContainerDelegate` (selectable_region.dart) or `Text`'s internal selection container (text.dart), neither ported yet. Trigger: `MultiSelectableSelectionContainerDelegate` and text.dart's selection container.
 - raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
 - form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).
 - form.rs: the error announcement `FormState._validate` sends through `SemanticsService`. Trigger: the semantics tree.
@@ -781,7 +823,8 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - view.rs, overlay.rs: the hidden-by-a-`LookupBoundary` variants of the `View.of` and `Overlay.of` error messages. Trigger: diagnostics.
 - form.rs, page_storage.rs, tap_region.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value (the check is in debug.rs). Trigger: each such widget's next edit.
-- text.rs: selection, `locale`, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; the next edit of text.rs for `locale` (embedder's `Locale` exists).
+- selectable_region.rs: `SelectionListener`, `SelectionDetails`, `SelectionListenerNotifier`, the deprecated `TextSelectionDelegate` members and the iOS-web double-tap quirks. Trigger: the first caller of a selection listener; a web host.
+- text.rs: `locale`, `hyphens`, and the deprecated `textScaleFactor`; `Text`'s selection container and `_RichText` carry none of them either. Trigger: `Locale` (the embedder's exists); `Hyphens`.
 - basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
 - basic.rs: `RepaintBoundary.wrap` and `wrapAll`, `DefaultAssetBundle`. Trigger: the sliver child delegates that call them; asset bundles.
@@ -817,10 +860,9 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - sliver.rs: `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisExpanded`, `SliverCrossAxisGroup` and `SliverMainAxisGroup`. Trigger: each one's render sliver.
 - sliver.rs: `SliverEnsureSemantics`. Trigger: the semantics tree.
 - Two-dimensional scrolling: the two-dimensional viewport, its scrollable and scopes, its child delegates, `DiagonalDragBehavior`, and sliver.rs's `KeepAlive` under such a viewport. Trigger: `two_dimensional_viewport.dart`.
-- scroll_delegate.rs: the `_SelectionKeepAlive` the delegates put inside each child's `AutomaticKeepAlive`, and the delegate description's exception branch. Trigger: `selection_container.dart`; diagnostics.
+- scroll_delegate.rs: the delegate description's exception branch. Trigger: diagnostics.
 - viewport.rs: the viewport diagnostics. Trigger: diagnostics.
 - Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
-- scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.
 - scroll_view.rs: the scroll view diagnostics. Trigger: diagnostics.
 - single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: the semantics tree; the inspector; diagnostics.
