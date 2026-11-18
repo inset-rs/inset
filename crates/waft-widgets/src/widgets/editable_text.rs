@@ -7243,7 +7243,9 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        install_fonts(&mut app);
+        // The line's height is its font's, so the test uses flutter_test's fonts rather than
+        // whichever font this machine answers with.
+        PaintingBinding::instance(&mut app).install_flutter_test_fonts(&mut app);
         let controller = app.create(BoxesController {
             change_notifier: ChangeNotifierData::new(),
             text_editing_controller: TextEditingControllerData::new(
@@ -7278,10 +7280,12 @@ mod tests {
             .expect("laid out");
         assert!(offset.dx() > 0.0, "after \"ab\"");
         assert_eq!(inline.size(&app), Size::new(30.0, 20.0));
-        // The editable's default strut forces every line to the style's 14 px height, so the
+        // The editable's default strut forces every line to the style's line height, so the
         // 20 px widget overflows the line instead of growing it, as Flutter's
         // `forceStrutHeight` does when `EditableText` derives its strut from the style.
-        assert_eq!(editable.size(&app).height(), 14.0);
+        let line_height = editable.preferred_line_height(&mut app);
+        assert_eq!(editable.size(&app).height(), line_height);
+        assert!(line_height < inline.size(&app).height());
     }
 
     // editable_text_test.dart 'cut and copy do nothing in obscured mode even if explicitly

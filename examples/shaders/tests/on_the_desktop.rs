@@ -5,7 +5,7 @@
 //! Its own binary, without the test harness: AppKit's event loop runs on the main thread only. It
 //! opens a window, above the others so that nothing covers it, for a moment, and needs a login
 //! session's window server.
-#![feature(arbitrary_self_types)]
+#![cfg_attr(target_os = "macos", feature(arbitrary_self_types))]
 // A picture's display list nests auto-trait obligations past the default depth.
 #![recursion_limit = "256"]
 

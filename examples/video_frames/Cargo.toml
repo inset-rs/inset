@@ -7,7 +7,8 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
-[dependencies]
+# The example is macOS only, so are its dependencies.
+[target.'cfg(target_os = "macos")'.dependencies]
 waft-embedder.workspace = true
 waft-embedder-winit.workspace = true
 waft-foundation.workspace = true

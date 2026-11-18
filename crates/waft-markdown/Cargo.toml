@@ -21,7 +21,8 @@ pulldown-cmark.workspace = true
 [dev-dependencies]
 waft-scheduler.workspace = true
 waft-test.workspace = true
-valo-system-fonts.workspace = true
+# flutter_test's fonts, so text metrics do not follow the machine's fonts.
+waft-painting = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

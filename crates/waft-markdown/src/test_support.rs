@@ -21,7 +21,8 @@ fn test_view() -> ViewRef {
     Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 1.0))
 }
 
-/// An app on a platform with one view and the OS fonts.
+/// An app on a platform with one view and flutter_test's fonts, as Flutter's widget tests
+/// install them, so text metrics are the same on every machine.
 pub(crate) fn test_cell() -> Rc<AppCell> {
     let platform = TestPlatform::new()
         .on(TargetPlatform::MacOS)
@@ -29,10 +30,7 @@ pub(crate) fn test_cell() -> Rc<AppCell> {
     let cell = AppCell::with_platform(Rc::new(platform));
     {
         let mut app = cell.borrow_mut();
-        let binding = PaintingBinding::instance(&mut app);
-        binding.install_fonts(&mut app, |fonts| {
-            fonts.add_source(valo_system_fonts::SystemFonts::load());
-        });
+        PaintingBinding::instance(&mut app).install_flutter_test_fonts(&mut app);
     }
     cell
 }
