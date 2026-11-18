@@ -9,6 +9,13 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+# The kits, for the test that their globs and the facade's never clash. A path and no version,
+# so `cargo publish` leaves them out: the published facade depends on no kit.
+[dev-dependencies]
+waft-cupertino = { path = "../waft-cupertino" }
+waft-material = { path = "../waft-material" }
+waft-winui = { path = "../waft-winui" }
+
 [dependencies]
 waft-embedder.workspace = true
 waft-embedder-default.workspace = true
