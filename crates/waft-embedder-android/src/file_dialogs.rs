@@ -740,7 +740,7 @@ impl Drop for UrisPicked {
             let finished = env.call_method(
                 activity,
                 jni_str!("finishActivity"),
-                jni_sig!("(I)Z"),
+                jni_sig!("(I)V"),
                 &[JValue::Int(request)],
             );
             if finished.is_err() {
