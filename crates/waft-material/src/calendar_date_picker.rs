@@ -955,7 +955,7 @@ impl State for DatePickerModeToggleButtonState {
         SizedBox::new()
             .height(SUB_HEADER_HEIGHT)
             .child(
-                Padding::new(EdgeInsetsDirectional::only(16.0, 0.0, 4.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(16.0, 0.0, 4.0, 0.0))
                     .child(Row::new().children(children)),
             )
             .into_widget()
@@ -1556,12 +1556,13 @@ impl State for MonthPickerState {
                     SizedBox::new()
                         .height(SUB_HEADER_HEIGHT)
                         .child(
-                            Padding::new(EdgeInsetsDirectional::only(16.0, 0.0, 4.0, 0.0).into())
-                                .child(Row::new().children([
+                            Padding::new(EdgeInsetsDirectional::only(16.0, 0.0, 4.0, 0.0)).child(
+                                Row::new().children([
                                     Spacer::new().into_widget(),
                                     previous_button.into_widget(),
                                     next_button.into_widget(),
-                                ])),
+                                ]),
+                            ),
                         )
                         .into_widget(),
                     Expanded::new(

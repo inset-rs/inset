@@ -1497,10 +1497,12 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
                 // field content should be aligned. The text field has a horizontal padding of 16 pixels.
                 // To conform with the 16 pixels padding, a 4 pixels padding is added in front of the item label.
                 .child(
-                    Padding::new(
-                        EdgeInsetsDirectional::only(effective_input_start_gap, 0.0, 0.0, 0.0)
-                            .into(),
-                    )
+                    Padding::new(EdgeInsetsDirectional::only(
+                        effective_input_start_gap,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ))
                     .child(label),
                 );
             if options.enable_scroll_to_highlight {

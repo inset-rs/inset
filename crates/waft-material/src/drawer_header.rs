@@ -100,7 +100,8 @@ impl DrawerHeader {
     }
 
     /// Dart `DrawerHeader(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> DrawerHeader {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> DrawerHeader {
+        let padding = padding.into();
         self.padding = padding;
         self
     }

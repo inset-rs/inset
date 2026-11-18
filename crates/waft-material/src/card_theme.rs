@@ -118,7 +118,8 @@ impl CardTheme {
     }
 
     /// Dart `CardTheme(margin:)`.
-    pub fn with_margin(mut self, margin: EdgeInsetsGeometry) -> CardTheme {
+    pub fn with_margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> CardTheme {
+        let margin = margin.into();
         debug_assert!(self.data.is_none());
         self.margin = Some(margin);
         self
@@ -437,7 +438,8 @@ impl CardThemeData {
     }
 
     /// Dart `CardThemeData(margin:)`.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> CardThemeData {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> CardThemeData {
+        let margin = margin.into();
         self.margin = Some(margin);
         self
     }

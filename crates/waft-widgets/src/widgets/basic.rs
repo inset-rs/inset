@@ -2367,7 +2367,8 @@ pub struct Padding {
 
 impl Padding {
     /// Creates a `Padding`; Dart's optional named arguments are the setters.
-    pub fn new(padding: EdgeInsetsGeometry) -> Padding {
+    pub fn new(padding: impl Into<EdgeInsetsGeometry>) -> Padding {
+        let padding = padding.into();
         Padding {
             key: None,
             padding,
@@ -4684,7 +4685,8 @@ pub struct SliverPadding {
 
 impl SliverPadding {
     /// Creates a sliver that applies padding on each side of another sliver.
-    pub fn new(padding: EdgeInsetsGeometry) -> SliverPadding {
+    pub fn new(padding: impl Into<EdgeInsetsGeometry>) -> SliverPadding {
+        let padding = padding.into();
         SliverPadding {
             key: None,
             padding,
@@ -9548,6 +9550,7 @@ mod tests {
     use waft_embedder::{Color, Offset, Radius, Size};
     use waft_foundation::{App, AppCell, Handle};
     use waft_gestures::{HitTestEntry, HitTestResult, PointerDownEvent, PointerEvent};
+    use waft_painting::{EdgeInsets, EdgeInsetsDirectional};
     use waft_rendering::{
         AnyRenderBox, BoxHitTestEntry, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
         ContainerRenderObjectMixin, ErasedRenderObject, RenderBox, RenderObject,
@@ -9638,6 +9641,41 @@ mod tests {
         assert_eq!(after, before, "the same RenderPadding is reconfigured");
         assert_eq!(after.padding(&app), EdgeInsetsGeometry::all(6.0));
         assert_eq!(after.size(&app), Size::new(22.0, 22.0));
+    }
+
+    /// A `Padding` takes `EdgeInsets` or `EdgeInsetsDirectional` where Flutter takes an
+    /// `EdgeInsetsGeometry`, without an `EdgeInsetsGeometry::from` at the call.
+    #[test]
+    fn padding_takes_either_kind_of_insets() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Padding::new(EdgeInsets::all(4.0))
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let padding = padding_under_root(&harness, &app);
+        assert_eq!(padding.padding(&app).resolve(None), EdgeInsets::all(4.0));
+
+        harness.set_child(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
+                    .child(sized(10.0, 10.0))
+                    .into_widget(),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let padding = padding_under_root(&harness, &app);
+        assert_eq!(
+            child_offset(padding, &app),
+            Offset::new(8.0, 0.0),
+            "the directional insets reach the widget"
+        );
     }
 
     #[test]

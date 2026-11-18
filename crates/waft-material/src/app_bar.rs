@@ -841,7 +841,8 @@ impl AppBar {
     }
 
     /// Dart `AppBar(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> AppBar {
+    pub fn actions_padding(mut self, actions_padding: impl Into<EdgeInsetsGeometry>) -> AppBar {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }
@@ -2500,7 +2501,11 @@ impl SliverAppBar {
     }
 
     /// Dart `SliverAppBar(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> SliverAppBar {
+    pub fn actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> SliverAppBar {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }
@@ -4825,7 +4830,7 @@ mod tests {
                             .into_widget(),
                     ]);
                     if let Some(actions_padding) = actions_padding {
-                        app_bar = app_bar.actions_padding(actions_padding.into());
+                        app_bar = app_bar.actions_padding(actions_padding);
                     }
                     scaffold_with(app_bar).into_widget()
                 });

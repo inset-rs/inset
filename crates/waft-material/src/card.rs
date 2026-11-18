@@ -247,7 +247,8 @@ impl Card {
     }
 
     /// Dart `Card(margin:)`.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> Card {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> Card {
+        let margin = margin.into();
         self.margin = Some(margin);
         self
     }

@@ -134,7 +134,11 @@ impl PopupMenuThemeData {
     }
 
     /// Dart `PopupMenuThemeData(menuPadding:)`.
-    pub fn menu_padding(mut self, menu_padding: EdgeInsetsGeometry) -> PopupMenuThemeData {
+    pub fn menu_padding(
+        mut self,
+        menu_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> PopupMenuThemeData {
+        let menu_padding = menu_padding.into();
         self.menu_padding = Some(menu_padding);
         self
     }

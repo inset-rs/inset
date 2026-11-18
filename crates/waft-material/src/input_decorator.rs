@@ -5387,7 +5387,11 @@ impl InputDecoration {
     }
 
     /// Dart `InputDecoration(contentPadding:)`.
-    pub fn content_padding(mut self, content_padding: EdgeInsetsGeometry) -> InputDecoration {
+    pub fn content_padding(
+        mut self,
+        content_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> InputDecoration {
+        let content_padding = content_padding.into();
         self.content_padding = Some(content_padding);
         self
     }
@@ -5590,8 +5594,9 @@ impl InputDecoration {
     /// Dart `InputDecoration(supportingTextPadding:)`.
     pub fn supporting_text_padding(
         mut self,
-        supporting_text_padding: EdgeInsetsGeometry,
+        supporting_text_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecoration {
+        let supporting_text_padding = supporting_text_padding.into();
         self.supporting_text_padding = Some(supporting_text_padding);
         self
     }
@@ -6244,8 +6249,9 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(contentPadding:)`.
     pub fn with_content_padding(
         mut self,
-        content_padding: EdgeInsetsGeometry,
+        content_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecorationTheme {
+        let content_padding = content_padding.into();
         debug_assert!(self.data.is_none());
         self.content_padding = Some(content_padding);
         self
@@ -7862,8 +7868,9 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(contentPadding:)`.
     pub fn content_padding(
         mut self,
-        content_padding: EdgeInsetsGeometry,
+        content_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecorationThemeData {
+        let content_padding = content_padding.into();
         self.content_padding = Some(content_padding);
         self
     }
@@ -8060,8 +8067,9 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(supportingTextPadding:)`.
     pub fn supporting_text_padding(
         mut self,
-        supporting_text_padding: EdgeInsetsGeometry,
+        supporting_text_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecorationThemeData {
+        let supporting_text_padding = supporting_text_padding.into();
         self.supporting_text_padding = Some(supporting_text_padding);
         self
     }
@@ -9303,7 +9311,7 @@ pub(crate) mod tests {
                 format!(
                     "{:?}",
                     InputDecorationThemeData::new()
-                        .content_padding(EdgeInsetsDirectional::only(5.0, 0.0, 0.0, 0.0).into())
+                        .content_padding(EdgeInsetsDirectional::only(5.0, 0.0, 0.0, 0.0))
                 )
                 .contains("contentPadding: EdgeInsetsDirectional(5.0, 0.0, 0.0, 0.0)")
             );
@@ -9312,7 +9320,7 @@ pub(crate) mod tests {
                 format!(
                     "{:?}",
                     InputDecorationThemeData::new()
-                        .content_padding(EdgeInsets::only(5.0, 0.0, 0.0, 0.0).into())
+                        .content_padding(EdgeInsets::only(5.0, 0.0, 0.0, 0.0))
                 )
                 .contains("contentPadding: EdgeInsets(5.0, 0.0, 0.0, 0.0)")
             );
@@ -9327,7 +9335,7 @@ pub(crate) mod tests {
                     .error_style(TextStyle::new().height(4.0))
                     .error_max_lines(5)
                     .is_dense(true)
-                    .content_padding(EdgeInsets::only(0.0, 0.0, 6.0, 0.0).into())
+                    .content_padding(EdgeInsets::only(0.0, 0.0, 6.0, 0.0))
                     .is_collapsed(true)
                     .prefix_style(TextStyle::new().height(7.0))
                     .suffix_style(TextStyle::new().height(8.0))
@@ -15009,7 +15017,7 @@ pub(crate) mod tests {
                         .hint_style(theme_style.clone())
                         .error_style(theme_style.clone())
                         .is_dense(true)
-                        .content_padding(EdgeInsets::all(1.0).into())
+                        .content_padding(EdgeInsets::all(1.0))
                         .prefix_style(theme_style.clone())
                         .suffix_style(theme_style.clone())
                         .counter_style(theme_style.clone())
@@ -15055,7 +15063,7 @@ pub(crate) mod tests {
                     .hint_style(decoration_style.clone())
                     .error_style(decoration_style.clone())
                     .is_dense(false)
-                    .content_padding(EdgeInsets::all(4.0).into())
+                    .content_padding(EdgeInsets::all(4.0))
                     .prefix_style(decoration_style.clone())
                     .suffix_style(decoration_style.clone())
                     .counter_style(decoration_style.clone())
@@ -15073,7 +15081,7 @@ pub(crate) mod tests {
                             .error_style(theme_style.clone())
                             .error_max_lines(4)
                             .is_dense(true)
-                            .content_padding(EdgeInsets::all(1.0).into())
+                            .content_padding(EdgeInsets::all(1.0))
                             .prefix_style(theme_style.clone())
                             .suffix_style(theme_style.clone())
                             .counter_style(theme_style.clone())
@@ -15584,7 +15592,7 @@ pub(crate) mod tests {
                     InputDecoration::new()
                         .label_text("Label Text")
                         .helper_text("Helper Text")
-                        .content_padding(EdgeInsets::ZERO.into()),
+                        .content_padding(EdgeInsets::ZERO),
                 );
             });
         }
@@ -15694,12 +15702,12 @@ pub(crate) mod tests {
                 "isDense and isCollapsed" => InputDecoration::new()
                     .is_dense(true)
                     .is_collapsed(true)
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .border(InputBorderRef::none())
                     .hint_text(HINT_TEXT),
                 "isDense with zero content padding" => InputDecoration::new()
                     .is_dense(true)
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .hint_text(HINT_TEXT),
                 "isCollapsed" => InputDecoration::new()
                     .is_collapsed(true)
@@ -15868,9 +15876,7 @@ pub(crate) mod tests {
                                                         InputDecoration::new()
                                                             .is_dense(true)
                                                             .is_collapsed(true)
-                                                            .content_padding(
-                                                                EdgeInsets::ZERO.into(),
-                                                            )
+                                                            .content_padding(EdgeInsets::ZERO)
                                                             .border(InputBorderRef::none())
                                                             .hint_text(HINT_TEXT),
                                                     )
@@ -16019,7 +16025,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let decoration_with_hint = || {
                     InputDecoration::new()
-                        .content_padding(EdgeInsets::ZERO.into())
+                        .content_padding(EdgeInsets::ZERO)
                         .hint_text("Hint")
                 };
                 const HINT_TEXT_WIDTH: f64 = 66.0;
@@ -16056,7 +16062,7 @@ pub(crate) mod tests {
         fn the_intrinsic_width_ignores_the_hint_when_not_empty_and_not_maintaining_its_size() {
             test_widgets(|tester| {
                 let decoration_with_hint = InputDecoration::new()
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .hint_text("Hint")
                     .maintain_hint_size(false);
                 const CONTENT_WIDTH: f64 = 20.0;
@@ -16080,7 +16086,7 @@ pub(crate) mod tests {
         fn the_intrinsic_width_keeps_the_hint_width_when_maintaining_its_size() {
             test_widgets(|tester| {
                 let decoration_with_hint = InputDecoration::new()
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .hint_text("Hint");
                 const CONTENT_WIDTH: f64 = 20.0;
                 const HINT_TEXT_WIDTH: f64 = 66.0;
@@ -16098,7 +16104,7 @@ pub(crate) mod tests {
 
         fn decoration_with_label(maintain_label_size: bool) -> InputDecoration {
             InputDecoration::new()
-                .content_padding(EdgeInsets::ZERO.into())
+                .content_padding(EdgeInsets::ZERO)
                 .label(SizedBox::new().width(30.0))
                 .maintain_label_size(maintain_label_size)
         }
@@ -16479,9 +16485,7 @@ pub(crate) mod tests {
                     tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
-                            .content_padding(
-                                EdgeInsetsDirectional::only(40.0, 12.0, 0.0, 12.0).into(),
-                            )
+                            .content_padding(EdgeInsetsDirectional::only(40.0, 12.0, 0.0, 12.0))
                             .icon(icon(Icons::insert_link()))
                             .label_text(LABEL_TEXT)
                             .hint_text(HINT_TEXT)
@@ -16525,9 +16529,8 @@ pub(crate) mod tests {
                 pump(
                     tester,
                     local(
-                        InputDecorationThemeData::new().content_padding(
-                            EdgeInsetsDirectional::only(START, TOP, END, BOTTOM).into(),
-                        ),
+                        InputDecorationThemeData::new()
+                            .content_padding(EdgeInsetsDirectional::only(START, TOP, END, BOTTOM)),
                         InputDecoration::new().label_text(LABEL_TEXT),
                     ),
                 );

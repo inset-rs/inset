@@ -2973,7 +2973,7 @@ pub(crate) mod tests {
                 m2,
                 Material::new().child(
                     Center::new().child(
-                        Padding::new(EdgeInsets::symmetric(0.0, 24.0).into()).child(
+                        Padding::new(EdgeInsets::symmetric(0.0, 24.0)).child(
                             ExpansionTile::new(test_text("title", &probe()))
                                 .key(expansion_tile_key.clone().into())
                                 .shape(rounded(16.0))

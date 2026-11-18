@@ -345,7 +345,8 @@ impl Container {
     }
 
     /// Dart `Container(padding:)`; must be non-negative.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> Container {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> Container {
+        let padding = padding.into();
         debug_assert!(padding.is_non_negative());
         self.padding = Some(padding);
         self
@@ -406,7 +407,8 @@ impl Container {
     }
 
     /// Dart `Container(margin:)`; must be non-negative.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> Container {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> Container {
+        let margin = margin.into();
         debug_assert!(margin.is_non_negative());
         self.margin = Some(margin);
         self

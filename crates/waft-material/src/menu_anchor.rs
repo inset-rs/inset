@@ -569,7 +569,11 @@ impl MenuAnchor {
     }
 
     /// Dart `MenuAnchor(reservedPadding:)`.
-    pub fn reserved_padding(mut self, reserved_padding: EdgeInsetsGeometry) -> MenuAnchor {
+    pub fn reserved_padding(
+        mut self,
+        reserved_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> MenuAnchor {
+        let reserved_padding = reserved_padding.into();
         self.reserved_padding = Some(reserved_padding);
         self
     }

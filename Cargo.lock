@@ -5071,6 +5071,7 @@ dependencies = [
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
+ "waft-gestures",
  "waft-macros",
  "waft-painting",
  "waft-scheduler",

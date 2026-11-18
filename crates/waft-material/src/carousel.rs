@@ -538,7 +538,7 @@ impl CarouselViewState {
                 .into_widget();
         }
 
-        Padding::new(effective_padding.into())
+        Padding::new(effective_padding)
             .child(
                 Material::new()
                     .clip_behavior(effective_item_clip_behavior)

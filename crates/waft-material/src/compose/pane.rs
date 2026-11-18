@@ -65,7 +65,8 @@ impl Pane {
     }
 
     /// How far the pane keeps from each edge of the scaffold.
-    pub fn margins(mut self, margins: EdgeInsetsGeometry) -> Pane {
+    pub fn margins(mut self, margins: impl Into<EdgeInsetsGeometry>) -> Pane {
+        let margins = margins.into();
         self.margins = margins;
         self
     }

@@ -2297,7 +2297,8 @@ impl<T: Clone + PartialEq + 'static> ShowMenu<T> {
     }
 
     /// The padding inside the menu.
-    pub fn menu_padding(mut self, menu_padding: EdgeInsetsGeometry) -> ShowMenu<T> {
+    pub fn menu_padding(mut self, menu_padding: impl Into<EdgeInsetsGeometry>) -> ShowMenu<T> {
+        let menu_padding = menu_padding.into();
         self.menu_padding = Some(menu_padding);
         self
     }
@@ -2776,7 +2777,8 @@ impl<T: Clone + PartialEq + 'static> PopupMenuButton<T> {
     }
 
     /// Dart `PopupMenuButton(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> PopupMenuButton<T> {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> PopupMenuButton<T> {
+        let padding = padding.into();
         self.padding = padding;
         self
     }

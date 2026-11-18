@@ -130,7 +130,7 @@ impl StatelessWidget for GridTileBar {
         let mut children: Vec<WidgetRef> = Vec::new();
         if let Some(leading) = &self.leading {
             children.push(
-                Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 8.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 8.0, 0.0))
                     .child(leading.clone())
                     .into_widget(),
             );
@@ -191,13 +191,13 @@ impl StatelessWidget for GridTileBar {
 
         if let Some(trailing) = &self.trailing {
             children.push(
-                Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
                     .child(trailing.clone())
                     .into_widget(),
             );
         }
 
-        let mut container = Container::new().padding(padding.into()).height(height);
+        let mut container = Container::new().padding(padding).height(height);
         if let Some(background_color) = self.background_color {
             container = container.decoration(BoxDecoration::new().color(background_color));
         }

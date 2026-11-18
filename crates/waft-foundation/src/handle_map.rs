@@ -79,6 +79,22 @@ impl DroppedEntries {
 ///
 /// A field, a widget, a closure that is stored, anything kept past a checkpoint holds one of
 /// these. Code that only uses an object during a call takes the bare handle.
+///
+/// Nothing makes one from nothing: it is a keeper of an object that already exists.
+/// [`App::create`] answers one for a new object, as a Dart constructor call does, and
+/// [`Retained::keep`] — or a handle's own `keep` — makes one for an object something already
+/// keeps, such as a controller a field holds:
+///
+/// ```
+/// use waft_foundation::{App, AppCell, Retained};
+///
+/// let cell = AppCell::new();
+/// let mut app = cell.borrow_mut();
+/// let kept = app.create(7u32);                 // what Dart's constructor call answers
+/// let handle = kept.handle();                  // the bare handle keeps nothing
+/// let second = Retained::keep(&app, handle);   // a second keeper of the same object
+/// assert_eq!(*app.get(&second), 7);
+/// ```
 pub struct Retained<H> {
     handle: H,
     keep: Rc<Keep>,

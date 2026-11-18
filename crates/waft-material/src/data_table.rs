@@ -971,15 +971,12 @@ impl DataTable {
         let mut contents = Semantics::new()
             .container(true)
             .child(
-                Padding::new(
-                    EdgeInsetsDirectional::only(
-                        effective_checkbox_horizontal_margin_start,
-                        0.0,
-                        effective_checkbox_horizontal_margin_end,
-                        0.0,
-                    )
-                    .into(),
-                )
+                Padding::new(EdgeInsetsDirectional::only(
+                    effective_checkbox_horizontal_margin_start,
+                    0.0,
+                    effective_checkbox_horizontal_margin_end,
+                    0.0,
+                ))
                 .child(
                     Center::new()
                         .child(Checkbox::new(checked, on_checkbox_changed).tristate(tristate)),

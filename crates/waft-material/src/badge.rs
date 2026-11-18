@@ -228,7 +228,8 @@ impl Badge {
     }
 
     /// Dart `Badge(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> Badge {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> Badge {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

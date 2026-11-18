@@ -2725,7 +2725,7 @@ mod tests {
             FloatingActionButtonThemeData::new()
                 .extended_size_constraints(constraints)
                 .extended_icon_label_spacing(icon_label_spacing)
-                .extended_padding(padding.into())
+                .extended_padding(padding)
                 .extended_text_style(text_style.clone()),
             |fab| fab,
         );
@@ -2773,7 +2773,7 @@ mod tests {
             use_material3,
             FloatingActionButtonThemeData::new()
                 .extended_icon_label_spacing(25.0)
-                .extended_padding(EdgeInsetsDirectional::only(7.0, 0.0, 8.0, 0.0).into())
+                .extended_padding(EdgeInsetsDirectional::only(7.0, 0.0, 8.0, 0.0))
                 .extended_text_style(TextStyle::new().letter_spacing(3.0)),
             |fab| {
                 fab.extended_icon_label_spacing(icon_label_spacing)

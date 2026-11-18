@@ -13,6 +13,7 @@ categories.workspace = true
 waft-embedder.workspace = true
 waft-embedder-default.workspace = true
 waft-foundation.workspace = true
+waft-gestures.workspace = true
 waft-macros.workspace = true
 waft-painting.workspace = true
 waft-shell.workspace = true

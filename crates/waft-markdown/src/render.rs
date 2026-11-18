@@ -139,7 +139,7 @@ pub fn quote(cx: &mut RenderContext, app: &mut App, blocks: &[Block]) -> WidgetR
     let children = self::blocks(cx, app, blocks, sheet.block_spacing);
     cx.text = outer;
     DecoratedBox::new(sheet.quote.decoration.clone())
-        .child(Padding::new(sheet.quote.padding.into()).child(column(children, cx.fit_content)))
+        .child(Padding::new(sheet.quote.padding).child(column(children, cx.fit_content)))
         .into_widget()
 }
 
@@ -422,7 +422,7 @@ fn table_cells(
             };
             let content = cells.get(column).map_or(&[][..], |cell| &cell.content);
             let text = rich_text(spans(cx, app, content, style), style.clone(), text_align);
-            TableCell::new(Padding::new(padding.into()).child(text)).into_widget()
+            TableCell::new(Padding::new(padding).child(text)).into_widget()
         })
         .collect()
 }
@@ -441,7 +441,7 @@ fn list_item(cx: &RenderContext, marker: WidgetRef, content: WidgetRef) -> Widge
         .children([
             SizedBox::new()
                 .width(list.indent + padding.left + padding.right)
-                .child(Padding::new(padding.into()).child(marker))
+                .child(Padding::new(padding).child(marker))
                 .into_widget(),
             Flexible::new(content)
                 .fit(if cx.fit_content {
@@ -482,7 +482,7 @@ fn padded(padding: EdgeInsets, child: WidgetRef) -> WidgetRef {
     if padding == EdgeInsets::ZERO {
         return child;
     }
-    Padding::new(padding.into()).child(child).into_widget()
+    Padding::new(padding).child(child).into_widget()
 }
 
 /// Material's `check_box` and `check_box_outline_blank` icons, drawn on their 24-unit grid.
@@ -595,7 +595,7 @@ impl State for SidewaysScrollState {
         let scroll_view = SingleChildScrollView::new()
             .controller(controller.clone())
             .scroll_direction(Axis::Horizontal)
-            .padding(widget.padding.into())
+            .padding(widget.padding)
             .child(widget.child.clone());
         RawScrollbar::new(scroll_view)
             .controller(controller)

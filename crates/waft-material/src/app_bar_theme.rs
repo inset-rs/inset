@@ -226,7 +226,11 @@ impl AppBarTheme {
     }
 
     /// Dart `AppBarTheme(actionsPadding:)`.
-    pub fn with_actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> AppBarTheme {
+    pub fn with_actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> AppBarTheme {
+        let actions_padding = actions_padding.into();
         debug_assert!(self.data.is_none());
         self.actions_padding = Some(actions_padding);
         self
@@ -875,7 +879,11 @@ impl AppBarThemeData {
     }
 
     /// Dart `AppBarThemeData(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> AppBarThemeData {
+    pub fn actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> AppBarThemeData {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }

@@ -873,7 +873,7 @@ impl State for RefreshIndicatorState {
                         } else {
                             EdgeInsets::only(0.0, 0.0, 0.0, displacement)
                         }
-                        .into(),
+                        ,
                     )
                     .child(
                         Align::new()

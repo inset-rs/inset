@@ -662,19 +662,17 @@ mod tests {
                             .color(Colors::WHITE)
                             .height(800.0)
                             .width(800.0)
-                            .child(
-                                Padding::new(EdgeInsets::symmetric(0.0, 250.0).into()).child(
-                                    FittedBox::new().child(
-                                        material_text_selection_controls().build_handle(
-                                            app,
-                                            context,
-                                            TextSelectionHandleType::Right,
-                                            10.0,
-                                            None,
-                                        ),
+                            .child(Padding::new(EdgeInsets::symmetric(0.0, 250.0)).child(
+                                FittedBox::new().child(
+                                    material_text_selection_controls().build_handle(
+                                        app,
+                                        context,
+                                        TextSelectionHandleType::Right,
+                                        10.0,
+                                        None,
                                     ),
                                 ),
-                            )
+                            ))
                             .into_widget()
                     }),
                 )

@@ -567,6 +567,15 @@ impl App {
     /// Puts `state` in the arena and answers the one [`Ref`] that keeps it: Dart's constructor
     /// call. The object is freed at the checkpoint after the last `Ref` to it is dropped.
     ///
+    /// ```
+    /// # use waft_foundation::{App, AppCell};
+    /// let cell = AppCell::new();
+    /// let mut app = cell.borrow_mut();
+    /// let counter = app.create(0u32);      // a field holds this `Ref`, not the bare handle
+    /// *app.get_mut(&counter) += 1;
+    /// assert_eq!(*app.get(&counter), 1);
+    /// ```
+    ///
     /// A tree node (an element, a state, a render object, a layer) is handed to the tree code at
     /// once with [`Retained::into_tree_node`].
     #[track_caller]

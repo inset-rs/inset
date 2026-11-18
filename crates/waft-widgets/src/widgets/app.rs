@@ -41,12 +41,13 @@ use crate::widgets::localizations::{
 };
 use crate::widgets::navigator::{
     NavigationNotification, Navigator, NavigatorObserverRef, NavigatorState, RouteFactory,
-    RouteRef, RouteSettings,
+    RouteRef, RouteSettings, RouteSettingsRef,
 };
 use crate::widgets::notification_listener::{NotificationListener, NotificationListenerCallback};
-use crate::widgets::pages::PageRouteRef;
+use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
 use crate::widgets::raw_tooltip::RawTooltip;
 use crate::widgets::restoration::RootRestorationScope;
+use crate::widgets::routes::RoutePageBuilder;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::shared_app_data::SharedAppData;
 use crate::widgets::shortcuts::{ShortcutMap, ShortcutRegistrar, Shortcuts};
@@ -356,9 +357,9 @@ pub struct WidgetsApp {
     /// [`builder`](Self::builder) must not be `None`.
     ///
     /// If this property is not set, either the [`routes`](Self::routes) or
-    /// [`home`](Self::home) properties must be set, and the
-    /// [`page_route_builder`](Self::page_route_builder) must also be set so that the
-    /// default handler will know what routes and `PageRoute`s to build.
+    /// [`home`](Self::home) properties must be set, so that the default handler knows what
+    /// routes to build; it builds them as plain [`PageRouteBuilder`]s with a jump cut, unless
+    /// [`page_route_builder`](Self::page_route_builder) gives the app's own.
     pub on_generate_route: Option<RouteFactory>,
 
     /// The routes generator callback used for generating initial routes if
@@ -377,7 +378,10 @@ pub struct WidgetsApp {
     /// a route (e.g. which button a user selected in a modal dialog).
     ///
     /// This callback can be used, for example, to specify that a `MaterialPageRoute`
-    /// or a `CupertinoPageRoute` should be used for building page transitions.
+    /// or a `CupertinoPageRoute` should be used for building page transitions. Without one,
+    /// the app builds plain [`PageRouteBuilder`]s with a jump cut, so a [`home`](Self::home) or
+    /// [`routes`](Self::routes) app works without naming a transition: a kit app sets this to
+    /// its kit's route.
     pub page_route_builder: Option<PageRouteFactory>,
 
     /// The widget for the default route of the app ([`Navigator::DEFAULT_ROUTE_NAME`],
@@ -756,6 +760,21 @@ pub struct WidgetsApp {
     pub use_inherited_media_query: bool,
 }
 
+/// The route `WidgetsApp` builds when the app gave no
+/// [`page_route_builder`](WidgetsApp::page_route_builder): a [`PageRouteBuilder`] with a jump
+/// cut, which a kit app overrides with its kit's transitions.
+fn default_page_route_builder(
+    app: &mut App,
+    settings: &RouteSettings,
+    builder: WidgetBuilder,
+) -> PageRouteRef {
+    let page_builder: RoutePageBuilder =
+        Rc::new(move |app, context, _animation, _secondary_animation| builder(app, context));
+    PageRouteBuilder::new(app, page_builder)
+        .settings(app, RouteSettingsRef::Settings(settings.clone()))
+        .into_erased()
+}
+
 impl WidgetsApp {
     /// Creates a widget that wraps a number of widgets that are commonly
     /// required for an application.
@@ -774,8 +793,10 @@ impl WidgetsApp {
     /// `"/"`.
     ///
     /// If [`home`](Self::home) or [`routes`](Self::routes) are set, the routing implementation
-    /// needs to know how to appropriately build `PageRoute`s. This can be achieved by
-    /// supplying the [`page_route_builder`](Self::page_route_builder) setter.
+    /// needs to know how to build `PageRoute`s. Supplying the
+    /// [`page_route_builder`](Self::page_route_builder) setter gives the app its own; without
+    /// one, routes are plain [`PageRouteBuilder`]s with a jump cut, which a kit app overrides
+    /// with its kit's transitions.
     ///
     /// The [`builder`](Self::builder) setter is designed to provide the ability to wrap the
     /// visible content of the app in some other widget. It is recommended that you use
@@ -861,7 +882,8 @@ impl WidgetsApp {
         self
     }
 
-    /// Dart `WidgetsApp(pageRouteBuilder:)`.
+    /// Dart `WidgetsApp(pageRouteBuilder:)`; without it, a [`home`](Self::home) or
+    /// [`routes`](Self::routes) app builds plain [`PageRouteBuilder`]s with a jump cut.
     pub fn page_route_builder(
         mut self,
         page_route_builder: impl Fn(&mut App, &RouteSettings, WidgetBuilder) -> PageRouteRef + 'static,
@@ -1185,14 +1207,6 @@ impl StatefulWidget for WidgetsApp {
              navigator-related properties, navigatorKey, initialRoute, and navigatorObservers, \
              must have their initial values (null, null, and the empty list, respectively)."
         );
-        debug_assert!(
-            self.builder.is_some()
-                || self.on_generate_route.is_some()
-                || self.page_route_builder.is_some(),
-            "If neither builder nor onGenerateRoute are provided, the pageRouteBuilder must be \
-             specified so that the default handler will know what kind of PageRoute transition \
-             to build."
-        );
     }
 
     fn create_state(&self) -> WidgetsAppState {
@@ -1408,10 +1422,11 @@ impl WidgetsAppState {
         };
 
         if let Some(page_content_builder) = page_content_builder {
-            let page_route_builder = self.widget(app).page_route_builder.clone().expect(
-                "The default onGenerateRoute handler for WidgetsApp must have a \
-                 pageRouteBuilder set if the home or routes properties are set.",
-            );
+            let page_route_builder = self
+                .widget(app)
+                .page_route_builder
+                .clone()
+                .unwrap_or_else(|| Rc::new(default_page_route_builder));
             let route = page_route_builder(app, settings, page_content_builder);
             return Some(route.into_erased());
         }
@@ -2001,6 +2016,17 @@ mod tests {
                     .routes([(String::from("/"), builder)])
                     .into_widget(),
             );
+            tester.pump_and_settle();
+            expect(tester, &built::<Marker>(), finds_widgets());
+        });
+    }
+
+    /// A `home` app builds its page with no `page_route_builder`: the route is a plain
+    /// `PageRouteBuilder` with a jump cut, not a panic in a frame.
+    #[test]
+    fn a_home_builds_without_a_page_route_builder() {
+        test_widgets(|tester| {
+            tester.pump_widget(WidgetsApp::new(COLOR).home(Marker).into_widget());
             tester.pump_and_settle();
             expect(tester, &built::<Marker>(), finds_widgets());
         });

@@ -426,19 +426,16 @@ impl StatelessWidget for DialTimePickerHeader {
             Orientation::Portrait => Column::new()
                 .cross_axis_alignment(CrossAxisAlignment::Start)
                 .children([
-                    Padding::new(
-                        EdgeInsetsDirectional::only(
-                            0.0,
-                            0.0,
-                            0.0,
-                            (if TimePickerModel::use_material3_of(app, context) {
-                                20.0
-                            } else {
-                                24.0
-                            }) - min_interactive_vertical_padding / 2.0,
-                        )
-                        .into(),
-                    )
+                    Padding::new(EdgeInsetsDirectional::only(
+                        0.0,
+                        0.0,
+                        0.0,
+                        (if TimePickerModel::use_material3_of(app, context) {
+                            20.0
+                        } else {
+                            24.0
+                        }) - min_interactive_vertical_padding / 2.0,
+                    ))
                     .child(Text::new(self.help_text.clone()).style(help_text_style))
                     .into_widget(),
                     Row::new()
@@ -1105,7 +1102,7 @@ impl StatelessWidget for AmPmButton {
         };
         semantics
             .child(
-                Padding::new(self.padding.into()).child(
+                Padding::new(self.padding).child(
                     Material::new()
                         .clip_behavior(Clip::AntiAlias)
                         .color(resolved_background_color.color())
@@ -2806,7 +2803,7 @@ impl State for TimePickerInputState {
         let mut top_row_children: Vec<WidgetRef> = Vec::new();
         if !use_24_hour_dials && time_of_day_format == TimeOfDayFormat::a_space_h_colon_mm {
             top_row_children.push(
-                Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 12.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 12.0, 0.0))
                     .child(day_period_control())
                     .into_widget(),
             );
@@ -2816,7 +2813,7 @@ impl State for TimePickerInputState {
         let hour_column = Column::new()
             .cross_axis_alignment(CrossAxisAlignment::Stretch)
             .children(
-                [Padding::new(EdgeInsets::only(0.0, 0.0, 0.0, 10.0).into())
+                [Padding::new(EdgeInsets::only(0.0, 0.0, 0.0, 10.0))
                     .child(HourTextField {
                         restoration_id: Some("hour_text_field".to_string()),
                         selected_time,
@@ -2851,7 +2848,7 @@ impl State for TimePickerInputState {
         let minute_column = Column::new()
             .cross_axis_alignment(CrossAxisAlignment::Stretch)
             .children(
-                [Padding::new(EdgeInsets::only(0.0, 0.0, 0.0, 10.0).into())
+                [Padding::new(EdgeInsets::only(0.0, 0.0, 0.0, 10.0))
                     .child(MinuteTextField {
                         restoration_id: Some("minute_text_field".to_string()),
                         selected_time,
@@ -2884,15 +2881,12 @@ impl State for TimePickerInputState {
             );
         top_row_children.push(
             Expanded::new(
-                Padding::new(
-                    EdgeInsetsDirectional::only(
-                        0.0,
-                        min_interactive_vertical_padding / 2.0,
-                        0.0,
-                        0.0,
-                    )
-                    .into(),
-                )
+                Padding::new(EdgeInsetsDirectional::only(
+                    0.0,
+                    min_interactive_vertical_padding / 2.0,
+                    0.0,
+                    0.0,
+                ))
                 .child(
                     Row::new()
                         .cross_axis_alignment(CrossAxisAlignment::Start)
@@ -2909,7 +2903,7 @@ impl State for TimePickerInputState {
         );
         if !use_24_hour_dials && time_of_day_format != TimeOfDayFormat::a_space_h_colon_mm {
             top_row_children.push(
-                Padding::new(EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0))
                     .child(day_period_control())
                     .into_widget(),
             );
@@ -2924,16 +2918,13 @@ impl State for TimePickerInputState {
             Column::new()
                 .cross_axis_alignment(CrossAxisAlignment::Start)
                 .children([
-                    Padding::new(
-                        EdgeInsetsDirectional::only(
-                            0.0,
-                            0.0,
-                            0.0,
-                            (if use_material3 { 20.0 } else { 24.0 })
-                                - min_interactive_vertical_padding / 2.0,
-                        )
-                        .into(),
-                    )
+                    Padding::new(EdgeInsetsDirectional::only(
+                        0.0,
+                        0.0,
+                        0.0,
+                        (if use_material3 { 20.0 } else { 24.0 })
+                            - min_interactive_vertical_padding / 2.0,
+                    ))
                     .child(Text::new(widget.help_text.clone()).style(help_text_style))
                     .into_widget(),
                     Row::new()
@@ -4053,10 +4044,12 @@ impl State for TimePickerDialogState {
             )
             .into_widget(),
         );
-        let actions = Padding::new(
-            EdgeInsetsDirectional::only(if theme.use_material3 { 0.0 } else { 4.0 }, 0.0, 0.0, 0.0)
-                .into(),
-        )
+        let actions = Padding::new(EdgeInsetsDirectional::only(
+            if theme.use_material3 { 0.0 } else { 4.0 },
+            0.0,
+            0.0,
+            0.0,
+        ))
         .child(Row::new().children(action_children))
         .into_widget();
 
@@ -4608,14 +4601,14 @@ impl State for TimePickerState {
                         .main_axis_size(MainAxisSize::Min)
                         .cross_axis_alignment(CrossAxisAlignment::Stretch)
                         .children([
-                            Padding::new(EdgeInsets::symmetric(0.0, horizontal).into())
+                            Padding::new(EdgeInsets::symmetric(0.0, horizontal))
                                 .child(DialTimePickerHeader { help_text })
                                 .into_widget(),
                             Expanded::new(
                                 Column::new().main_axis_size(MainAxisSize::Min).children([
                                     // Dial grows and shrinks with the available space.
                                     Expanded::new(
-                                        Padding::new(EdgeInsets::symmetric(0.0, horizontal).into())
+                                        Padding::new(EdgeInsets::symmetric(0.0, horizontal))
                                             .child(dial),
                                     )
                                     .into_widget(),
@@ -4626,7 +4619,7 @@ impl State for TimePickerState {
                         .into_widget(),
                     Orientation::Landscape => Column::new()
                         .children([Expanded::new(
-                            Padding::new(EdgeInsets::symmetric(0.0, horizontal).into()).child(
+                            Padding::new(EdgeInsets::symmetric(0.0, horizontal)).child(
                                 Row::new()
                                     .cross_axis_alignment(CrossAxisAlignment::Stretch)
                                     .children([

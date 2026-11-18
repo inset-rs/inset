@@ -1095,7 +1095,8 @@ impl ListView {
     crate::scroll_view_setters!(ListView);
 
     /// Dart `ListView(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> ListView {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> ListView {
+        let padding = padding.into();
         self.box_scroll_view.padding = Some(padding);
         self
     }
@@ -1503,7 +1504,8 @@ impl GridView {
     crate::scroll_view_setters!(GridView);
 
     /// Dart `GridView(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> GridView {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> GridView {
+        let padding = padding.into();
         self.box_scroll_view.padding = Some(padding);
         self
     }
@@ -1621,6 +1623,12 @@ impl GridViewBuilder {
         self
     }
 
+    /// Dart `padding:`, as [`GridView::padding`].
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> GridViewBuilder {
+        self.grid_view = self.grid_view.padding(padding);
+        self
+    }
+
     /// The [`GridView`] this builder describes.
     pub fn build(self) -> GridView {
         GridView {
@@ -1667,6 +1675,12 @@ macro_rules! tiles_constructor_setters {
         /// See [`GridView::children`].
         pub fn children(mut self, children: impl IntoIterator<Item = WidgetRef>) -> $name {
             self.grid_view = self.grid_view.children(children);
+            self
+        }
+
+        /// Dart `padding:`, as [`GridView::padding`].
+        pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> $name {
+            self.grid_view = self.grid_view.padding(padding);
             self
         }
 
@@ -1736,7 +1750,7 @@ mod tests {
     use waft_foundation::{AppCell, ValueKey};
 
     use waft_embedder::{Size, TextDirection};
-    use waft_painting::EdgeInsets;
+    use waft_painting::{EdgeInsets, EdgeInsetsDirectional};
     use waft_rendering::{AnyRenderObject, RenderSliverPadding};
 
     use super::*;
@@ -2094,6 +2108,43 @@ mod tests {
         let mut built = built.borrow().clone();
         built.sort();
         assert_eq!(built, (0..6).collect::<Vec<i32>>());
+    }
+
+    /// `GridView.extent` and `GridView.builder` take `padding`, as Dart's constructors do, and
+    /// the sliver gets it.
+    #[test]
+    fn a_grid_view_constructor_takes_padding() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let extent = GridView::extent(150.0)
+            .padding(EdgeInsets::all(8.0))
+            .children(boxes(4));
+        let harness = Harness::mount(&mut app, wrap(extent));
+        harness.pump(&mut app);
+        let sliver_padding = find_sliver_padding(&app, harness.render_root(&app).as_object())
+            .expect("the grid wraps its sliver in a SliverPadding");
+        assert_eq!(
+            sliver_padding.padding(&app).resolve(None),
+            EdgeInsets::all(8.0)
+        );
+
+        let delegate = Rc::new(SliverGridDelegateWithFixedCrossAxisCount::new(2));
+        let built = GridView::builder(delegate, |_app, _context, _index| {
+            Some(SizedBox::new().height(ITEM_EXTENT).into_widget())
+        })
+        .item_count(4)
+        .padding(EdgeInsetsDirectional::only(4.0, 0.0, 2.0, 0.0))
+        .build();
+        harness.set_child(&mut app, wrap(built));
+        harness.pump(&mut app);
+        let sliver_padding = find_sliver_padding(&app, harness.render_root(&app).as_object())
+            .expect("the built grid wraps its sliver in a SliverPadding");
+        assert_eq!(
+            sliver_padding
+                .padding(&app)
+                .resolve(Some(TextDirection::Ltr)),
+            EdgeInsets::from_ltrb(4.0, 0.0, 2.0, 0.0)
+        );
     }
 
     #[test]

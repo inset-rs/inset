@@ -229,7 +229,8 @@ impl CupertinoListTile {
     }
 
     /// Dart `CupertinoListTile(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> CupertinoListTile {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> CupertinoListTile {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

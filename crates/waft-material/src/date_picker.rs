@@ -42,8 +42,8 @@ use waft_foundation::{
 };
 use waft_painting::{
     Alignment, AlignmentDirectional, AlignmentGeometry, BorderSide, CircleBorder, EdgeInsets,
-    EdgeInsetsDirectional, OutlinedBorderRef, ShapeBorderRef, ShapeDecoration, TextOverflow,
-    TextStyle, axis_direction_is_reversed,
+    EdgeInsetsDirectional, EdgeInsetsGeometry, OutlinedBorderRef, ShapeBorderRef, ShapeDecoration,
+    TextOverflow, TextStyle, axis_direction_is_reversed,
 };
 use waft_rendering::{
     BoxConstraints, CrossAxisAlignment, CustomPainter, MainAxisAlignment, MainAxisSize,
@@ -1100,7 +1100,7 @@ impl State for DatePickerDialogState {
             } else {
                 MAX_TEXT_SCALE_FACTOR
             },
-            Padding::new(EdgeInsets::symmetric(0.0, 8.0).into()).child(
+            Padding::new(EdgeInsets::symmetric(0.0, 8.0)).child(
                 Align::new()
                     .alignment(AlignmentGeometry::from(AlignmentDirectional::CENTER_END))
                     .child(OverflowBar::new().spacing(8.0).children(vec![
@@ -1181,19 +1181,17 @@ impl State for DatePickerDialogState {
                             INPUT_FORM_LANDSCAPE_HEIGHT
                         })
                         .child(
-                            Padding::new(EdgeInsets::symmetric(0.0, 24.0).into()).child(
-                                Shortcuts::new(
-                                    DatePickerDialogState::form_shortcut_map(),
-                                    Column::new()
-                                        .main_axis_alignment(MainAxisAlignment::Center)
-                                        .children([Flexible::new(
-                                            MediaQuery::with_clamped_text_scaling(
-                                                None, 0.0, 2.0, field,
-                                            ),
-                                        )
-                                        .into_widget()]),
-                                ),
-                            ),
+                            Padding::new(EdgeInsets::symmetric(0.0, 24.0)).child(Shortcuts::new(
+                                DatePickerDialogState::form_shortcut_map(),
+                                Column::new()
+                                    .main_axis_alignment(MainAxisAlignment::Center)
+                                    .children([Flexible::new(
+                                        MediaQuery::with_clamped_text_scaling(
+                                            None, 0.0, 2.0, field,
+                                        ),
+                                    )
+                                    .into_widget()]),
+                            )),
                         ),
                 )
                 .key(form_key.clone().into())
@@ -1548,9 +1546,9 @@ impl StatelessWidget for DatePickerHeader {
                             )
                             .child(
                                 material.child(
-                                    Padding::new(
-                                        EdgeInsetsDirectional::only(24.0, 0.0, 12.0, 12.0).into(),
-                                    )
+                                    Padding::new(EdgeInsetsDirectional::only(
+                                        24.0, 0.0, 12.0, 12.0,
+                                    ))
                                     .child(
                                         Column::new()
                                             .cross_axis_alignment(CrossAxisAlignment::Start)
@@ -1570,14 +1568,14 @@ impl StatelessWidget for DatePickerHeader {
             Orientation::Landscape => {
                 let mut children = vec![
                     SizedBox::new().height(16.0).into_widget(),
-                    Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE).into())
+                    Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE))
                         .child(help)
                         .into_widget(),
                     SizedBox::new()
                         .height(if self.is_short { 16.0 } else { 56.0 })
                         .into_widget(),
                     Expanded::new(
-                        Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE).into())
+                        Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE))
                             .child(title),
                     )
                     .into_widget(),
@@ -1585,9 +1583,9 @@ impl StatelessWidget for DatePickerHeader {
                 if let Some(entry_mode_button) = &self.entry_mode_button {
                     children.push(
                         Padding::new(if theme.use_material3 {
-                            EdgeInsetsDirectional::only(8.0, 0.0, 4.0, 6.0).into()
+                            EdgeInsetsGeometry::directional(8.0, 0.0, 4.0, 6.0)
                         } else {
-                            EdgeInsets::symmetric(0.0, 4.0).into()
+                            EdgeInsetsGeometry::symmetric(0.0, 4.0)
                         })
                         .child(
                             Semantics::new()
@@ -2629,7 +2627,7 @@ impl State for DateRangePickerDialogState {
                         INPUT_FORM_LANDSCAPE_HEIGHT
                     })
                     .child(
-                        Padding::new(EdgeInsets::symmetric(0.0, 24.0).into()).child(
+                        Padding::new(EdgeInsets::symmetric(0.0, 24.0)).child(
                             Column::new().children([
                                 Spacer::new().into_widget(),
                                 InputDateRangePicker {
@@ -2974,7 +2972,7 @@ impl StatelessWidget for CalendarRangePickerDialog {
             && let Some(entry_mode_button) = &self.entry_mode_button
         {
             bottom_row.push(
-                Padding::new(EdgeInsets::symmetric(0.0, 8.0).into())
+                Padding::new(EdgeInsets::symmetric(0.0, 8.0))
                     .child(IconTheme::new(
                         icon_theme.clone(),
                         entry_mode_button.clone(),
@@ -4016,7 +4014,7 @@ impl State for MonthItemState {
                     ..BoxConstraints::new()
                 })
                 .child(
-                    Padding::new(EdgeInsets::symmetric(0.0, 16.0).into()).child(
+                    Padding::new(EdgeInsets::symmetric(0.0, 16.0)).child(
                         Align::new()
                             .alignment(AlignmentGeometry::from(AlignmentDirectional::CENTER_START))
                             .child(
@@ -4511,7 +4509,7 @@ impl StatelessWidget for InputDateRangePickerDialog {
             ..BoxConstraints::new()
         })
         .child(
-            Padding::new(EdgeInsets::symmetric(0.0, 8.0).into()).child(
+            Padding::new(EdgeInsets::symmetric(0.0, 8.0)).child(
                 Align::new()
                     .alignment(AlignmentGeometry::from(AlignmentDirectional::CENTER_END))
                     .child(OverflowBar::new().spacing(8.0).children(vec![

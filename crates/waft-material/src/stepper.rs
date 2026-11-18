@@ -662,8 +662,7 @@ impl StepperState {
         Padding::new(
             stepper
                 .step_icon_margin
-                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0))
-                .into(),
+                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0)),
         )
         .child(
             SizedBox::new()
@@ -710,8 +709,7 @@ impl StepperState {
         Padding::new(
             stepper
                 .step_icon_margin
-                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0))
-                .into(),
+                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0)),
         )
         .child(
             SizedBox::new()
@@ -858,7 +856,7 @@ impl StepperState {
         if let Some(subtitle) = stepper.steps[index].subtitle.clone() {
             let style = self.subtitle_style(app, context, index);
             children.push(
-                Padding::new(EdgeInsets::only(0.0, 2.0, 0.0, 0.0).into())
+                Padding::new(EdgeInsets::only(0.0, 2.0, 0.0, 0.0))
                     .child(
                         AnimatedDefaultTextStyle::new(subtitle, style, K_THEME_ANIMATION_DURATION)
                             .curve(waft_animation::Curves::fast_out_slow_in()),
@@ -922,7 +920,7 @@ impl StepperState {
                         .children(vec![first_line, icon, last_line])
                         .into_widget(),
                     Expanded::new(
-                        Padding::new(EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0).into())
+                        Padding::new(EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0))
                             .child(header_text),
                     )
                     .into_widget(),
@@ -1020,10 +1018,10 @@ impl StepperState {
         )
         .style(cancel_style);
 
-        Padding::new(EdgeInsets::only(0.0, 16.0, 0.0, 0.0).into())
+        Padding::new(EdgeInsets::only(0.0, 16.0, 0.0, 0.0))
             .child(SizedBox::new().height(48.0).child(Row::new().children(vec![
                         continue_button.into_widget(),
-                        Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0).into())
+                        Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
                             .child(cancel_button)
                             .into_widget(),
                     ])))
@@ -1180,7 +1178,7 @@ impl StepperState {
             let icon = self.build_icon(app, context, index);
             let label = self.build_label_text(app, context, index);
             let header_text = self.build_header_text(app, context, index);
-            let margin = stepper.step_icon_margin.map_or_else(
+            let margin: EdgeInsetsGeometry = stepper.step_icon_margin.map_or_else(
                 || EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0).into(),
                 |margin| margin.into(),
             );
@@ -1858,7 +1856,7 @@ mod tests {
                 return Container::new().into_widget();
             };
             Container::new()
-                .margin(EdgeInsets::only(0.0, 16.0, 0.0, 0.0).into())
+                .margin(EdgeInsets::only(0.0, 16.0, 0.0, 0.0))
                 .child(SizedBox::new().height(48.0).child(Row::new().children(vec![
                             TextButton::new(
                                 details.on_step_continue.clone(),
@@ -1866,7 +1864,7 @@ mod tests {
                             )
                             .into_widget(),
                             Container::new()
-                                .margin(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0).into())
+                                .margin(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
                                 .child(TextButton::new(
                                     details.on_step_cancel.clone(),
                                     Some(Text::new(cancel_label)),

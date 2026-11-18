@@ -368,7 +368,7 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuItemButtonSta
             .expect("a menu item has its dropdown item");
         let mut child = route.items[widget.item_index].clone();
         if let Some(padding) = widget.padding {
-            child = Padding::new(padding.into()).child(child).into_widget();
+            child = Padding::new(padding).child(child).into_widget();
         }
         let mut sized = SizedBox::new();
         if let Some(item_height) = route.item_height {
@@ -598,7 +598,7 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
                                                     ListView::new()
                                                         // Ensure this always inherits the PrimaryScrollController
                                                         .primary(true)
-                                                        .padding(K_MATERIAL_LIST_PADDING.into())
+                                                        .padding(K_MATERIAL_LIST_PADDING)
                                                         .shrink_wrap(true)
                                                         .children(children),
                                                 )
@@ -2103,7 +2103,8 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButton<T> {
     }
 
     /// Dart `DropdownButton(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> DropdownButton<T> {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> DropdownButton<T> {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }
@@ -2694,7 +2695,7 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownButtonState<T> {
                 text_style.copy_with().color(theme.disabled_color)
             },
             sized.child(
-                Padding::new(padding.resolve(Some(text_direction)).into()).child(
+                Padding::new(padding.resolve(Some(text_direction))).child(
                     Row::new()
                         .main_axis_alignment(MainAxisAlignment::SpaceBetween)
                         .main_axis_size(MainAxisSize::Min)
@@ -3213,7 +3214,8 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownButtonFormField<T> {
     }
 
     /// Dart `DropdownButtonFormField(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> DropdownButtonFormField<T> {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> DropdownButtonFormField<T> {
+        let padding = padding.into();
         self.button = self.button.padding(padding);
         self
     }
