@@ -13,8 +13,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use http::{Request, StatusCode};
-use waft_embedder::{Body, HttpClient, HttpError, RedirectPolicy, SendOptions};
+use http::{HeaderMap, Request, StatusCode};
+use waft_embedder::{
+    Body, BodyReadFuture, BodyStream, BodyTrailersFuture, HttpClient, HttpError, RedirectPolicy,
+    SendOptions,
+};
 use waft_embedder_apple::http::AppleHttpClient;
 
 /// The path a request asked for, after reading its head and body.
@@ -46,6 +49,58 @@ fn response(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
 
 fn ok(body: &[u8]) -> Vec<u8> {
     response("200 OK", &[], body)
+}
+
+/// The method and path a request asked for and the bytes its body carried, after reading all
+/// three.
+fn read_request_and_body(stream: &mut TcpStream) -> (String, String, Vec<u8>) {
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 1024];
+    while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => bytes.extend_from_slice(&buffer[..read]),
+            _ => break,
+        }
+    }
+    let head = String::from_utf8_lossy(&bytes).into_owned();
+    let mut asked = head.lines().next().unwrap_or_default().split(' ');
+    let method = asked.next().unwrap_or_default().to_owned();
+    let path = asked.next().unwrap_or_default().to_owned();
+    let length: usize = head
+        .lines()
+        .find_map(|line| line.strip_prefix("Content-Length: "))
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0);
+    while bytes.len() < head.len() + length {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => bytes.extend_from_slice(&buffer[..read]),
+            _ => break,
+        }
+    }
+    (method, path, bytes[head.len()..].to_vec())
+}
+
+/// A body of bytes that streams, whose bytes are gone once they are read: one a client cannot
+/// send again.
+struct Once(Vec<u8>);
+
+impl BodyStream for Once {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> BodyReadFuture<'a> {
+        let read = self.0.len().min(buf.len());
+        buf[..read].copy_from_slice(&self.0);
+        self.0.clear();
+        Box::pin(std::future::ready(Ok(read)))
+    }
+
+    fn trailers(&mut self) -> BodyTrailersFuture<'_> {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    fn length(&self) -> Option<u64> {
+        None
+    }
 }
 
 fn get(url: &str) -> Request<Body> {
@@ -127,6 +182,118 @@ fn a_redirect_is_followed_or_answered_as_it_is() {
     .expect("the redirect itself");
     assert_eq!(response.status(), StatusCode::FOUND);
     assert_eq!(response.headers()["location"].to_str().unwrap(), location);
+}
+
+#[test]
+fn a_307_redirect_resends_the_request_body() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let address = listener.local_addr().unwrap();
+    let location = format!("http://{address}/final");
+    let resent = Arc::new(Mutex::new(None::<(String, String, Vec<u8>)>));
+    let kept = Arc::clone(&resent);
+    let answer_location = location.clone();
+    thread::spawn(move || {
+        for (seen, stream) in listener.incoming().enumerate() {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            let (method, path, body) = read_request_and_body(&mut stream);
+            let answer = if seen == 0 {
+                response(
+                    "307 Temporary Redirect",
+                    &[("Location", &answer_location)],
+                    b"",
+                )
+            } else {
+                *kept.lock().unwrap() = Some((method, path, body));
+                ok(b"final")
+            };
+            let _ = stream.write_all(&answer);
+        }
+    });
+
+    let client = AppleHttpClient::new();
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("http://{address}/redirect"))
+        .body(Body::from(b"resend me".to_vec()))
+        .unwrap();
+    let mut response =
+        pollster::block_on(client.send(request, SendOptions::default())).expect("the response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        pollster::block_on(response.body_mut().read_all()).unwrap(),
+        b"final"
+    );
+    let (method, path, body) = resent
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the request was resent");
+    assert_eq!(method, "POST", "a 307 keeps the method");
+    assert_eq!(path, "/final");
+    assert_eq!(
+        body, b"resend me",
+        "the redirect carried the request's body again"
+    );
+}
+
+#[test]
+fn a_307_of_a_body_that_cannot_be_resent_is_answered_as_it_is() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let address = listener.local_addr().unwrap();
+    let location = format!("http://{address}/final");
+    let answer_location = location.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                continue;
+            };
+            read_request_and_body(&mut stream);
+            let answer = response(
+                "307 Temporary Redirect",
+                &[("Location", &answer_location)],
+                b"",
+            );
+            let _ = stream.write_all(&answer);
+        }
+    });
+
+    let client = AppleHttpClient::new();
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("http://{address}/redirect"))
+        .body(Body::from_stream(Once(b"streamed".to_vec())))
+        .unwrap();
+    let mut response =
+        pollster::block_on(client.send(request, SendOptions::default())).expect("the response");
+    assert_eq!(
+        response.status(),
+        StatusCode::TEMPORARY_REDIRECT,
+        "a body that cannot be sent again is not sent half"
+    );
+    assert_eq!(response.headers()["location"].to_str().unwrap(), location);
+    assert_eq!(
+        pollster::block_on(response.body_mut().read_all()).unwrap(),
+        b""
+    );
+}
+
+#[test]
+fn a_request_with_trailers_fails_where_the_session_cannot_send_them() {
+    let mut trailers = HeaderMap::new();
+    trailers.insert("x-checksum", 7u32.into());
+    let client = AppleHttpClient::new();
+    let request = Request::builder()
+        .method("POST")
+        .uri("http://127.0.0.1:1/put")
+        .body(Body::from(b"the bytes".to_vec()).with_trailers(trailers))
+        .unwrap();
+    let error = pollster::block_on(client.send(request, SendOptions::default())).unwrap_err();
+    assert_eq!(
+        error,
+        HttpError::Internal(Some("NSURLSession cannot send trailers".to_owned()))
+    );
 }
 
 #[test]

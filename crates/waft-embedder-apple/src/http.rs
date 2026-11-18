@@ -6,8 +6,17 @@
 //! A response's head arrives as soon as the session has it, and its body streams as the data
 //! arrives. Dropping the response or the future cancels its task. Request bodies are read whole
 //! before the request is made: `NSURLSession` takes a body as data or as an `NSInputStream`, and
-//! this does not wrap a Waft future in one. Redirects are counted here so that a policy's limit
-//! is the one that applies, and TLS challenges are left to the session's default handling.
+//! this does not wrap a Waft future in one. A body made with trailers to send fails here, as
+//! `NSURLSession` sends none, rather than dropping them quietly.
+//!
+//! Redirects are counted here so that a policy's limit is the one that applies, and TLS
+//! challenges are left to the session's default handling. A redirect that resends its body — a
+//! 307 or a 308 — is resent only when the body can be
+//! ([`Body::try_clone`](waft_embedder::Body::try_clone)): the client keeps the request's method
+//! and bytes and sets them on the session's new request, so the resend is this client's rather
+//! than the session's undocumented one. A body that streams cannot be sent again, so the
+//! redirect response is the answer, as reqwest answers it, rather than a request whose body went
+//! with the first try.
 //!
 //! `NSHTTPURLResponse` joins a repeated response header into one value, and says nothing of the
 //! protocol version, so a response answers each header once and as HTTP/1.1 whatever was spoken.
@@ -62,21 +71,22 @@ use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_foundation::{
-    NSData, NSError, NSHTTPURLResponse, NSMutableURLRequest, NSOperationQueue, NSString, NSURL,
-    NSURLErrorAppTransportSecurityRequiresSecureConnection, NSURLErrorBadServerResponse,
-    NSURLErrorBadURL, NSURLErrorCallIsActive, NSURLErrorCancelled, NSURLErrorCannotConnectToHost,
-    NSURLErrorCannotDecodeContentData, NSURLErrorCannotDecodeRawData, NSURLErrorCannotFindHost,
-    NSURLErrorCannotLoadFromNetwork, NSURLErrorCannotParseResponse,
-    NSURLErrorClientCertificateRejected, NSURLErrorClientCertificateRequired,
-    NSURLErrorDNSLookupFailed, NSURLErrorDataNotAllowed, NSURLErrorHTTPTooManyRedirects,
-    NSURLErrorInternationalRoamingOff, NSURLErrorNetworkConnectionLost,
-    NSURLErrorNotConnectedToInternet, NSURLErrorRedirectToNonExistentLocation,
-    NSURLErrorResourceUnavailable, NSURLErrorSecureConnectionFailed,
-    NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateHasUnknownRoot,
-    NSURLErrorServerCertificateNotYetValid, NSURLErrorServerCertificateUntrusted,
-    NSURLErrorTimedOut, NSURLErrorUnsupportedURL, NSURLErrorUserAuthenticationRequired,
-    NSURLErrorUserCancelledAuthentication, NSURLErrorZeroByteResource, NSURLRequest, NSURLResponse,
-    NSURLSession, NSURLSessionDataDelegate, NSURLSessionDataTask, NSURLSessionDelegate,
+    NSData, NSError, NSHTTPURLResponse, NSMutableCopying, NSMutableURLRequest, NSOperationQueue,
+    NSString, NSURL, NSURLErrorAppTransportSecurityRequiresSecureConnection,
+    NSURLErrorBadServerResponse, NSURLErrorBadURL, NSURLErrorCallIsActive, NSURLErrorCancelled,
+    NSURLErrorCannotConnectToHost, NSURLErrorCannotDecodeContentData,
+    NSURLErrorCannotDecodeRawData, NSURLErrorCannotFindHost, NSURLErrorCannotLoadFromNetwork,
+    NSURLErrorCannotParseResponse, NSURLErrorClientCertificateRejected,
+    NSURLErrorClientCertificateRequired, NSURLErrorDNSLookupFailed, NSURLErrorDataNotAllowed,
+    NSURLErrorHTTPTooManyRedirects, NSURLErrorInternationalRoamingOff,
+    NSURLErrorNetworkConnectionLost, NSURLErrorNotConnectedToInternet,
+    NSURLErrorRedirectToNonExistentLocation, NSURLErrorResourceUnavailable,
+    NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateHasBadDate,
+    NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid,
+    NSURLErrorServerCertificateUntrusted, NSURLErrorTimedOut, NSURLErrorUnsupportedURL,
+    NSURLErrorUserAuthenticationRequired, NSURLErrorUserCancelledAuthentication,
+    NSURLErrorZeroByteResource, NSURLRequest, NSURLResponse, NSURLSession,
+    NSURLSessionDataDelegate, NSURLSessionDataTask, NSURLSessionDelegate,
     NSURLSessionResponseDisposition, NSURLSessionTask, NSURLSessionTaskDelegate,
 };
 use waft_embedder::{
@@ -183,7 +193,24 @@ async fn load(
     let url = url_of(request.uri())?;
     let method = request.method().as_str().to_owned();
     let headers = request.headers().clone();
+    // `NSURLSession` sends no request trailers, so a body made to carry them fails here rather
+    // than sending a request that would lose them.
+    if request.body_mut().take_trailers().is_some() {
+        return Err(HttpError::Internal(Some(
+            "NSURLSession cannot send trailers".to_owned(),
+        )));
+    }
+    // What a 307 or 308 resends: the method and the bytes, kept only for a body that can be
+    // sent again, as a stream's cannot.
+    let replay = match request.body().try_clone() {
+        Some(mut again) => Some(Replay {
+            method: method.clone(),
+            bytes: again.read_all().await?,
+        }),
+        None => None,
+    };
     let bytes = request.body_mut().read_all().await?;
+    exchange.set_replay(replay);
     let request = NSMutableURLRequest::new();
     request.setURL(Some(&url));
     request.setHTTPMethod(&NSString::from_str(&method));
@@ -302,6 +329,16 @@ struct State {
     error: Option<HttpError>,
     redirects_left: usize,
     redirect_policy: RedirectPolicy,
+    /// What a 307 or 308 resends, kept for a body that can be sent again.
+    replay: Option<Replay>,
+}
+
+/// What a redirect that resends its request carries: the method and the bytes of one whose body
+/// can be sent again.
+#[derive(Clone)]
+struct Replay {
+    method: String,
+    bytes: Vec<u8>,
 }
 
 /// How much a response's delivered but unread data may hold before its task is suspended: 256
@@ -328,6 +365,7 @@ impl Exchange {
                 error: None,
                 redirects_left,
                 redirect_policy: options.redirects,
+                replay: None,
             }),
         }
     }
@@ -351,6 +389,11 @@ impl Exchange {
     /// Stores the task, which the timers and back-pressure need.
     fn set_task(&self, task: &Retained<NSURLSessionDataTask>) {
         self.lock().task = Some(task.clone());
+    }
+
+    /// Stores what a redirect resends, which a request whose body can be sent again gives.
+    fn set_replay(&self, replay: Option<Replay>) {
+        self.lock().replay = replay;
     }
 
     fn chunk(&self, bytes: Vec<u8>) {
@@ -426,9 +469,11 @@ impl Exchange {
         wake(body_waiter);
     }
 
-    /// Counts a redirect against the policy: what to do with it. One past the policy's limit
-    /// fails the exchange at once, so the answer is the error rather than the redirect.
-    fn redirect(&self) -> Redirect {
+    /// Counts a redirect against the policy and matches it to what the exchange kept: what to
+    /// do with it. One past the policy's limit fails the exchange at once, so the answer is the
+    /// error rather than the redirect; a 307 or 308 goes on only with a body that can be sent
+    /// again, and is the answer otherwise.
+    fn redirect(&self, status: u16) -> Redirect {
         let mut state = self.lock();
         match state.redirect_policy {
             RedirectPolicy::Never => Redirect::Answer,
@@ -446,9 +491,26 @@ impl Exchange {
             }
             RedirectPolicy::Follow { .. } => {
                 state.redirects_left -= 1;
-                Redirect::Follow
+                if status == 307 || status == 308 {
+                    if state.replay.is_some() {
+                        Redirect::Resend
+                    } else {
+                        Redirect::Answer
+                    }
+                } else {
+                    Redirect::Follow
+                }
             }
         }
+    }
+
+    /// What a redirect that resends its request carries, which only an exchange that kept its
+    /// body's bytes answers.
+    fn resend(&self) -> Replay {
+        self.lock()
+            .replay
+            .clone()
+            .expect("a redirect resends only what an exchange kept")
     }
 
     /// Wakes both waiters, after a failure set by a timer or a redirect limit.
@@ -466,6 +528,9 @@ impl Exchange {
 enum Redirect {
     /// The session goes on to the new location.
     Follow,
+    /// The session goes on to the new location, with the request's method and body set back on
+    /// its request: a 307 or a 308.
+    Resend,
     /// The redirect response is the answer.
     Answer,
     /// The exchange has failed; its task is cancelled.
@@ -578,19 +643,34 @@ define_class!(
             &self,
             _session: &NSURLSession,
             task: &NSURLSessionTask,
-            _response: &NSHTTPURLResponse,
+            response: &NSHTTPURLResponse,
             request: &NSURLRequest,
             completion: &DynBlock<dyn Fn(*mut NSURLRequest)>,
         ) {
             abort_on_panic(|| {
-                let redirect = match self.ivars().get(task) {
-                    Some(exchange) => exchange.redirect(),
-                    None => Redirect::Fail,
+                let status = u16::try_from(response.statusCode()).unwrap_or(0);
+                let Some(exchange) = self.ivars().get(task) else {
+                    task.cancel();
+                    completion.call((std::ptr::null_mut(),));
+                    return;
                 };
-                match redirect {
+                match exchange.redirect(status) {
                     Redirect::Follow => {
                         let request = request as *const NSURLRequest as *mut NSURLRequest;
                         completion.call((request,));
+                    }
+                    Redirect::Resend => {
+                        let resend = exchange.resend();
+                        // A mutable copy of the session's request, which carries its headers and
+                        // timeout, with the method and body the redirect keeps set on it, so the
+                        // resend is this client's rather than the session's undocumented one.
+                        let again: Retained<NSMutableURLRequest> = request.mutableCopy();
+                        again.setHTTPMethod(&NSString::from_str(&resend.method));
+                        if !resend.bytes.is_empty() {
+                            again.setHTTPBody(Some(&NSData::from_vec(resend.bytes)));
+                        }
+                        let held: &NSURLRequest = &again;
+                        completion.call((held as *const NSURLRequest as *mut NSURLRequest,));
                     }
                     Redirect::Answer => completion.call((std::ptr::null_mut(),)),
                     Redirect::Fail => {

@@ -44,6 +44,9 @@ pub struct SentRequest {
     pub uri: Uri,
     pub headers: HeaderMap,
     pub body: Vec<u8>,
+    /// The fields the request was made to send after its body, which a test's client has
+    /// nowhere to send and so keeps.
+    pub trailers: Option<HeaderMap>,
     pub options: SendOptions,
 }
 
@@ -142,11 +145,13 @@ impl HttpClient for MockHttpClient {
         Box::pin(async move {
             let body = request.body_mut();
             let bytes = body.read_all().await?;
+            let trailers = body.take_trailers();
             kept.keep(SentRequest {
                 method,
                 uri: uri.clone(),
                 headers,
                 body: bytes,
+                trailers,
                 options,
             });
             let response = response.ok_or_else(|| {
@@ -261,6 +266,23 @@ mod tests {
             client.asked()[0].uri,
             "https://example.test/photo.png".parse::<Uri>().unwrap()
         );
+    }
+
+    #[test]
+    fn a_request_with_trailers_is_kept_with_them() {
+        let client =
+            MockHttpClient::new().answering("https://example.test/put", MockResponse::new());
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", 7u32.into());
+        let request = Request::builder()
+            .method("PUT")
+            .uri("https://example.test/put")
+            .body(Body::from(b"the bytes".to_vec()).with_trailers(trailers.clone()))
+            .unwrap();
+        let mut response = now(client.send(request, SendOptions::default())).unwrap();
+        now(response.body_mut().read_all()).unwrap();
+        assert_eq!(client.asked()[0].body, b"the bytes".to_vec());
+        assert_eq!(client.asked()[0].trailers, Some(trailers));
     }
 
     #[test]

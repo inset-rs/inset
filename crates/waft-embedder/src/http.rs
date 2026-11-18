@@ -11,6 +11,7 @@
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::time::Duration;
 
 use http::{HeaderMap, Request, Response};
@@ -434,7 +435,21 @@ pub type BodyReadAllFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<u8>, Htt
 
 /// The body of a request or a response. It is empty, bytes already in memory, or a stream read
 /// as fast as the platform delivers it.
-pub struct Body(Option<Box<dyn BodyStream>>);
+///
+/// The fields that come after a body — its trailers — are read with [`trailers`](Self::trailers)
+/// once the body has ended, which reads what is left of the body first, as HTTP sends its
+/// trailers only after the last byte. A request carries its own with
+/// [`with_trailers`](Self::with_trailers), which a client that cannot send them fails rather
+/// than dropping them. A body made from bytes can be sent again with
+/// [`try_clone`](Self::try_clone), which is what a redirect that resends its body needs.
+pub struct Body {
+    /// The stream, when the body has one; `None` for an empty body.
+    stream: Option<Box<dyn BodyStream>>,
+    /// The body's whole bytes, when it was made from them: what [`Body::try_clone`] sends again.
+    replay: Option<Rc<Vec<u8>>>,
+    /// Fields to send after the body, where the platform's client can.
+    trailers: Option<HeaderMap>,
+}
 
 /// How much one whole read asks for at a time.
 const READ_CHUNK: usize = 64 * 1024;
@@ -442,18 +457,66 @@ const READ_CHUNK: usize = 64 * 1024;
 impl Body {
     /// No bytes at all: a `GET`'s body, or a response with nothing in it.
     pub fn empty() -> Body {
-        Body(None)
+        Body {
+            stream: None,
+            replay: None,
+            trailers: None,
+        }
     }
 
     /// The bytes `stream` reads, as they come.
     pub fn from_stream(stream: impl BodyStream + 'static) -> Body {
-        Body(Some(Box::new(stream)))
+        Body {
+            stream: Some(Box::new(stream)),
+            replay: None,
+            trailers: None,
+        }
+    }
+
+    /// The bytes `bytes`, kept to be sent again.
+    fn from_bytes(bytes: Rc<Vec<u8>>) -> Body {
+        Body {
+            stream: Some(Box::new(BufferedBody::new(Rc::clone(&bytes)))),
+            replay: Some(bytes),
+            trailers: None,
+        }
+    }
+
+    /// `trailers`, sent after this body ends. A client whose protocol layer cannot send them
+    /// fails the request rather than dropping them.
+    pub fn with_trailers(mut self, trailers: HeaderMap) -> Body {
+        self.trailers = Some(trailers);
+        self
+    }
+
+    /// The fields to send after the body, taking them: what a client that can send trailers
+    /// sends once the body has ended. `None` for a body made without any, or once taken.
+    pub fn take_trailers(&mut self) -> Option<HeaderMap> {
+        self.trailers.take()
+    }
+
+    /// A second body with the same bytes, for a request a client sends again on a redirect that
+    /// resends its body. `Some` for a body made from bytes and for an empty one; `None` for one
+    /// that streams, whose bytes are gone once they are read.
+    pub fn try_clone(&self) -> Option<Body> {
+        let stream = match &self.stream {
+            None => None,
+            Some(_) => {
+                let bytes = self.replay.clone()?;
+                Some(Box::new(BufferedBody::new(bytes)) as Box<dyn BodyStream>)
+            }
+        };
+        Some(Body {
+            stream,
+            replay: self.replay.clone(),
+            trailers: self.trailers.clone(),
+        })
     }
 
     /// Reads the next bytes of the body into `buf`, answering how many it read, `0` at the end:
     /// a piece at a time, as the platform delivers it.
     pub fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> BodyReadFuture<'a> {
-        match &mut self.0 {
+        match &mut self.stream {
             Some(stream) => stream.read(buf),
             None => Box::pin(std::future::ready(Ok(0))),
         }
@@ -461,29 +524,47 @@ impl Body {
 
     /// The whole body, read through: the bytes a request carries, or a response's.
     pub fn read_all(&mut self) -> BodyReadAllFuture<'_> {
-        let stream: Option<&mut (dyn BodyStream + '_)> = match &mut self.0 {
+        let stream: Option<&mut (dyn BodyStream + '_)> = match &mut self.stream {
             Some(stream) => Some(&mut **stream),
             None => None,
         };
         Box::pin(read_all(stream))
     }
 
-    /// How many bytes the whole body carries, when its sender said so. `None` for an empty body
-    /// and for one whose length is unknown.
+    /// The fields that came after the body, once it has ended: reads what is left of the body
+    /// first, as HTTP sends its trailers only after its last byte, so asking for them never
+    /// waits for a reader that never comes. `None` where the response has none, and always
+    /// `None` on a client whose protocol layer does not expose them.
+    pub fn trailers(&mut self) -> BodyTrailersFuture<'_> {
+        Box::pin(async move {
+            let mut chunk = vec![0; READ_CHUNK];
+            while self.read(&mut chunk).await? != 0 {}
+            match self.stream.as_deref_mut() {
+                Some(stream) => stream.trailers().await,
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// How many bytes the whole body carries, when its sender said so: `Some(0)` for an empty
+    /// body, and `None` for one whose length is unknown.
     pub fn length(&self) -> Option<u64> {
-        self.0.as_ref().and_then(|stream| stream.length())
+        match &self.stream {
+            None => Some(0),
+            Some(stream) => stream.length(),
+        }
     }
 }
 
 impl From<Vec<u8>> for Body {
     fn from(bytes: Vec<u8>) -> Body {
-        Body(Some(Box::new(BufferedBody::new(bytes))))
+        Body::from_bytes(Rc::new(bytes))
     }
 }
 
 impl From<&'static [u8]> for Body {
     fn from(bytes: &'static [u8]) -> Body {
-        Body(Some(Box::new(BufferedBody::new(bytes.to_vec()))))
+        Body::from_bytes(Rc::new(bytes.to_vec()))
     }
 }
 
@@ -495,7 +576,7 @@ impl Default for Body {
 
 impl fmt::Debug for Body {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.0 {
+        match &self.stream {
             None => formatter.write_str("Body(empty)"),
             Some(stream) => formatter
                 .debug_struct("Body")
@@ -522,12 +603,12 @@ async fn read_all(stream: Option<&mut dyn BodyStream>) -> Result<Vec<u8>, HttpEr
 
 /// Bytes already in memory, read at once.
 struct BufferedBody {
-    bytes: Vec<u8>,
+    bytes: Rc<Vec<u8>>,
     read: usize,
 }
 
 impl BufferedBody {
-    fn new(bytes: Vec<u8>) -> BufferedBody {
+    fn new(bytes: Rc<Vec<u8>>) -> BufferedBody {
         BufferedBody { bytes, read: 0 }
     }
 }
@@ -572,37 +653,125 @@ mod tests {
     #[test]
     fn a_body_of_bytes_reads_whole_and_says_its_length() {
         let mut body = Body::from(b"hello, body".to_vec());
-        assert_eq!(body.0.as_ref().unwrap().length(), Some(11));
+        assert_eq!(body.length(), Some(11));
         assert_eq!(now(body.read_all()).unwrap(), b"hello, body");
+        assert_eq!(now(body.trailers()).unwrap(), None, "no trailers came");
+    }
+
+    #[test]
+    fn an_empty_body_carries_no_bytes_where_a_stream_of_unknown_length_carries_some_unknown() {
+        assert_eq!(
+            Body::empty().length(),
+            Some(0),
+            "an empty body is zero bytes"
+        );
+        struct Unknown;
+        impl BodyStream for Unknown {
+            fn read<'a>(&'a mut self, _buf: &'a mut [u8]) -> BodyReadFuture<'a> {
+                Box::pin(std::future::ready(Ok(0)))
+            }
+            fn trailers(&mut self) -> BodyTrailersFuture<'_> {
+                Box::pin(std::future::ready(Ok(None)))
+            }
+            fn length(&self) -> Option<u64> {
+                None
+            }
+        }
+        assert_eq!(Body::from_stream(Unknown).length(), None);
+    }
+
+    /// The stream every test below reads: its bytes in pieces, and trailers after them.
+    struct Pieces(Vec<u8>, usize);
+
+    impl BodyStream for Pieces {
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> BodyReadFuture<'a> {
+            let read = (self.0.len() - self.1).min(buf.len()).min(3);
+            buf[..read].copy_from_slice(&self.0[self.1..self.1 + read]);
+            self.1 += read;
+            Box::pin(std::future::ready(Ok(read)))
+        }
+
+        fn trailers(&mut self) -> BodyTrailersFuture<'_> {
+            let mut trailers = HeaderMap::new();
+            trailers.insert("x-checksum", 7u32.into());
+            Box::pin(std::future::ready(Ok(Some(trailers))))
+        }
+
+        fn length(&self) -> Option<u64> {
+            Some(self.0.len() as u64)
+        }
     }
 
     #[test]
     fn a_streamed_body_is_read_a_piece_at_a_time() {
-        struct Pieces(Vec<u8>, usize);
-
-        impl BodyStream for Pieces {
-            fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> BodyReadFuture<'a> {
-                let read = (self.0.len() - self.1).min(buf.len()).min(3);
-                buf[..read].copy_from_slice(&self.0[self.1..self.1 + read]);
-                self.1 += read;
-                Box::pin(std::future::ready(Ok(read)))
-            }
-
-            fn trailers(&mut self) -> BodyTrailersFuture<'_> {
-                let mut trailers = HeaderMap::new();
-                trailers.insert("x-checksum", 7u32.into());
-                Box::pin(std::future::ready(Ok(Some(trailers))))
-            }
-
-            fn length(&self) -> Option<u64> {
-                Some(self.0.len() as u64)
-            }
-        }
-
         let mut body = Body::from_stream(Pieces(b"streamed body".to_vec(), 0));
         assert_eq!(now(body.read_all()).unwrap(), b"streamed body");
-        let mut stream = body.0.take().unwrap();
-        assert_eq!(now(stream.trailers()).unwrap().unwrap()["x-checksum"], "7");
+        assert_eq!(
+            now(body.trailers()).unwrap().unwrap()["x-checksum"],
+            "7",
+            "the trailers came after the body"
+        );
+    }
+
+    #[test]
+    fn asking_for_the_trailers_reads_the_rest_of_the_body_first() {
+        let mut body = Body::from_stream(Pieces(b"streamed body".to_vec(), 0));
+        let trailers = now(body.trailers())
+            .expect("the body ended")
+            .expect("trailers came");
+        assert_eq!(trailers["x-checksum"], "7");
+        let mut chunk = [0u8; 8];
+        assert_eq!(
+            now(body.read(&mut chunk)).unwrap(),
+            0,
+            "the body was drained to its end before the trailers answered"
+        );
+    }
+
+    #[test]
+    fn a_body_with_trailers_to_send_hands_its_client_them_once() {
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", 7u32.into());
+        let mut body = Body::from(b"a body".to_vec()).with_trailers(trailers.clone());
+        assert_eq!(body.take_trailers(), Some(trailers));
+        assert_eq!(
+            body.take_trailers(),
+            None,
+            "the fields are taken once, by the client that sends them"
+        );
+    }
+
+    #[test]
+    fn a_body_made_from_bytes_is_sent_again_and_a_stream_is_not() {
+        let body = Body::from(b"resend me".to_vec());
+        let mut again = body.try_clone().expect("bytes can be sent again");
+        assert_eq!(again.length(), body.length());
+        assert_eq!(now(again.read_all()).unwrap(), b"resend me");
+        assert_eq!(
+            body.try_clone().unwrap().take_trailers(),
+            None,
+            "a body without trailers clones without them"
+        );
+
+        let streamed = Body::from_stream(Pieces(b"streamed".to_vec(), 0));
+        assert!(
+            streamed.try_clone().is_none(),
+            "a stream's bytes are gone once they are read"
+        );
+    }
+
+    #[test]
+    fn an_empty_body_and_one_with_trailers_are_sent_again_with_what_they_carry() {
+        let empty = Body::empty();
+        let mut again = empty.try_clone().expect("nothing to lose");
+        assert_eq!(again.length(), Some(0));
+        assert_eq!(now(again.read_all()).unwrap(), Vec::<u8>::new());
+
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", 7u32.into());
+        let with_trailers = Body::empty().with_trailers(trailers.clone());
+        let mut again = with_trailers.try_clone().expect("nothing to lose");
+        assert_eq!(again.take_trailers(), Some(trailers));
     }
 
     #[test]
