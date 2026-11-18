@@ -2645,6 +2645,10 @@ mod tests {
         PaintingBinding::instance(&mut app).install_fonts(&mut app, {
             let allow_non_ascii = Rc::clone(&allow_non_ascii);
             move |fonts| {
+                // FlutterTest is the primary face and covers ASCII only, so a CJK codepoint
+                // goes through the gated source on every machine, even where the system's
+                // default font covers CJK itself.
+                fonts.add_source(waft_embedder::TestFontSource::new());
                 fonts.add_source(GatedFonts {
                     inner: valo_system_fonts::SystemFonts::load(),
                     allow_non_ascii,
