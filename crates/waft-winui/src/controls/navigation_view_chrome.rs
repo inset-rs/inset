@@ -36,7 +36,8 @@ pub(super) struct PaneChrome {
     pub toggle_top: f64,
     /// The separate back-button row inside PaneContentGrid.
     pub back_row: f64,
-    /// PaneContentGridToggleButtonRow's visible-state minimum.
+    /// PaneContentGridToggleButtonRow's minimum, which `TogglePaneButtonVisible` sets so that the
+    /// search box clears the toggle or the title holder above it.
     pub toggle_row_min_height: f64,
     /// PaneHeaderContentBorderRow's minimum from toggle and close visibility.
     pub header_row_min_height: f64,
@@ -72,6 +73,9 @@ impl PaneChrome {
             && !top
             && !widget.pane_title.is_empty()
             && !(widget.pane_display_mode == NavigationViewPaneDisplayMode::LeftMinimal && !open);
+        // UpdateLeftNavigationOnlyVisualState enters TogglePaneButtonVisible for a shown title
+        // holder as for a shown toggle.
+        let toggle_pane_button_visible_state = show_toggle || show_title_holder;
         let back_width = (widget.compact_pane_length - 8.0).max(0.0);
         let toggle_width =
             if !closed_compact && !widget.pane_title.is_empty() && !(overlay && !open) {
@@ -121,7 +125,7 @@ impl PaneChrome {
             toggle_left,
             toggle_top: back_row,
             back_row,
-            toggle_row_min_height: if show_toggle {
+            toggle_row_min_height: if toggle_pane_button_visible_state {
                 r.navigation_view_pane_header_row_min_height
             } else {
                 0.0
