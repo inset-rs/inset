@@ -449,6 +449,20 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `transform_rect` keeps the infinities a zero transform maps to, where Dart's `transformRect` turns them into NaN, whose comparisons then order it first.
   Affect: a selection scrolled through a list orders the kept-alive selected children where Flutter orders them, so the items revealed at the end stay in the range.
 
+## widgets/selectable_region.rs → selectable_region.dart (`SelectableRegion`)
+
+- Change: a region whose `selectionControls` do not mix in `TextSelectionHandleControls` shows no toolbar.
+  Reason: language — the overlay's own toolbar asks the deprecated `TextSelectionDelegate` members (`textEditingValue`, `cutSelection`, `pasteText`, …), which the region does not implement.
+  Affect: `contextMenuBuilder` is a region's only toolbar; the platform controls, which are handle controls, and Material's `SelectionArea` are unaffected.
+
+- Change: the browser's context menu (`BrowserContextMenu`, `PlatformSelectableRegionContextMenu` attaching the region) and the process-text and share items of a menu are absent.
+  Reason: platform — the host is not a browser, and it has no text-processing service or share sheet.
+  Affect: a region's menu holds Copy and Select All, where a web host would show its own menu and an Android host a Share item.
+
+- Change: the deprecated `TextSelectionDelegate` implementation, `_updateSelectionStatus`'s `textEditingValue`, `SelectionListener`, `SelectionDetails` and `SelectionListenerNotifier` are not ported.
+  Reason: language — the delegate's members exist only for the deprecated toolbar and the platform's text input channel, which the port does not use; the listener classes wait for their tests' needs.
+  Affect: `SelectableRegionState` is not a `TextSelectionDelegate` and no `SelectionListener` reports a region's selection details; `onSelectionChanged` and `contextMenuButtonItems` give what those would.
+
 ## widgets/text.rs → text.dart (selection)
 
 - Change: the text delegate records where each fragment of the paragraph after its first starts in it when the selectables change, where Dart reads it from the fragment's first box while it computes the range.
@@ -815,6 +829,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - view.rs, overlay.rs: the hidden-by-a-`LookupBoundary` variants of the `View.of` and `Overlay.of` error messages. Trigger: diagnostics.
 - form.rs, page_storage.rs, tap_region.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value (the check is in debug.rs). Trigger: each such widget's next edit.
+- selectable_region.rs: `SelectionListener`, `SelectionDetails`, `SelectionListenerNotifier`, the deprecated `TextSelectionDelegate` members and the iOS-web double-tap quirks. Trigger: the first caller of a selection listener; a web host.
 - text.rs: `locale`, `strutStyle`, `hyphens`, and the deprecated `textScaleFactor`; `Text`'s selection container and `_RichText` carry none of them either. Trigger: `Locale` (the embedder's exists); `StrutStyle`; `Hyphens`.
 - basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
