@@ -158,7 +158,11 @@ impl DialogTheme {
     }
 
     /// Dart `DialogTheme(actionsPadding:)`.
-    pub fn with_actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> DialogTheme {
+    pub fn with_actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> DialogTheme {
+        let actions_padding = actions_padding.into();
         debug_assert!(self.data.is_none());
         self.actions_padding = Some(actions_padding);
         self
@@ -678,7 +682,11 @@ impl DialogThemeData {
     }
 
     /// Dart `DialogThemeData(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> DialogThemeData {
+    pub fn actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> DialogThemeData {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }
@@ -1263,7 +1271,7 @@ mod tests {
     #[test]
     fn material3_custom_icon_color_theme_lowest_preference() {
         test_widgets(|tester| {
-            let secondary = m3(&tester.cell.borrow()).color_scheme.secondary;
+            let secondary = m3(&tester.cell.borrow()).color_scheme.secondary();
             app_with_dialog(tester, icon_dialog(), m3, None);
             open(tester);
 

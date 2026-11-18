@@ -59,16 +59,16 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3 {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.12));
+                    return Some(colors.on_surface().with_opacity(0.12));
                 }
                 if states.contains(&WidgetState::Selected) {
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
                 if toggleable {
                     // toggleable but unselected case
                     return Some(colors.surface_container_highest());
                 }
-                Some(colors.primary)
+                Some(colors.primary())
             })
         })
     }
@@ -81,16 +81,16 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3 {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.38));
+                    return Some(colors.on_surface().with_opacity(0.38));
                 }
                 if states.contains(&WidgetState::Selected) {
-                    return Some(colors.on_primary);
+                    return Some(colors.on_primary());
                 }
                 if toggleable {
                     // toggleable but unselected case
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
-                Some(colors.on_primary)
+                Some(colors.on_primary())
             })
         })
     }
@@ -103,35 +103,35 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3 {
             move |states| {
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.on_primary.with_opacity(0.1));
+                        return Some(colors.on_primary().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.on_primary.with_opacity(0.08));
+                        return Some(colors.on_primary().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.on_primary.with_opacity(0.1));
+                        return Some(colors.on_primary().with_opacity(0.1));
                     }
                 }
                 if toggleable {
                     // toggleable but unselected case
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary.with_opacity(0.08));
+                        return Some(colors.primary().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.on_primary.with_opacity(0.1));
+                    return Some(colors.on_primary().with_opacity(0.1));
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(colors.on_primary.with_opacity(0.08));
+                    return Some(colors.on_primary().with_opacity(0.08));
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(colors.on_primary.with_opacity(0.1));
+                    return Some(colors.on_primary().with_opacity(0.1));
                 }
                 Some(Colors::TRANSPARENT)
             },

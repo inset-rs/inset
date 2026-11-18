@@ -788,7 +788,7 @@ impl<T: Clone + PartialEq + 'static> State for RadioListTileState<T> {
                     .as_ref()
                     .and_then(|fill_color| fill_color.resolve(&states))
             })
-            .unwrap_or(theme.color_scheme.secondary);
+            .unwrap_or(theme.color_scheme.secondary());
         let enabled = RadioClient::enabled(self, app);
         let focus_node = self.focus_node(app);
         let widget = self.widget(app);
@@ -1545,7 +1545,7 @@ mod tests {
             };
 
             frame(tester, true);
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             // The tile's transparent `Ink`, Dart's `..rect()`, is not recorded.
             assert_paints(
                 tester,
@@ -1569,7 +1569,7 @@ mod tests {
             // Check when the radio is selected, but disabled.
             group_value.set(Some(0));
             frame(tester, false);
-            let disabled = theme.color_scheme.on_surface.with_opacity(0.38);
+            let disabled = theme.color_scheme.on_surface().with_opacity(0.38);
             assert_paints(
                 tester,
                 radio_material::<i32>(tester),

@@ -1037,8 +1037,8 @@ impl SliderState {
         {
             #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
             let fallback = Color::alpha_blend(
-                theme.color_scheme.on_surface.with_opacity(0.60),
-                theme.color_scheme.surface.with_opacity(0.90),
+                theme.color_scheme.on_surface().with_opacity(0.60),
+                theme.color_scheme.surface().with_opacity(0.90),
             );
             slider_theme.value_indicator_color.unwrap_or(fallback)
         } else {
@@ -3120,82 +3120,82 @@ impl SliderThemeDataGetters for SliderDefaultsM2 {
     fn active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.24))
+        Some(colors.primary().with_opacity(0.24))
     }
 
     fn secondary_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.54))
+        Some(colors.primary().with_opacity(0.54))
     }
 
     fn disabled_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.32))
+        Some(colors.on_surface().with_opacity(0.32))
     }
 
     fn disabled_inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn disabled_secondary_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(0.54))
+        Some(colors.on_primary().with_opacity(0.54))
     }
 
     fn inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.54))
+        Some(colors.primary().with_opacity(0.54))
     }
 
     fn disabled_active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(0.12))
+        Some(colors.on_primary().with_opacity(0.12))
     }
 
     fn disabled_inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn disabled_thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         Some(Color::alpha_blend(
-            colors.on_surface.with_opacity(0.38),
-            colors.surface,
+            colors.on_surface().with_opacity(0.38),
+            colors.surface(),
         ))
     }
 
     fn overlay_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.12).into())
+        Some(colors.primary().with_opacity(0.12).into())
     }
 
     fn value_indicator_color(&self, app: &mut App) -> Option<Color> {
@@ -3210,7 +3210,7 @@ impl SliderThemeDataGetters for SliderDefaultsM2 {
             {
                 colors.inverse_surface()
             } else {
-                colors.primary
+                colors.primary()
             },
         )
     }
@@ -3245,7 +3245,7 @@ impl SliderThemeDataGetters for SliderDefaultsM2 {
                 .as_ref()
                 .expect("the text theme has a body large style")
                 .copy_with()
-                .color(colors.on_primary),
+                .color(colors.on_primary()),
         )
     }
 }
@@ -3275,7 +3275,7 @@ impl SliderThemeDataGetters for SliderDefaultsM3Year2023 {
     fn active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn inactive_track_color(&self, app: &mut App) -> Option<Color> {
@@ -3287,31 +3287,31 @@ impl SliderThemeDataGetters for SliderDefaultsM3Year2023 {
     fn secondary_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.54))
+        Some(colors.primary().with_opacity(0.54))
     }
 
     fn disabled_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn disabled_inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn disabled_secondary_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(0.38))
+        Some(colors.on_primary().with_opacity(0.38))
     }
 
     fn inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
@@ -3323,34 +3323,34 @@ impl SliderThemeDataGetters for SliderDefaultsM3Year2023 {
     fn disabled_active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn disabled_inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn disabled_thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         Some(Color::alpha_blend(
-            colors.on_surface.with_opacity(0.38),
-            colors.surface,
+            colors.on_surface().with_opacity(0.38),
+            colors.surface(),
         ))
     }
 
     fn overlay_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
+        let primary = colors.primary();
         Some(
             WidgetStateColor::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Dragged) {
@@ -3372,7 +3372,7 @@ impl SliderThemeDataGetters for SliderDefaultsM3Year2023 {
     fn value_indicator_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn value_indicator_shape(&self, _app: &mut App) -> Option<SliderComponentShapeRef> {
@@ -3405,7 +3405,7 @@ impl SliderThemeDataGetters for SliderDefaultsM3Year2023 {
                 .as_ref()
                 .expect("the text theme has a label medium style")
                 .copy_with()
-                .color(colors.on_primary),
+                .color(colors.on_primary()),
         )
     }
 }
@@ -4178,7 +4178,7 @@ pub(crate) mod tests {
 
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn primary_with_opacity(theme: &ThemeData, opacity: f64) -> Color {
-        theme.color_scheme.primary.with_opacity(opacity)
+        theme.color_scheme.primary().with_opacity(opacity)
     }
 
     // 'Material3 - Slider is focusable and has correct focus color'.
@@ -5763,7 +5763,7 @@ pub(crate) mod tests {
 
             tester.pump_widget(build_slider(0.0));
 
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             let paints_thumb_at = |tester: &WidgetTester, x: f64| {
                 let color: waft_embedder::valo::Color = primary.into();
                 tester
@@ -6108,18 +6108,19 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let theme = default_theme(tester);
             let color_scheme = theme.color_scheme.clone();
-            let active_track_color = color_scheme.primary;
+            let active_track_color = color_scheme.primary();
             let inactive_track_color = color_scheme.secondary_container();
-            let secondary_active_track_color = color_scheme.primary.with_opacity(0.54);
-            let disabled_active_track_color = color_scheme.on_surface.with_opacity(0.38);
-            let disabled_inactive_track_color = color_scheme.on_surface.with_opacity(0.12);
-            let disabled_secondary_active_track_color = color_scheme.on_surface.with_opacity(0.38);
-            let active_tick_mark_color = color_scheme.on_primary;
+            let secondary_active_track_color = color_scheme.primary().with_opacity(0.54);
+            let disabled_active_track_color = color_scheme.on_surface().with_opacity(0.38);
+            let disabled_inactive_track_color = color_scheme.on_surface().with_opacity(0.12);
+            let disabled_secondary_active_track_color =
+                color_scheme.on_surface().with_opacity(0.38);
+            let active_tick_mark_color = color_scheme.on_primary();
             let inactive_tick_mark_color = color_scheme.on_secondary_container();
             let disabled_active_tick_mark_color = color_scheme.on_inverse_surface();
-            let disabled_inactive_tick_mark_color = color_scheme.on_surface;
-            let thumb_color = color_scheme.primary;
-            let disabled_thumb_color = color_scheme.on_surface.with_opacity(0.38);
+            let disabled_inactive_tick_mark_color = color_scheme.on_surface();
+            let thumb_color = color_scheme.primary();
+            let disabled_thumb_color = color_scheme.on_surface().with_opacity(0.38);
             let value_indicator_color = color_scheme.inverse_surface();
             let value = 0.45;
             let app_theme = default_theme(tester);

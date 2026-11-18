@@ -173,7 +173,11 @@ impl FlexibleSpaceBar {
     }
 
     /// Dart `FlexibleSpaceBar(titlePadding:)`.
-    pub fn title_padding(mut self, title_padding: EdgeInsetsGeometry) -> FlexibleSpaceBar {
+    pub fn title_padding(
+        mut self,
+        title_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> FlexibleSpaceBar {
+        let title_padding = title_padding.into();
         self.title_padding = Some(title_padding);
         self
     }

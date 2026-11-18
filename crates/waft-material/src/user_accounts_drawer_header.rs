@@ -88,9 +88,9 @@ impl StatelessWidget for AccountPictures {
             .into_iter()
             .take(3)
             .map(|picture| {
-                Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
                     .child(Semantics::new().container(true).child(
-                        Padding::new(EdgeInsets::from_ltrb(8.0, 0.0, 0.0, 8.0).into()).child(
+                        Padding::new(EdgeInsets::from_ltrb(8.0, 0.0, 0.0, 8.0)).child(
                             SizedBox::from_size(self.other_accounts_pictures_size).child(picture),
                         ),
                     ))
@@ -292,7 +292,7 @@ impl State for AccountDetailsState {
             children.push(
                 LayoutId::new(
                     account_name_id(),
-                    Padding::new(EdgeInsets::symmetric(2.0, 0.0).into()).child(
+                    Padding::new(EdgeInsets::symmetric(2.0, 0.0)).child(
                         DefaultTextStyle::new(
                             theme
                                 .primary_text_theme
@@ -311,7 +311,7 @@ impl State for AccountDetailsState {
             children.push(
                 LayoutId::new(
                     account_email_id(),
-                    Padding::new(EdgeInsets::symmetric(2.0, 0.0).into()).child(
+                    Padding::new(EdgeInsets::symmetric(2.0, 0.0)).child(
                         DefaultTextStyle::new(
                             theme
                                 .primary_text_theme
@@ -664,7 +664,7 @@ impl State for UserAccountsDrawerHeaderState {
         let widget = self.widget(app);
         let decoration = widget.decoration.clone().unwrap_or_else(|| {
             BoxDecoration::new()
-                .color(theme.color_scheme.primary)
+                .color(theme.color_scheme.primary())
                 .into()
         });
         let is_open = app.get(self).is_open;
@@ -692,7 +692,7 @@ impl State for UserAccountsDrawerHeaderState {
                 .cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .children(vec![
                     Expanded::new(
-                        Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 16.0, 0.0).into())
+                        Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 16.0, 0.0))
                             .child(pictures),
                     )
                     .into_widget(),
@@ -708,7 +708,7 @@ impl State for UserAccountsDrawerHeaderState {
                 DrawerHeader::new(Some(child.into_widget()))
                     .decoration(decoration)
                     .margin(widget.margin)
-                    .padding(EdgeInsetsDirectional::only(16.0, 16.0, 0.0, 0.0).into()),
+                    .padding(EdgeInsetsDirectional::only(16.0, 16.0, 0.0, 0.0)),
             )
             .into_widget()
     }
@@ -794,7 +794,7 @@ mod tests {
         }
         let mut color_scheme = ColorScheme::light();
         if let Some(color_scheme_primary) = options.color_scheme_primary {
-            color_scheme.primary = color_scheme_primary;
+            color_scheme = color_scheme.with_primary(color_scheme_primary);
         }
         let theme = builder
             .color_scheme(color_scheme)

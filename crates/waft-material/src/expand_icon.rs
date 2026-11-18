@@ -549,7 +549,7 @@ mod tests {
             let theme = m3(&tester.cell.borrow());
             assert_eq!(
                 last_icon_theme_color(tester),
-                Some(theme.color_scheme.on_surface.with_opacity(0.38))
+                Some(theme.color_scheme.on_surface().with_opacity(0.38))
             );
 
             // Test dark mode.
@@ -559,7 +559,7 @@ mod tests {
             let theme = m3_dark(&tester.cell.borrow());
             assert_eq!(
                 last_icon_theme_color(tester),
-                Some(theme.color_scheme.on_surface.with_opacity(0.38))
+                Some(theme.color_scheme.on_surface().with_opacity(0.38))
             );
         });
     }

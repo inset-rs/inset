@@ -281,8 +281,8 @@ impl ButtonStyleButton for OutlinedButton {
                     text_style: theme.text_theme.label_large.clone(),
                     ..OutlinedButton::style_from()
                 }
-                .foreground_color(color_scheme.primary)
-                .disabled_foreground_color(color_scheme.on_surface.with_opacity(0.38))
+                .foreground_color(color_scheme.primary())
+                .disabled_foreground_color(color_scheme.on_surface().with_opacity(0.38))
                 .background_color(Colors::TRANSPARENT)
                 .disabled_background_color(Colors::TRANSPARENT)
                 .shadow_color(theme.shadow_color)
@@ -291,7 +291,7 @@ impl ButtonStyleButton for OutlinedButton {
                 .minimum_size(Size::new(64.0, 36.0))
                 .maximum_size(Size::INFINITE)
                 .side(BorderSide {
-                    color: color_scheme.on_surface.with_opacity(0.12),
+                    color: color_scheme.on_surface().with_opacity(0.12),
                     ..BorderSide::default()
                 })
                 .shape(RoundedRectangleBorder::new(
@@ -864,9 +864,9 @@ mod tests {
             assert_eq!(
                 text_style.color.as_deref().copied(),
                 Some(if disabled {
-                    color_scheme.on_surface.with_opacity(0.38)
+                    color_scheme.on_surface().with_opacity(0.38)
                 } else {
-                    color_scheme.primary
+                    color_scheme.primary()
                 })
             );
             assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));
@@ -876,13 +876,13 @@ mod tests {
         });
         let expected: ShapeBorderRef = if material3 {
             ShapeBorderRef::new(StadiumBorder::new(side(if disabled {
-                color_scheme.on_surface.with_opacity(0.12)
+                color_scheme.on_surface().with_opacity(0.12)
             } else {
                 color_scheme.outline()
             })))
         } else {
             ShapeBorderRef::new(RoundedRectangleBorder::new(
-                side(color_scheme.on_surface.with_opacity(0.12)),
+                side(color_scheme.on_surface().with_opacity(0.12)),
                 BorderRadius::all(Radius::circular(4.0)).into(),
             ))
         };
@@ -1043,7 +1043,7 @@ mod tests {
         test_widgets(|tester| {
             let focus_node = focus_node(tester);
             let theme = default_theme(tester);
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             tester.pump_widget(app_centered(
                 theme,
                 OutlinedButton::new(pressed(), Some(Text::new("OutlinedButton")))
@@ -1107,7 +1107,7 @@ mod tests {
 
     fn focus_case(tester: &mut WidgetTester, autofocus: bool) {
         let theme = default_theme(tester);
-        let primary = theme.color_scheme.primary;
+        let primary = theme.color_scheme.primary();
         let focus_color = Color::new(0xff001122);
         let focus_node = focus_node(tester);
         tester.pump_widget(material_app(

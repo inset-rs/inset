@@ -546,7 +546,7 @@ impl ButtonThemeData {
     pub fn get_brightness(&self, button: &MaterialButton) -> Brightness {
         button
             .color_brightness
-            .unwrap_or_else(|| self.color_scheme().brightness)
+            .unwrap_or_else(|| self.color_scheme().brightness())
     }
 
     /// Defines the `button`'s base colors, and the defaults for the button's minimum size,
@@ -561,7 +561,7 @@ impl ButtonThemeData {
         button
             .text_color
             .or(button.disabled_text_color)
-            .unwrap_or_else(|| self.color_scheme().on_surface.with_opacity(0.38))
+            .unwrap_or_else(|| self.color_scheme().on_surface().with_opacity(0.38))
     }
 
     /// The `button`'s background color when `on_pressed` is null.
@@ -570,7 +570,7 @@ impl ButtonThemeData {
         button
             .disabled_color
             .or(self.disabled_color)
-            .unwrap_or_else(|| self.color_scheme().on_surface.with_opacity(0.38))
+            .unwrap_or_else(|| self.color_scheme().on_surface().with_opacity(0.38))
     }
 
     /// The button's background fill color, or `None` for buttons that don't have a background
@@ -601,7 +601,7 @@ impl ButtonThemeData {
                     Colors::BLACK87
                 }
             }
-            ButtonTextTheme::Accent => self.color_scheme().secondary,
+            ButtonTextTheme::Accent => self.color_scheme().secondary(),
             ButtonTextTheme::Primary => {
                 let fill_is_dark = match self.get_fill_color(button) {
                     Some(fill_color) => {

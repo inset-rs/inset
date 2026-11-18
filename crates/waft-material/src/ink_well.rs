@@ -3150,7 +3150,7 @@ mod tests {
             let padded_ink_well = |key: Option<&GlobalKey>, child: WidgetRef| {
                 let mut ink_well = InkWell::new()
                     .on_tap(Listener::new(|_app| {}))
-                    .child(Padding::new(waft_painting::EdgeInsets::all(50.0).into()).child(child));
+                    .child(Padding::new(waft_painting::EdgeInsets::all(50.0)).child(child));
                 if let Some(key) = key {
                     ink_well = ink_well.key(key.clone().into());
                 }
@@ -3998,7 +3998,7 @@ mod tests {
 
     /// `InkWell(key: key, onTap: () {}, child: Padding(padding: EdgeInsets.all(50), child))`.
     fn padded_ink_well(key: Option<&GlobalKey>, child: Option<WidgetRef>) -> WidgetRef {
-        let mut padding = Padding::new(waft_painting::EdgeInsets::all(50.0).into());
+        let mut padding = Padding::new(waft_painting::EdgeInsets::all(50.0));
         if let Some(child) = child {
             padding = padding.child(child);
         }

@@ -2494,9 +2494,9 @@ mod tests {
         test_widgets(|tester| {
             check_overlay_by_state(tester, IconButton::filled, |colors| {
                 (
-                    colors.on_primary.with_opacity(0.08),
-                    colors.on_primary.with_opacity(0.1),
-                    colors.on_primary.with_opacity(0.1),
+                    colors.on_primary().with_opacity(0.08),
+                    colors.on_primary().with_opacity(0.1),
+                    colors.on_primary().with_opacity(0.1),
                 )
             });
         });
@@ -2523,7 +2523,7 @@ mod tests {
             check_overlay_by_state(tester, IconButton::outlined, |colors| {
                 (
                     colors.on_surface_variant().with_opacity(0.08),
-                    colors.on_surface.with_opacity(0.1),
+                    colors.on_surface().with_opacity(0.1),
                     colors.on_surface_variant().with_opacity(0.08),
                 )
             });
@@ -2542,20 +2542,20 @@ mod tests {
         test_widgets(|tester| {
             let colors = ColorScheme::light();
             pump_m3(tester, IconButton::filled(noop(), icon(Icons::ac_unit())));
-            assert_eq!(icon_color(tester), Some(colors.on_primary));
-            check_material(tester, colors.primary, &stadium());
+            assert_eq!(icon_color(tester), Some(colors.on_primary()));
+            check_material(tester, colors.primary(), &stadium());
             check_icon_alignment_and_size(tester);
 
             press_and_release(tester);
             // No change vs enabled and not pressed.
-            check_material(tester, colors.primary, &stadium());
+            check_material(tester, colors.primary(), &stadium());
 
             // Disabled IconButton
             pump_m3(tester, IconButton::filled(None, icon(Icons::ac_unit())));
-            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface().with_opacity(0.12), &stadium());
             assert_eq!(
                 icon_color(tester),
-                Some(colors.on_surface.with_opacity(0.38))
+                Some(colors.on_surface().with_opacity(0.38))
             );
         });
     }
@@ -2569,13 +2569,13 @@ mod tests {
                 tester,
                 IconButton::filled(noop(), icon(Icons::ac_unit())).is_selected(true),
             );
-            assert_eq!(icon_color(tester), Some(colors.on_primary));
-            check_material(tester, colors.primary, &stadium());
+            assert_eq!(icon_color(tester), Some(colors.on_primary()));
+            check_material(tester, colors.primary(), &stadium());
             check_icon_alignment_and_size(tester);
 
             press_and_release(tester);
             // No change vs enabled and not pressed.
-            check_material(tester, colors.primary, &stadium());
+            check_material(tester, colors.primary(), &stadium());
 
             // Enabled unselected IconButton
             pump_m3(
@@ -2583,17 +2583,17 @@ mod tests {
                 IconButton::filled(noop(), icon(Icons::ac_unit())).is_selected(false),
             );
             check_material(tester, colors.surface_variant(), &stadium());
-            assert_eq!(icon_color(tester), Some(colors.primary));
+            assert_eq!(icon_color(tester), Some(colors.primary()));
 
             // Disabled IconButton
             pump_m3(
                 tester,
                 IconButton::filled(None, icon(Icons::ac_unit())).is_selected(true),
             );
-            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface().with_opacity(0.12), &stadium());
             assert_eq!(
                 icon_color(tester),
-                Some(colors.on_surface.with_opacity(0.38))
+                Some(colors.on_surface().with_opacity(0.38))
             );
         });
     }
@@ -2618,10 +2618,10 @@ mod tests {
                 tester,
                 IconButton::filled_tonal(None, icon(Icons::ac_unit())),
             );
-            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface().with_opacity(0.12), &stadium());
             assert_eq!(
                 icon_color(tester),
-                Some(colors.on_surface.with_opacity(0.38))
+                Some(colors.on_surface().with_opacity(0.38))
             );
         });
     }
@@ -2653,10 +2653,10 @@ mod tests {
                 tester,
                 IconButton::filled_tonal(None, icon(Icons::ac_unit())).is_selected(true),
             );
-            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface().with_opacity(0.12), &stadium());
             assert_eq!(
                 icon_color(tester),
-                Some(colors.on_surface.with_opacity(0.38))
+                Some(colors.on_surface().with_opacity(0.38))
             );
         });
     }
@@ -2678,11 +2678,11 @@ mod tests {
             check_material(
                 tester,
                 Colors::TRANSPARENT,
-                &stadium_with(colors.on_surface.with_opacity(0.12)),
+                &stadium_with(colors.on_surface().with_opacity(0.12)),
             );
             assert_eq!(
                 icon_color(tester),
-                Some(colors.on_surface.with_opacity(0.38))
+                Some(colors.on_surface().with_opacity(0.38))
             );
         });
     }
@@ -2714,10 +2714,10 @@ mod tests {
                 tester,
                 IconButton::outlined(None, icon(Icons::ac_unit())).is_selected(true),
             );
-            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface().with_opacity(0.12), &stadium());
             assert_eq!(
                 icon_color(tester),
-                Some(colors.on_surface.with_opacity(0.38))
+                Some(colors.on_surface().with_opacity(0.38))
             );
         });
     }
@@ -2969,7 +2969,7 @@ mod tests {
             tester.pump_and_settle();
 
             assert_eq!(selected_of(tester), Some(true));
-            assert_eq!(icon_color(tester), Some(colors.primary));
+            assert_eq!(icon_color(tester), Some(colors.primary()));
             assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The IconButton should be unselected if it's clicked again
@@ -2991,7 +2991,7 @@ mod tests {
             tester.pump_widget(widget);
 
             assert_eq!(selected_of(tester), Some(true));
-            assert_eq!(icon_color(tester), Some(colors.primary));
+            assert_eq!(icon_color(tester), Some(colors.primary()));
             assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The IconButton becomes unselected if it's clicked
@@ -3997,7 +3997,7 @@ mod tests {
         test_widgets(|tester| {
             let cases: [(Constructor, ContainerColor); 3] = [
                 (IconButton::new, |_| Colors::TRANSPARENT),
-                (IconButton::filled, |scheme| scheme.primary),
+                (IconButton::filled, |scheme| scheme.primary()),
                 (IconButton::filled_tonal, |scheme| {
                     scheme.secondary_container()
                 }),
@@ -4193,7 +4193,7 @@ mod tests {
                 icon_theme_color(tester),
                 Some(
                     scheme
-                        .on_surface
+                        .on_surface()
                         .with_values(Some(0.38), None, None, None, None)
                 )
             );
@@ -4232,7 +4232,7 @@ mod tests {
                 material_color(tester),
                 Some(
                     scheme
-                        .on_surface
+                        .on_surface()
                         .with_values(Some(0.1), None, None, None, None)
                 )
             );
@@ -4240,7 +4240,7 @@ mod tests {
                 icon_theme_color(tester),
                 Some(
                     scheme
-                        .on_surface
+                        .on_surface()
                         .with_values(Some(0.38), None, None, None, None)
                 )
             );

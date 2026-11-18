@@ -37,7 +37,8 @@ pub use waft_animation::{
 };
 pub use waft_painting::*;
 pub use waft_rendering::{
-    BoxConstraints, CrossAxisAlignment, FlexFit, MainAxisAlignment, MainAxisSize, StackFit,
+    BoxConstraints, CrossAxisAlignment, CustomPainter, FlexFit, MainAxisAlignment, MainAxisSize,
+    StackFit,
 };
 // The widget, not dart:ui's `Image` that painting carries: Flutter's `widgets.dart` makes
 // the same choice, leaving the other as `ui.Image`.

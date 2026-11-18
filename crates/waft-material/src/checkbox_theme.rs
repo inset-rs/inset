@@ -1078,7 +1078,7 @@ mod tests {
             let primary = Rc::new(Cell::new(Colors::TRANSPARENT));
             let frame = |tester: &mut WidgetTester, seed_color: Color| {
                 let color_scheme = ColorScheme::from_seed(seed_color).build();
-                primary.set(color_scheme.primary);
+                primary.set(color_scheme.primary());
                 let primary = Rc::clone(&primary);
                 pump_themed_with_colors(
                     tester,

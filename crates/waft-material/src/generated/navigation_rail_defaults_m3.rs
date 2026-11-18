@@ -46,7 +46,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM3 {
     fn background_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.surface)
+        Some(colors.surface())
     }
 
     fn unselected_label_text_style(&self, app: &mut App) -> Option<TextStyle> {
@@ -59,7 +59,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM3 {
                 .as_ref()
                 .expect("the M3 text theme has labelMedium")
                 .copy_with()
-                .color(colors.on_surface),
+                .color(colors.on_surface()),
         )
     }
 
@@ -73,7 +73,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM3 {
                 .as_ref()
                 .expect("the M3 text theme has labelMedium")
                 .copy_with()
-                .color(colors.on_surface),
+                .color(colors.on_surface()),
         )
     }
 

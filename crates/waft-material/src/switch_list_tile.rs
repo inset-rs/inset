@@ -608,7 +608,7 @@ impl StatelessWidget for SwitchListTile {
                     .as_ref()
                     .and_then(|thumb_color| thumb_color.resolve(&states))
             })
-            .unwrap_or(theme.color_scheme.secondary);
+            .unwrap_or(theme.color_scheme.secondary());
         let mut list_tile = ListTile::new()
             .selected_color(effective_active_color)
             .enabled(self.on_changed.is_some())

@@ -287,7 +287,8 @@ impl CupertinoButton {
     }
 
     /// Dart `CupertinoButton(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> CupertinoButton {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> CupertinoButton {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

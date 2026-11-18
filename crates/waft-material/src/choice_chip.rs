@@ -322,7 +322,7 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         };
         self.context
             .text_theme(app)
@@ -334,7 +334,7 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
     fn color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
         let (on_surface, secondary_container, surface_container_low) = (
-            colors.on_surface,
+            colors.on_surface(),
             colors.secondary_container(),
             colors.surface_container_low(),
         );
@@ -383,10 +383,10 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
             if self.is_selected {
                 colors.on_secondary_container()
             } else {
-                colors.primary
+                colors.primary()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         })
     }
 
@@ -399,7 +399,7 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         }))
     }
 
@@ -414,7 +414,7 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
                     }
                 } else {
                     BorderSide {
-                        color: colors.on_surface.with_opacity(0.12),
+                        color: colors.on_surface().with_opacity(0.12),
                         ..BorderSide::default()
                     }
                 }
@@ -435,10 +435,10 @@ impl ChipThemeDataGetters for ChoiceChipDefaultsM3 {
                     if self.is_selected {
                         colors.on_secondary_container()
                     } else {
-                        colors.primary
+                        colors.primary()
                     }
                 } else {
-                    colors.on_surface
+                    colors.on_surface()
                 })
                 .size(18.0),
         )
@@ -547,7 +547,7 @@ mod tests {
     fn material3_choice_chip_defaults() {
         test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
-            let disabled_side = theme.color_scheme.on_surface.with_alpha(0x1f);
+            let disabled_side = theme.color_scheme.on_surface().with_alpha(0x1f);
 
             // Test enabled ChoiceChip defaults.
             pump_chip(tester, &theme, enabled(false), true);
@@ -714,7 +714,7 @@ mod tests {
     fn material3_choice_chip_elevated_defaults() {
         test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
-            let disabled_fill = theme.color_scheme.on_surface.with_alpha(0x1f);
+            let disabled_fill = theme.color_scheme.on_surface().with_alpha(0x1f);
             let elevated = |selected: bool, enabled: bool| {
                 with_on_selected(ChoiceChip::elevated(Text::new(LABEL), selected), enabled)
             };
@@ -991,7 +991,7 @@ mod tests {
             build_chip(tester, None);
             assert_eq!(
                 icon_data(tester).color.map(|color| color.color()),
-                Some(theme.color_scheme.primary)
+                Some(theme.color_scheme.primary())
             );
 
             // Test provided icon theme.

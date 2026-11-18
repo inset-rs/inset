@@ -560,7 +560,10 @@ mod tests {
             assert_eq!(material.elevation, 0.0);
             assert!(shape_is(material, &RoundedRectangleBorder::default()));
             let text_style = material.text_style.as_ref().expect("a text style");
-            assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+            assert_eq!(
+                text_style.color,
+                Some(theme.color_scheme.on_surface().into())
+            );
         });
     }
 
@@ -616,7 +619,10 @@ mod tests {
                 assert_eq!(material.elevation, 0.0);
                 assert!(shape_is(material, &RoundedRectangleBorder::default()));
                 let text_style = material.text_style.as_ref().expect("a text style");
-                assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+                assert_eq!(
+                    text_style.color,
+                    Some(theme.color_scheme.on_surface().into())
+                );
             });
         });
     }

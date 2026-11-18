@@ -250,12 +250,12 @@ mod tests {
             material(tester, |material| {
                 assert_eq!(material.animation_duration, Duration::from_millis(200));
                 assert!(material.border_radius.is_none());
-                assert_eq!(material.color, Some(color_scheme.primary));
+                assert_eq!(material.color, Some(color_scheme.primary()));
                 assert_eq!(material.elevation, 0.0);
                 assert_eq!(material.shadow_color, Some(Color::new(0xff000000)));
                 let shape = material.shape.as_deref().expect("a shape");
                 assert!(shape.eq_shape(&StadiumBorder::default()));
-                assert_eq!(text_color(material), Some(color_scheme.on_primary));
+                assert_eq!(text_color(material), Some(color_scheme.on_primary()));
                 let text_style = material.text_style.as_ref().expect("a text style");
                 assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));
                 assert_eq!(text_style.font_size, Some(14.0));

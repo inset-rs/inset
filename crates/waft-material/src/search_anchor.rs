@@ -3167,7 +3167,7 @@ impl State for SearchBarState {
                     .and_then(|hint_style| hint_style.resolve(&states))
             });
 
-        let default_color = match color_scheme.brightness {
+        let default_color = match color_scheme.brightness() {
             Brightness::Light => K_DEFAULT_ICON_DARK_COLOR,
             Brightness::Dark => K_DEFAULT_ICON_LIGHT_COLOR,
         };
@@ -3184,7 +3184,7 @@ impl State for SearchBarState {
                 None,
                 custom_theme
                     .clone()
-                    .unwrap_or_else(|| IconThemeData::new().color(color_scheme.on_surface)),
+                    .unwrap_or_else(|| IconThemeData::new().color(color_scheme.on_surface())),
                 leading,
             )
             .into_widget()
@@ -3429,7 +3429,7 @@ mod tests {
             tester.widget(find::text(input), |text: &EditableText| text.style.clone());
         assert_eq!(
             input_style.color.as_ref().map(|color| color.color()),
-            Some(color_scheme.on_surface)
+            Some(color_scheme.on_surface())
         );
         assert_eq!(input_style.font_size, Some(16.0));
         assert_eq!(input_style.font_weight, Some(FontWeight::W400));
@@ -3778,7 +3778,7 @@ mod tests {
                 tester.widget(find::text(input), |text: &EditableText| text.style.clone());
             assert_eq!(
                 input_style.color.as_ref().map(|color| color.color()),
-                Some(color_scheme.on_surface)
+                Some(color_scheme.on_surface())
             );
             assert_eq!(input_style.font_size, Some(16.0));
             assert_eq!(input_style.font_family.as_deref(), Some("Roboto"));
@@ -4652,7 +4652,7 @@ mod tests {
             );
             let icon = tester.element(find::by_icon(&Icons::search()));
             let color = tester.glyph_style(icon).color.map(|color| color.color());
-            assert_eq!(color, Some(color_scheme.on_surface));
+            assert_eq!(color, Some(color_scheme.on_surface()));
         });
     }
 
@@ -6059,7 +6059,7 @@ mod tests {
                 .widget(find::text(input), |text: &EditableText| text.style.clone())
                 .color
                 .map(|color| color.color());
-            assert_eq!(input_color, Some(color_scheme.on_surface));
+            assert_eq!(input_color, Some(color_scheme.on_surface()));
         });
     }
 

@@ -51,9 +51,9 @@ impl SwitchThemeDataGetters for SwitchDefaultsM3 {
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
                     if states.contains(&WidgetState::Selected) {
-                        return Some(colors.surface);
+                        return Some(colors.surface());
                     }
-                    return Some(colors.on_surface.with_opacity(0.38));
+                    return Some(colors.on_surface().with_opacity(0.38));
                 }
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
@@ -65,7 +65,7 @@ impl SwitchThemeDataGetters for SwitchDefaultsM3 {
                     if states.contains(&WidgetState::Focused) {
                         return Some(colors.primary_container());
                     }
-                    return Some(colors.on_primary);
+                    return Some(colors.on_primary());
                 }
                 if states.contains(&WidgetState::Pressed) {
                     return Some(colors.on_surface_variant());
@@ -87,21 +87,21 @@ impl SwitchThemeDataGetters for SwitchDefaultsM3 {
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
                     if states.contains(&WidgetState::Selected) {
-                        return Some(colors.on_surface.with_opacity(0.12));
+                        return Some(colors.on_surface().with_opacity(0.12));
                     }
                     return Some(colors.surface_container_highest().with_opacity(0.12));
                 }
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.primary);
+                        return Some(colors.primary());
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary);
+                        return Some(colors.primary());
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary);
+                        return Some(colors.primary());
                     }
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
                 if states.contains(&WidgetState::Pressed) {
                     return Some(colors.surface_container_highest());
@@ -125,7 +125,7 @@ impl SwitchThemeDataGetters for SwitchDefaultsM3 {
                     return Some(Colors::TRANSPARENT);
                 }
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.12));
+                    return Some(colors.on_surface().with_opacity(0.12));
                 }
                 Some(colors.outline())
             },
@@ -138,24 +138,24 @@ impl SwitchThemeDataGetters for SwitchDefaultsM3 {
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary.with_opacity(0.08));
+                        return Some(colors.primary().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     return None;
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(colors.on_surface.with_opacity(0.08));
+                    return Some(colors.on_surface().with_opacity(0.08));
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 None
             },
@@ -210,7 +210,7 @@ impl SwitchConfig for SwitchConfigM3 {
         <dyn WidgetStateProperty<Color>>::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
                 if states.contains(&WidgetState::Selected) {
-                    return colors.on_surface.with_opacity(0.38);
+                    return colors.on_surface().with_opacity(0.38);
                 }
                 return colors.surface_container_highest().with_opacity(0.38);
             }

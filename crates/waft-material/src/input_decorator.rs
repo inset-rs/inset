@@ -3015,10 +3015,10 @@ impl InputDecoratorState {
             };
         }
         if has_error {
-            return theme_data.color_scheme.error;
+            return theme_data.color_scheme.error();
         }
         if is_focused {
-            return theme_data.color_scheme.primary;
+            return theme_data.color_scheme.primary();
         }
         if decoration.filled.expect("applied from the theme") {
             return theme_data.hint_color;
@@ -3026,7 +3026,7 @@ impl InputDecoratorState {
         // Dart's `withOpacity`, deprecated there too: its rounding to an 8-bit alpha is part of
         // the behaviour being ported.
         #[allow(deprecated)]
-        let enabled_color = theme_data.color_scheme.on_surface.with_opacity(0.38);
+        let enabled_color = theme_data.color_scheme.on_surface().with_opacity(0.38);
         if is_hovering {
             let hover_color = decoration.hover_color.unwrap_or(theme_data.hover_color);
             #[allow(deprecated)]
@@ -5387,7 +5387,11 @@ impl InputDecoration {
     }
 
     /// Dart `InputDecoration(contentPadding:)`.
-    pub fn content_padding(mut self, content_padding: EdgeInsetsGeometry) -> InputDecoration {
+    pub fn content_padding(
+        mut self,
+        content_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> InputDecoration {
+        let content_padding = content_padding.into();
         self.content_padding = Some(content_padding);
         self
     }
@@ -5590,8 +5594,9 @@ impl InputDecoration {
     /// Dart `InputDecoration(supportingTextPadding:)`.
     pub fn supporting_text_padding(
         mut self,
-        supporting_text_padding: EdgeInsetsGeometry,
+        supporting_text_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecoration {
+        let supporting_text_padding = supporting_text_padding.into();
         self.supporting_text_padding = Some(supporting_text_padding);
         self
     }
@@ -6244,8 +6249,9 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(contentPadding:)`.
     pub fn with_content_padding(
         mut self,
-        content_padding: EdgeInsetsGeometry,
+        content_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecorationTheme {
+        let content_padding = content_padding.into();
         debug_assert!(self.data.is_none());
         self.content_padding = Some(content_padding);
         self
@@ -7862,8 +7868,9 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(contentPadding:)`.
     pub fn content_padding(
         mut self,
-        content_padding: EdgeInsetsGeometry,
+        content_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecorationThemeData {
+        let content_padding = content_padding.into();
         self.content_padding = Some(content_padding);
         self
     }
@@ -8060,8 +8067,9 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(supportingTextPadding:)`.
     pub fn supporting_text_padding(
         mut self,
-        supporting_text_padding: EdgeInsetsGeometry,
+        supporting_text_padding: impl Into<EdgeInsetsGeometry>,
     ) -> InputDecorationThemeData {
+        let supporting_text_padding = supporting_text_padding.into();
         self.supporting_text_padding = Some(supporting_text_padding);
         self
     }
@@ -8383,8 +8391,8 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
         let theme = self.context.theme(app);
         let disabled_color = theme.disabled_color;
         let hint_color = theme.hint_color;
-        let error = theme.color_scheme.error;
-        let primary = theme.color_scheme.primary;
+        let error = theme.color_scheme.error();
+        let primary = theme.color_scheme.primary();
         let floating_label_style =
             WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
@@ -8421,7 +8429,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
 
     fn error_style(&self, app: &mut App) -> Option<AnyTextStyle> {
         let theme = self.context.theme(app);
-        let error = theme.color_scheme.error;
+        let error = theme.color_scheme.error();
         let body_small = theme.text_theme.body_small.clone();
         let error_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
             let body_small = body_small
@@ -8452,7 +8460,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
         let theme = self.context.theme(app);
         let brightness = Theme::brightness_of(app, self.context.context());
         let disabled_color = theme.disabled_color;
-        let primary = theme.color_scheme.primary;
+        let primary = theme.color_scheme.primary();
         let icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
                 return disabled_color;
@@ -8472,7 +8480,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
         let theme = self.context.theme(app);
         let brightness = Theme::brightness_of(app, self.context.context());
         let disabled_color = theme.disabled_color;
-        let primary = theme.color_scheme.primary;
+        let primary = theme.color_scheme.primary();
         let prefix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
                 return disabled_color;
@@ -8492,8 +8500,8 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
         let theme = self.context.theme(app);
         let brightness = Theme::brightness_of(app, self.context.context());
         let disabled_color = theme.disabled_color;
-        let error = theme.color_scheme.error;
-        let primary = theme.color_scheme.primary;
+        let error = theme.color_scheme.error();
+        let primary = theme.color_scheme.primary();
         let suffix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
                 return disabled_color;
@@ -9303,7 +9311,7 @@ pub(crate) mod tests {
                 format!(
                     "{:?}",
                     InputDecorationThemeData::new()
-                        .content_padding(EdgeInsetsDirectional::only(5.0, 0.0, 0.0, 0.0).into())
+                        .content_padding(EdgeInsetsDirectional::only(5.0, 0.0, 0.0, 0.0))
                 )
                 .contains("contentPadding: EdgeInsetsDirectional(5.0, 0.0, 0.0, 0.0)")
             );
@@ -9312,7 +9320,7 @@ pub(crate) mod tests {
                 format!(
                     "{:?}",
                     InputDecorationThemeData::new()
-                        .content_padding(EdgeInsets::only(5.0, 0.0, 0.0, 0.0).into())
+                        .content_padding(EdgeInsets::only(5.0, 0.0, 0.0, 0.0))
                 )
                 .contains("contentPadding: EdgeInsets(5.0, 0.0, 0.0, 0.0)")
             );
@@ -9327,7 +9335,7 @@ pub(crate) mod tests {
                     .error_style(TextStyle::new().height(4.0))
                     .error_max_lines(5)
                     .is_dense(true)
-                    .content_padding(EdgeInsets::only(0.0, 0.0, 6.0, 0.0).into())
+                    .content_padding(EdgeInsets::only(0.0, 0.0, 6.0, 0.0))
                     .is_collapsed(true)
                     .prefix_style(TextStyle::new().height(7.0))
                     .suffix_style(TextStyle::new().height(8.0))
@@ -9778,7 +9786,7 @@ pub(crate) mod tests {
                 check_filled_color(
                     tester,
                     BuildInputDecorator::new(filled(false).enabled(false)),
-                    |theme| theme.color_scheme.on_surface.with_opacity(0.04),
+                    |theme| theme.color_scheme.on_surface().with_opacity(0.04),
                 );
             });
         }
@@ -9791,7 +9799,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(filled(false).enabled(false)),
-                    |theme| theme.color_scheme.on_surface.with_opacity(0.38),
+                    |theme| theme.color_scheme.on_surface().with_opacity(0.38),
                     1.0,
                 );
             });
@@ -9843,7 +9851,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(filled(false)).is_hovering(true),
-                    |theme| theme.color_scheme.on_surface,
+                    |theme| theme.color_scheme.on_surface(),
                     1.0,
                 );
             });
@@ -9901,7 +9909,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(filled(false)).is_focused(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                     2.0,
                 );
             });
@@ -9918,7 +9926,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(filled(false))
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                     2.0,
                 );
             });
@@ -9952,7 +9960,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(filled(true)),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                     1.0,
                 );
             });
@@ -9966,7 +9974,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(filled(true)).is_focused(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                     2.0,
                 );
             });
@@ -9997,7 +10005,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(filled(true))
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                     2.0,
                 );
             });
@@ -10248,7 +10256,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(outlined(false).enabled(false)),
-                    |theme| theme.color_scheme.on_surface.with_opacity(0.12),
+                    |theme| theme.color_scheme.on_surface().with_opacity(0.12),
                     1.0,
                 );
             });
@@ -10286,7 +10294,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(outlined(false)).is_hovering(true),
-                    |theme| theme.color_scheme.on_surface,
+                    |theme| theme.color_scheme.on_surface(),
                     1.0,
                 );
             });
@@ -10324,7 +10332,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(outlined(false)).is_focused(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                     2.0,
                 );
             });
@@ -10341,7 +10349,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(outlined(false))
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                     2.0,
                 );
             });
@@ -10373,7 +10381,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(outlined(true)),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                     1.0,
                 );
             });
@@ -10387,7 +10395,7 @@ pub(crate) mod tests {
                 check_border(
                     tester,
                     BuildInputDecorator::new(outlined(true)).is_focused(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                     2.0,
                 );
             });
@@ -10418,7 +10426,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(outlined(true))
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                     2.0,
                 );
             });
@@ -11447,7 +11455,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(filled_label().enabled(false)),
-                    |theme| theme.color_scheme.on_surface.with_opacity(0.38),
+                    |theme| theme.color_scheme.on_surface().with_opacity(0.38),
                 );
             });
         }
@@ -11473,7 +11481,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(filled_label()).is_focused(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                 );
             });
         }
@@ -11488,7 +11496,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(filled_label())
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                 );
             });
         }
@@ -11501,7 +11509,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT)),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                 );
             });
         }
@@ -11515,7 +11523,7 @@ pub(crate) mod tests {
                     tester,
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT))
                         .is_focused(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                 );
             });
         }
@@ -11544,7 +11552,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT))
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                 );
             });
         }
@@ -11656,7 +11664,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(outlined_label().enabled(false)),
-                    |theme| theme.color_scheme.on_surface.with_opacity(0.38),
+                    |theme| theme.color_scheme.on_surface().with_opacity(0.38),
                 );
             });
         }
@@ -11682,7 +11690,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(outlined_label()).is_focused(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                 );
             });
         }
@@ -11697,7 +11705,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(outlined_label())
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.primary,
+                    |theme| theme.color_scheme.primary(),
                 );
             });
         }
@@ -11717,7 +11725,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(outlined_error_label()),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                 );
             });
         }
@@ -11730,7 +11738,7 @@ pub(crate) mod tests {
                 check_label_color(
                     tester,
                     BuildInputDecorator::new(outlined_error_label()).is_focused(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                 );
             });
         }
@@ -11758,7 +11766,7 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(outlined_error_label())
                         .is_focused(true)
                         .is_hovering(true),
-                    |theme| theme.color_scheme.error,
+                    |theme| theme.color_scheme.error(),
                 );
             });
         }
@@ -12502,7 +12510,7 @@ pub(crate) mod tests {
         }
 
         fn disabled_on_surface(theme: &ThemeData) -> Color {
-            theme.color_scheme.on_surface.with_opacity(0.38)
+            theme.color_scheme.on_surface().with_opacity(0.38)
         }
 
         /// Declares the "hint and input align vertically" cases of one decoration kind.
@@ -13287,7 +13295,7 @@ pub(crate) mod tests {
             let theme = decorator_theme(tester);
             assert_eq!(
                 text_style(tester, ERROR_TEXT),
-                body_small_with(&theme, theme.color_scheme.error)
+                body_small_with(&theme, theme.color_scheme.error())
             );
             assert_eq!(
                 text_style(tester, COUNTER_TEXT),
@@ -13300,7 +13308,7 @@ pub(crate) mod tests {
         }
 
         fn disabled_on_surface(theme: &ThemeData) -> Color {
-            theme.color_scheme.on_surface.with_opacity(0.38)
+            theme.color_scheme.on_surface().with_opacity(0.38)
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration helper/counter/error - for filled
@@ -13849,7 +13857,7 @@ pub(crate) mod tests {
                 let theme = decorator_theme(tester);
                 assert_eq!(
                     text_style(tester, ERROR_TEXT),
-                    body_small_with(&theme, theme.color_scheme.error)
+                    body_small_with(&theme, theme.color_scheme.error())
                 );
             });
         }
@@ -14053,7 +14061,7 @@ pub(crate) mod tests {
         }
 
         fn error(theme: &ThemeData) -> Color {
-            theme.color_scheme.error
+            theme.color_scheme.error()
         }
 
         fn on_error_container(theme: &ThemeData) -> Color {
@@ -15009,7 +15017,7 @@ pub(crate) mod tests {
                         .hint_style(theme_style.clone())
                         .error_style(theme_style.clone())
                         .is_dense(true)
-                        .content_padding(EdgeInsets::all(1.0).into())
+                        .content_padding(EdgeInsets::all(1.0))
                         .prefix_style(theme_style.clone())
                         .suffix_style(theme_style.clone())
                         .counter_style(theme_style.clone())
@@ -15055,7 +15063,7 @@ pub(crate) mod tests {
                     .hint_style(decoration_style.clone())
                     .error_style(decoration_style.clone())
                     .is_dense(false)
-                    .content_padding(EdgeInsets::all(4.0).into())
+                    .content_padding(EdgeInsets::all(4.0))
                     .prefix_style(decoration_style.clone())
                     .suffix_style(decoration_style.clone())
                     .counter_style(decoration_style.clone())
@@ -15073,7 +15081,7 @@ pub(crate) mod tests {
                             .error_style(theme_style.clone())
                             .error_max_lines(4)
                             .is_dense(true)
-                            .content_padding(EdgeInsets::all(1.0).into())
+                            .content_padding(EdgeInsets::all(1.0))
                             .prefix_style(theme_style.clone())
                             .suffix_style(theme_style.clone())
                             .counter_style(theme_style.clone())
@@ -15584,7 +15592,7 @@ pub(crate) mod tests {
                     InputDecoration::new()
                         .label_text("Label Text")
                         .helper_text("Helper Text")
-                        .content_padding(EdgeInsets::ZERO.into()),
+                        .content_padding(EdgeInsets::ZERO),
                 );
             });
         }
@@ -15694,12 +15702,12 @@ pub(crate) mod tests {
                 "isDense and isCollapsed" => InputDecoration::new()
                     .is_dense(true)
                     .is_collapsed(true)
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .border(InputBorderRef::none())
                     .hint_text(HINT_TEXT),
                 "isDense with zero content padding" => InputDecoration::new()
                     .is_dense(true)
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .hint_text(HINT_TEXT),
                 "isCollapsed" => InputDecoration::new()
                     .is_collapsed(true)
@@ -15868,9 +15876,7 @@ pub(crate) mod tests {
                                                         InputDecoration::new()
                                                             .is_dense(true)
                                                             .is_collapsed(true)
-                                                            .content_padding(
-                                                                EdgeInsets::ZERO.into(),
-                                                            )
+                                                            .content_padding(EdgeInsets::ZERO)
                                                             .border(InputBorderRef::none())
                                                             .hint_text(HINT_TEXT),
                                                     )
@@ -16019,7 +16025,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let decoration_with_hint = || {
                     InputDecoration::new()
-                        .content_padding(EdgeInsets::ZERO.into())
+                        .content_padding(EdgeInsets::ZERO)
                         .hint_text("Hint")
                 };
                 const HINT_TEXT_WIDTH: f64 = 66.0;
@@ -16056,7 +16062,7 @@ pub(crate) mod tests {
         fn the_intrinsic_width_ignores_the_hint_when_not_empty_and_not_maintaining_its_size() {
             test_widgets(|tester| {
                 let decoration_with_hint = InputDecoration::new()
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .hint_text("Hint")
                     .maintain_hint_size(false);
                 const CONTENT_WIDTH: f64 = 20.0;
@@ -16080,7 +16086,7 @@ pub(crate) mod tests {
         fn the_intrinsic_width_keeps_the_hint_width_when_maintaining_its_size() {
             test_widgets(|tester| {
                 let decoration_with_hint = InputDecoration::new()
-                    .content_padding(EdgeInsets::ZERO.into())
+                    .content_padding(EdgeInsets::ZERO)
                     .hint_text("Hint");
                 const CONTENT_WIDTH: f64 = 20.0;
                 const HINT_TEXT_WIDTH: f64 = 66.0;
@@ -16098,7 +16104,7 @@ pub(crate) mod tests {
 
         fn decoration_with_label(maintain_label_size: bool) -> InputDecoration {
             InputDecoration::new()
-                .content_padding(EdgeInsets::ZERO.into())
+                .content_padding(EdgeInsets::ZERO)
                 .label(SizedBox::new().width(30.0))
                 .maintain_label_size(maintain_label_size)
         }
@@ -16479,9 +16485,7 @@ pub(crate) mod tests {
                     tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
-                            .content_padding(
-                                EdgeInsetsDirectional::only(40.0, 12.0, 0.0, 12.0).into(),
-                            )
+                            .content_padding(EdgeInsetsDirectional::only(40.0, 12.0, 0.0, 12.0))
                             .icon(icon(Icons::insert_link()))
                             .label_text(LABEL_TEXT)
                             .hint_text(HINT_TEXT)
@@ -16525,9 +16529,8 @@ pub(crate) mod tests {
                 pump(
                     tester,
                     local(
-                        InputDecorationThemeData::new().content_padding(
-                            EdgeInsetsDirectional::only(START, TOP, END, BOTTOM).into(),
-                        ),
+                        InputDecorationThemeData::new()
+                            .content_padding(EdgeInsetsDirectional::only(START, TOP, END, BOTTOM)),
                         InputDecoration::new().label_text(LABEL_TEXT),
                     ),
                 );
@@ -20367,7 +20370,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let theme = m2(&tester.cell.borrow());
                 // Dart's `withOpacity`, deprecated there too.
-                let enabled_color = theme.color_scheme.on_surface.with_opacity(0.38);
+                let enabled_color = theme.color_scheme.on_surface().with_opacity(0.38);
                 let disabled_color = theme.disabled_color;
                 let hover_color =
                     Color::alpha_blend(theme.hover_color.with_opacity(0.12), enabled_color);
@@ -20398,14 +20401,14 @@ pub(crate) mod tests {
                     .is_focused(true)
                     .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(tester), theme.color_scheme.primary);
+                assert_eq!(get_border_color(tester), theme.color_scheme.primary());
 
                 // Error
                 M2::new(InputDecoration::new().error_text("Nope"))
                     .theme(m2)
                     .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(tester), theme.color_scheme.error);
+                assert_eq!(get_border_color(tester), theme.color_scheme.error());
 
                 // Disabled
                 M2::new(InputDecoration::new().enabled(false))

@@ -113,7 +113,8 @@ impl MaterialBannerThemeData {
     }
 
     /// Dart `MaterialBannerThemeData(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> MaterialBannerThemeData {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> MaterialBannerThemeData {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }
@@ -121,8 +122,9 @@ impl MaterialBannerThemeData {
     /// Dart `MaterialBannerThemeData(leadingPadding:)`.
     pub fn leading_padding(
         mut self,
-        leading_padding: EdgeInsetsGeometry,
+        leading_padding: impl Into<EdgeInsetsGeometry>,
     ) -> MaterialBannerThemeData {
+        let leading_padding = leading_padding.into();
         self.leading_padding = Some(leading_padding);
         self
     }

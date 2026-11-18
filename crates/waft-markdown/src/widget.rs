@@ -277,9 +277,7 @@ impl Layout {
                 physics,
                 shrink_wrap,
             } => {
-                let mut list = ListView::new()
-                    .padding((*padding).into())
-                    .shrink_wrap(*shrink_wrap);
+                let mut list = ListView::new().padding(*padding).shrink_wrap(*shrink_wrap);
                 if let Some(controller) = controller {
                     list = list.controller(controller.clone());
                 }
@@ -477,7 +475,7 @@ fn main() {}
         let item_key: KeyRef = key.clone().into();
         let panel = SizedBox::new().width(width).height(600.0).child(
             ListView::new().children([
-                Padding::new(EdgeInsets::all(8.0).into())
+                Padding::new(EdgeInsets::all(8.0))
                     .key(item_key)
                     .child(child)
                     .into_widget(),

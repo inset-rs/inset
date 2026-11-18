@@ -290,7 +290,8 @@ impl CupertinoListSection {
     }
 
     /// Dart `CupertinoListSection(margin:)`.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> CupertinoListSection {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> CupertinoListSection {
+        let margin = margin.into();
         self.margin = margin;
         self.margin_is_default = false;
         self

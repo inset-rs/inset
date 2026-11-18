@@ -105,7 +105,8 @@ impl BadgeThemeData {
     }
 
     /// Dart `BadgeThemeData(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> BadgeThemeData {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> BadgeThemeData {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

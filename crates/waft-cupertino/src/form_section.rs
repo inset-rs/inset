@@ -155,7 +155,8 @@ impl CupertinoFormSection {
     }
 
     /// Dart `CupertinoFormSection(margin:)`.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> CupertinoFormSection {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> CupertinoFormSection {
+        let margin = margin.into();
         self.margin = margin;
         self
     }

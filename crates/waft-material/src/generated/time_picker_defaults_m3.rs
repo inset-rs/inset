@@ -44,7 +44,8 @@ impl TimePickerDefaultsM3 {
 
     fn hour_minute_text_color_property(&self, app: &mut App) -> Rc<dyn Fn(&WidgetStates) -> Color> {
         let colors = self.context.colors(app);
-        let (on_primary_container, on_surface) = (colors.on_primary_container(), colors.on_surface);
+        let (on_primary_container, on_surface) =
+            (colors.on_primary_container(), colors.on_surface());
         Rc::new(move |states| {
             if states.contains(&WidgetState::Selected) {
                 on_primary_container
@@ -136,7 +137,7 @@ impl TimePickerDefaults for TimePickerDefaultsM3 {
     }
 
     fn dial_hand_color(&self, app: &mut App) -> AnyColor {
-        self.context.colors(app).primary.into()
+        self.context.colors(app).primary().into()
     }
 
     fn dial_size(&self, _app: &mut App) -> Size {
@@ -157,7 +158,7 @@ impl TimePickerDefaults for TimePickerDefaultsM3 {
 
     fn dial_text_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
-        let (on_primary, on_surface) = (colors.on_primary, colors.on_surface);
+        let (on_primary, on_surface) = (colors.on_primary(), colors.on_surface());
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
                 on_primary
@@ -181,7 +182,7 @@ impl TimePickerDefaults for TimePickerDefaultsM3 {
     }
 
     fn entry_mode_icon_color(&self, app: &mut App) -> AnyColor {
-        self.context.colors(app).on_surface.into()
+        self.context.colors(app).on_surface().into()
     }
 
     fn help_text_style(&self, app: &mut App) -> AnyTextStyle {
@@ -208,7 +209,7 @@ impl TimePickerDefaults for TimePickerDefaultsM3 {
             colors.primary_container(),
             colors.on_primary_container(),
             colors.surface_container_highest(),
-            colors.on_surface,
+            colors.on_surface(),
         );
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
@@ -289,10 +290,10 @@ impl TimePickerDefaults for TimePickerDefaultsM3 {
             .hour_minute_text_style(app)
             .value()
             .copy_with()
-            .color(self.context.colors(app).on_surface.with_opacity(0.36));
+            .color(self.context.colors(app).on_surface().with_opacity(0.36));
         let colors = self.context.colors(app);
         let (primary_container, error, primary) =
-            (colors.primary_container(), colors.error, colors.primary);
+            (colors.primary_container(), colors.error(), colors.primary());
         InputDecorationThemeData::new()
             .content_padding(EdgeInsetsGeometry::from(EdgeInsets::ZERO))
             .filled(true)
@@ -349,7 +350,7 @@ impl TimePickerDefaults for TimePickerDefaultsM3 {
         app: &mut App,
     ) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         Some(Rc::new(WidgetStatePropertyAll::new(Some(
-            self.context.colors(app).on_surface,
+            self.context.colors(app).on_surface(),
         ))))
     }
 

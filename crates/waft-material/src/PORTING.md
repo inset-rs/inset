@@ -147,7 +147,11 @@ Ported against: 34b89b2086d4
 ## color_scheme.rs → color_scheme.dart
 - Change: `ColorScheme`'s colours are plain `Color`s; a `MaterialColor` given to it, as `from_swatch` gives its `primary_swatch`, is stored as its primary colour.
   Reason: language — dart:ui `Color` is a value here and cannot be subclassed, and only the fields the framework resolves or type-checks carry an `AnyColor` (waft-painting's colors.rs entry).
-  Affect: `ColorScheme::from_swatch().build().primary` equals `Colors::BLUE.primary()`, where Dart's `primary` is the swatch itself and equals only `Colors.blue`.
+  Affect: `ColorScheme::from_swatch().build().primary()` equals `Colors::BLUE.primary()`, where Dart's `primary` is the swatch itself and equals only `Colors.blue`.
+
+- Change: every colour of `ColorScheme` is a method (`scheme.primary()`), and its fields are private, where Dart reads properties.
+  Reason: language — a Dart property has no Rust field-or-method duality, and a private field behind a getter keeps Flutter's fallback colour inside the type.
+  Affect: an app reads every colour with a call; the nullable ones keep Flutter's fallbacks, so `surface_container_high()` answers a colour even when the scheme never set one.
 
 ## typography.rs → typography.dart
 - Change: `Typography`'s text-theme constants (`english_like2014()`, `black_mountain_view()` and the rest) are functions that build a new `TextTheme` on each call, and each `Typography` holds its own shared copy of the five it was given.

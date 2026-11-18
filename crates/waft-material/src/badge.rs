@@ -228,7 +228,8 @@ impl Badge {
     }
 
     /// Dart `Badge(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> Badge {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> Badge {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }
@@ -962,7 +963,7 @@ pub(crate) mod tests {
                     .clone()
                     .expect("a label small style")
                     .copy_with()
-                    .color(theme.color_scheme.on_error)
+                    .color(theme.color_scheme.on_error())
             );
 
             // default badge alignment = AlignmentDirection.topEnd
@@ -984,7 +985,7 @@ pub(crate) mod tests {
             assert!(badge_paints_rrect(
                 tester,
                 stadium(12.0, -4.0, 31.5, 12.0, 8.0),
-                Some(theme.color_scheme.error),
+                Some(theme.color_scheme.error()),
             ));
         });
     }
@@ -1013,7 +1014,7 @@ pub(crate) mod tests {
                     .clone()
                     .expect("a label small style")
                     .copy_with()
-                    .color(theme.color_scheme.on_error)
+                    .color(theme.color_scheme.on_error())
             );
 
             assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
@@ -1027,7 +1028,7 @@ pub(crate) mod tests {
             assert!(badge_paints_rrect(
                 tester,
                 stadium(-4.0, -4.0, 15.5, 12.0, 8.0),
-                Some(theme.color_scheme.error),
+                Some(theme.color_scheme.error()),
             ));
         });
     }
@@ -1075,7 +1076,7 @@ pub(crate) mod tests {
             assert!(badge_paints_rrect(
                 tester,
                 stadium(12.0, -4.0, 12.0 + badge_width, 12.0, 8.0),
-                Some(theme.color_scheme.error),
+                Some(theme.color_scheme.error()),
             ));
 
             pump_app(tester, m3, |_app| build_frame(1000, &seen));
@@ -1107,7 +1108,7 @@ pub(crate) mod tests {
             assert!(badge_paints_rrect(
                 tester,
                 stadium(18.0, 0.0, 24.0, 6.0, 3.0),
-                Some(colors.error),
+                Some(colors.error()),
             ));
         });
     }
@@ -1139,7 +1140,7 @@ pub(crate) mod tests {
             assert!(badge_paints_rrect(
                 tester,
                 stadium(0.0, 0.0, 6.0, 6.0, 3.0),
-                Some(colors.error),
+                Some(colors.error()),
             ));
         });
     }

@@ -1299,7 +1299,8 @@ impl AnimatedContainer {
     }
 
     /// Dart `AnimatedContainer(padding:)`; must be non-negative.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> AnimatedContainer {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> AnimatedContainer {
+        let padding = padding.into();
         debug_assert!(padding.is_non_negative());
         self.padding = Some(padding);
         self
@@ -1357,7 +1358,8 @@ impl AnimatedContainer {
     }
 
     /// Dart `AnimatedContainer(margin:)`; must be non-negative.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> AnimatedContainer {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> AnimatedContainer {
+        let margin = margin.into();
         debug_assert!(margin.is_non_negative());
         self.margin = Some(margin);
         self
@@ -1616,7 +1618,8 @@ pub struct AnimatedPadding {
 impl AnimatedPadding {
     /// Creates a widget that insets its child by a value that animates
     /// implicitly.
-    pub fn new(padding: EdgeInsetsGeometry, duration: Duration) -> AnimatedPadding {
+    pub fn new(padding: impl Into<EdgeInsetsGeometry>, duration: Duration) -> AnimatedPadding {
+        let padding = padding.into();
         debug_assert!(padding.is_non_negative());
         AnimatedPadding {
             implicitly_animated_widget: ImplicitlyAnimatedWidgetData::new(duration),

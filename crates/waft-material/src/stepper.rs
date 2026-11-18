@@ -505,7 +505,7 @@ impl StepperState {
             .map(|connector_color| connector_color.resolve(&states));
         resolved_connector_color.unwrap_or_else(|| {
             if is_active {
-                color_scheme.primary
+                color_scheme.primary()
             } else {
                 Colors::GREY.shade400()
             }
@@ -610,12 +610,12 @@ impl StepperState {
         }
         if !self.is_dark(app, context) {
             if is_active {
-                color_scheme.primary
+                color_scheme.primary()
             } else {
-                color_scheme.on_surface.with_opacity(0.38)
+                color_scheme.on_surface().with_opacity(0.38)
             }
         } else if is_active {
-            color_scheme.secondary
+            color_scheme.secondary()
         } else {
             color_scheme.background()
         }
@@ -662,8 +662,7 @@ impl StepperState {
         Padding::new(
             stepper
                 .step_icon_margin
-                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0))
-                .into(),
+                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0)),
         )
         .child(
             SizedBox::new()
@@ -710,8 +709,7 @@ impl StepperState {
         Padding::new(
             stepper
                 .step_icon_margin
-                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0))
-                .into(),
+                .unwrap_or(EdgeInsets::symmetric(8.0, 0.0)),
         )
         .child(
             SizedBox::new()
@@ -858,7 +856,7 @@ impl StepperState {
         if let Some(subtitle) = stepper.steps[index].subtitle.clone() {
             let style = self.subtitle_style(app, context, index);
             children.push(
-                Padding::new(EdgeInsets::only(0.0, 2.0, 0.0, 0.0).into())
+                Padding::new(EdgeInsets::only(0.0, 2.0, 0.0, 0.0))
                     .child(
                         AnimatedDefaultTextStyle::new(subtitle, style, K_THEME_ANIMATION_DURATION)
                             .curve(waft_animation::Curves::fast_out_slow_in()),
@@ -922,7 +920,7 @@ impl StepperState {
                         .children(vec![first_line, icon, last_line])
                         .into_widget(),
                     Expanded::new(
-                        Padding::new(EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0).into())
+                        Padding::new(EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0))
                             .child(header_text),
                     )
                     .into_widget(),
@@ -972,9 +970,9 @@ impl StepperState {
                 if states.contains(&WidgetState::Disabled) {
                     None
                 } else if is_dark {
-                    Some(foreground_color_scheme.on_surface)
+                    Some(foreground_color_scheme.on_surface())
                 } else {
-                    Some(foreground_color_scheme.on_primary)
+                    Some(foreground_color_scheme.on_primary())
                 }
             });
         let continue_background_color: WidgetStatePropertyRef<Option<Color>> =
@@ -982,7 +980,7 @@ impl StepperState {
                 if is_dark || states.contains(&WidgetState::Disabled) {
                     None
                 } else {
-                    Some(color_scheme.primary)
+                    Some(color_scheme.primary())
                 }
             });
         let continue_style = ButtonStyle::new()
@@ -1020,10 +1018,10 @@ impl StepperState {
         )
         .style(cancel_style);
 
-        Padding::new(EdgeInsets::only(0.0, 16.0, 0.0, 0.0).into())
+        Padding::new(EdgeInsets::only(0.0, 16.0, 0.0, 0.0))
             .child(SizedBox::new().height(48.0).child(Row::new().children(vec![
                         continue_button.into_widget(),
-                        Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0).into())
+                        Padding::new(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
                             .child(cancel_button)
                             .into_widget(),
                     ])))
@@ -1180,7 +1178,7 @@ impl StepperState {
             let icon = self.build_icon(app, context, index);
             let label = self.build_label_text(app, context, index);
             let header_text = self.build_header_text(app, context, index);
-            let margin = stepper.step_icon_margin.map_or_else(
+            let margin: EdgeInsetsGeometry = stepper.step_icon_margin.map_or_else(
                 || EdgeInsetsDirectional::only(12.0, 0.0, 0.0, 0.0).into(),
                 |margin| margin.into(),
             );
@@ -1858,7 +1856,7 @@ mod tests {
                 return Container::new().into_widget();
             };
             Container::new()
-                .margin(EdgeInsets::only(0.0, 16.0, 0.0, 0.0).into())
+                .margin(EdgeInsets::only(0.0, 16.0, 0.0, 0.0))
                 .child(SizedBox::new().height(48.0).child(Row::new().children(vec![
                             TextButton::new(
                                 details.on_step_continue.clone(),
@@ -1866,7 +1864,7 @@ mod tests {
                             )
                             .into_widget(),
                             Container::new()
-                                .margin(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0).into())
+                                .margin(EdgeInsetsDirectional::only(8.0, 0.0, 0.0, 0.0))
                                 .child(TextButton::new(
                                     details.on_step_cancel.clone(),
                                     Some(Text::new(cancel_label)),
@@ -2263,7 +2261,7 @@ mod tests {
     fn material3_stepper_enabled_button_styles() {
         test_widgets(|tester| {
             let theme_light = light_theme(tester);
-            let light_primary = theme_light.color_scheme.primary;
+            let light_primary = theme_light.color_scheme.primary();
             pump_button_frame(tester, theme_light, true);
 
             const CONTINUE_STR: &str = "Continue";
@@ -2289,7 +2287,7 @@ mod tests {
             );
 
             let theme_dark = ThemeData::dark(&tester.cell.borrow(), None);
-            let dark_on_surface = theme_dark.color_scheme.on_surface;
+            let dark_on_surface = theme_dark.color_scheme.on_surface();
             pump_button_frame(tester, theme_dark, true);
             // Complete the theme animation.
             tester.pump_and_settle();
@@ -2370,7 +2368,7 @@ mod tests {
                 theme_light,
                 "Continue",
                 "Cancel",
-                colors_light.on_surface.with_opacity(0.38),
+                colors_light.on_surface().with_opacity(0.38),
             );
 
             let theme_dark = ThemeData::dark(&tester.cell.borrow(), None);
@@ -2380,7 +2378,7 @@ mod tests {
                 theme_dark,
                 "Continue",
                 "Cancel",
-                colors_dark.on_surface.with_opacity(0.38),
+                colors_dark.on_surface().with_opacity(0.38),
             );
         });
     }
@@ -2460,12 +2458,12 @@ mod tests {
             // Light theme
             let light = light_theme(tester).color_scheme.clone();
             build_frame(tester, true, Brightness::Light);
-            assert_eq!(circle_color(tester, "1"), Some(light.primary));
+            assert_eq!(circle_color(tester, "1"), Some(light.primary()));
             build_frame(tester, false, Brightness::Light);
             tester.pump_and_settle();
             assert_eq!(
                 circle_color(tester, "1"),
-                Some(light.on_surface.with_opacity(0.38))
+                Some(light.on_surface().with_opacity(0.38))
             );
 
             // Dark theme
@@ -2474,7 +2472,7 @@ mod tests {
                 .clone();
             build_frame(tester, true, Brightness::Dark);
             tester.pump_and_settle();
-            assert_eq!(circle_color(tester, "1"), Some(dark.secondary));
+            assert_eq!(circle_color(tester, "1"), Some(dark.secondary()));
             build_frame(tester, false, Brightness::Dark);
             tester.pump_and_settle();
             assert_eq!(circle_color(tester, "1"), Some(dark.background()));

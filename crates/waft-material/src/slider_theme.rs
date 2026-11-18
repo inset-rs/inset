@@ -1517,7 +1517,7 @@ mod tests {
                         RRect::from_ltrb_and_corners(
                             24.0, 292.0, 356.4, 308.0, outer, inner, inner, outer,
                         ),
-                        Some(color_scheme.primary),
+                        Some(color_scheme.primary()),
                     ),
                     // Inctive track.
                     PaintCall::rrect_at(
@@ -1567,7 +1567,7 @@ mod tests {
                     // Inctive track.
                     PaintCall::rrect_at(
                         RRect::from_ltrbr(24.0, 297.0, 364.4, 303.0, active_track_corner_radius,),
-                        Some(color_scheme.primary),
+                        Some(color_scheme.primary()),
                     ),
                 ],
             ));
@@ -1829,22 +1829,22 @@ mod tests {
             let theme = ThemeData::builder().build(&tester.cell.borrow());
             let color_scheme = theme.color_scheme.clone();
             let colors = DefaultColors {
-                active_track: color_scheme.primary,
+                active_track: color_scheme.primary(),
                 inactive_track: color_scheme.surface_container_highest(),
-                secondary_active_track: color_scheme.primary.with_opacity(0.54),
-                disabled_active_track: color_scheme.on_surface.with_opacity(0.38),
-                disabled_inactive_track: color_scheme.on_surface.with_opacity(0.12),
-                disabled_secondary_active_track: color_scheme.on_surface.with_opacity(0.12),
+                secondary_active_track: color_scheme.primary().with_opacity(0.54),
+                disabled_active_track: color_scheme.on_surface().with_opacity(0.38),
+                disabled_inactive_track: color_scheme.on_surface().with_opacity(0.12),
+                disabled_secondary_active_track: color_scheme.on_surface().with_opacity(0.12),
                 shadow: color_scheme.shadow(),
-                thumb: color_scheme.primary,
+                thumb: color_scheme.primary(),
                 disabled_thumb: Color::alpha_blend(
-                    color_scheme.on_surface.with_opacity(0.38),
-                    color_scheme.surface,
+                    color_scheme.on_surface().with_opacity(0.38),
+                    color_scheme.surface(),
                 ),
-                active_tick_mark: color_scheme.on_primary.with_opacity(0.38),
+                active_tick_mark: color_scheme.on_primary().with_opacity(0.38),
                 inactive_tick_mark: color_scheme.on_surface_variant().with_opacity(0.38),
-                disabled_active_tick_mark: color_scheme.on_surface.with_opacity(0.38),
-                disabled_inactive_tick_mark: color_scheme.on_surface.with_opacity(0.38),
+                disabled_active_tick_mark: color_scheme.on_surface().with_opacity(0.38),
+                disabled_inactive_tick_mark: color_scheme.on_surface().with_opacity(0.38),
             };
             let app_theme = default_theme(tester);
             let build_app = |divisions: Option<i32>, enabled: bool| {
@@ -1874,26 +1874,26 @@ mod tests {
                 .build(&tester.cell.borrow());
             let color_scheme = theme.color_scheme.clone();
             let colors = DefaultColors {
-                active_track: color_scheme.primary,
-                inactive_track: color_scheme.primary.with_opacity(0.24),
-                secondary_active_track: color_scheme.primary.with_opacity(0.54),
-                disabled_active_track: color_scheme.on_surface.with_opacity(0.32),
-                disabled_inactive_track: color_scheme.on_surface.with_opacity(0.12),
-                disabled_secondary_active_track: color_scheme.on_surface.with_opacity(0.12),
+                active_track: color_scheme.primary(),
+                inactive_track: color_scheme.primary().with_opacity(0.24),
+                secondary_active_track: color_scheme.primary().with_opacity(0.54),
+                disabled_active_track: color_scheme.on_surface().with_opacity(0.32),
+                disabled_inactive_track: color_scheme.on_surface().with_opacity(0.12),
+                disabled_secondary_active_track: color_scheme.on_surface().with_opacity(0.12),
                 shadow: color_scheme.shadow(),
-                thumb: color_scheme.primary,
+                thumb: color_scheme.primary(),
                 disabled_thumb: Color::alpha_blend(
-                    color_scheme.on_surface.with_opacity(0.38),
-                    color_scheme.surface,
+                    color_scheme.on_surface().with_opacity(0.38),
+                    color_scheme.surface(),
                 ),
-                active_tick_mark: color_scheme.on_primary.with_opacity(0.54),
-                inactive_tick_mark: color_scheme.primary.with_opacity(0.54),
-                disabled_active_tick_mark: color_scheme.on_primary.with_opacity(0.12),
-                disabled_inactive_tick_mark: color_scheme.on_surface.with_opacity(0.12),
+                active_tick_mark: color_scheme.on_primary().with_opacity(0.54),
+                inactive_tick_mark: color_scheme.primary().with_opacity(0.54),
+                disabled_active_tick_mark: color_scheme.on_primary().with_opacity(0.12),
+                disabled_inactive_tick_mark: color_scheme.on_surface().with_opacity(0.12),
             };
             let value_indicator_color = Color::alpha_blend(
-                color_scheme.on_surface.with_opacity(0.60),
-                color_scheme.surface.with_opacity(0.90),
+                color_scheme.on_surface().with_opacity(0.60),
+                color_scheme.surface().with_opacity(0.90),
             );
             let value = Rc::new(Cell::new(0.45));
             let build_app = |divisions: Option<i32>, enabled: bool| {
@@ -2576,7 +2576,7 @@ mod tests {
                 .platform(TargetPlatform::Android)
                 .build(&tester.cell.borrow())
                 .color_scheme
-                .primary;
+                .primary();
             default_value_indicator_color(
                 tester,
                 |tester| {
@@ -3005,7 +3005,7 @@ mod tests {
                         .inactive_track_color(Colors::TRANSPARENT),
                 )
                 .build(&tester.cell.borrow());
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             let build_slider = |value: f64| {
                 material_app(
                     theme.clone(),

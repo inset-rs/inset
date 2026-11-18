@@ -1213,13 +1213,13 @@ impl FloatingActionButtonThemeDataGetters for FabDefaultsM2 {
     fn foreground_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_secondary)
+        Some(colors.on_secondary())
     }
 
     fn background_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.secondary)
+        Some(colors.secondary())
     }
 
     fn focus_color(&self, app: &mut App) -> Option<Color> {
@@ -2445,9 +2445,9 @@ mod tests {
             ));
 
             raw_button(tester, |button| {
-                assert_eq!(button.fill_color, Some(color_scheme.secondary));
+                assert_eq!(button.fill_color, Some(color_scheme.secondary()));
             });
-            assert_eq!(icon_color(tester), Some(color_scheme.on_secondary));
+            assert_eq!(icon_color(tester), Some(color_scheme.on_secondary()));
 
             // These defaults come directly from the [FloatingActionButton].
             raw_button(tester, |button| {
@@ -2725,7 +2725,7 @@ mod tests {
             FloatingActionButtonThemeData::new()
                 .extended_size_constraints(constraints)
                 .extended_icon_label_spacing(icon_label_spacing)
-                .extended_padding(padding.into())
+                .extended_padding(padding)
                 .extended_text_style(text_style.clone()),
             |fab| fab,
         );
@@ -2773,7 +2773,7 @@ mod tests {
             use_material3,
             FloatingActionButtonThemeData::new()
                 .extended_icon_label_spacing(25.0)
-                .extended_padding(EdgeInsetsDirectional::only(7.0, 0.0, 8.0, 0.0).into())
+                .extended_padding(EdgeInsetsDirectional::only(7.0, 0.0, 8.0, 0.0))
                 .extended_text_style(TextStyle::new().letter_spacing(3.0)),
             |fab| {
                 fab.extended_icon_label_spacing(icon_label_spacing)

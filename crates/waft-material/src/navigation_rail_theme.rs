@@ -551,7 +551,7 @@ mod tests {
 
             assert_eq!(
                 rail_material(tester, |material| material.color),
-                Some(theme.color_scheme.surface)
+                Some(theme.color_scheme.surface())
             );
             assert_eq!(rail_material(tester, |material| material.elevation), 0.0);
             assert_eq!(destination_size(tester).width(), 80.0);
@@ -617,20 +617,20 @@ mod tests {
 
             assert_eq!(
                 rail_material(tester, |material| material.color),
-                Some(theme.color_scheme.surface)
+                Some(theme.color_scheme.surface())
             );
             assert_eq!(rail_material(tester, |material| material.elevation), 0.0);
             assert_eq!(destination_size(tester).width(), 72.0);
             assert_eq!(selected_icon_theme(tester).size, Some(24.0));
             assert_eq!(
                 selected_icon_theme(tester).color,
-                Some(theme.color_scheme.primary.into())
+                Some(theme.color_scheme.primary().into())
             );
             assert_eq!(selected_icon_theme(tester).opacity, Some(1.0));
             assert_eq!(unselected_icon_theme(tester).size, Some(24.0));
             assert_eq!(
                 unselected_icon_theme(tester).color,
-                Some(theme.color_scheme.on_surface.into())
+                Some(theme.color_scheme.on_surface().into())
             );
             assert_eq!(unselected_icon_theme(tester).opacity, Some(0.64));
             assert_eq!(selected_label_style(tester).font_size, Some(14.0));

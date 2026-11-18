@@ -134,7 +134,7 @@ impl ButtonStyleGetters for MenuButtonDefaultsM3 {
     fn foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
@@ -155,7 +155,7 @@ impl ButtonStyleGetters for MenuButtonDefaultsM3 {
     fn icon_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
@@ -197,7 +197,7 @@ impl ButtonStyleGetters for MenuButtonDefaultsM3 {
     fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Pressed) {
                 return Some(on_surface.with_opacity(0.1));

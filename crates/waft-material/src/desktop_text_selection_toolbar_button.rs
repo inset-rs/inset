@@ -64,7 +64,7 @@ impl DesktopTextSelectionToolbarButton {
         on_pressed: Option<Listener>,
         text: impl Into<String>,
     ) -> DesktopTextSelectionToolbarButton {
-        let color = if Theme::of(app, context).color_scheme.brightness == Brightness::Dark {
+        let color = if Theme::of(app, context).color_scheme.brightness() == Brightness::Dark {
             Colors::WHITE
         } else {
             Colors::BLACK87
@@ -94,7 +94,7 @@ impl StatelessWidget for DesktopTextSelectionToolbarButton {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         // TODO(hansmuller): Should be colorScheme.onSurface
         let theme = Theme::of(app, context);
-        let is_dark = theme.color_scheme.brightness == Brightness::Dark;
+        let is_dark = theme.color_scheme.brightness() == Brightness::Dark;
         let foreground_color = if is_dark {
             Colors::WHITE
         } else {

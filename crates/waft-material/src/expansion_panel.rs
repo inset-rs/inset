@@ -497,14 +497,13 @@ impl ExpansionPanelListState {
         if let Some(highlight_color) = child.highlight_color {
             expand_icon = expand_icon.highlight_color(highlight_color);
         }
-        let mut expand_icon_padded =
-            Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 8.0, 0.0).into())
-                .child(
-                    IgnorePointer::new()
-                        .ignoring(child.can_tap_on_header)
-                        .child(expand_icon),
-                )
-                .into_widget();
+        let mut expand_icon_padded = Padding::new(EdgeInsetsDirectional::only(0.0, 0.0, 8.0, 0.0))
+            .child(
+                IgnorePointer::new()
+                    .ignoring(child.can_tap_on_header)
+                    .child(expand_icon),
+            )
+            .into_widget();
 
         if !child.can_tap_on_header {
             let localizations = <dyn MaterialLocalizations>::of(app, context);
@@ -524,9 +523,9 @@ impl ExpansionPanelListState {
                     AnimatedContainer::new(animation_duration)
                         .curve(Curves::fast_out_slow_in())
                         .margin(if expanded {
-                            expanded_header_padding.into()
+                            expanded_header_padding
                         } else {
-                            EdgeInsets::ZERO.into()
+                            EdgeInsets::ZERO
                         })
                         .child(
                             ConstrainedBox::new(
@@ -2287,7 +2286,7 @@ mod tests {
                 ExpansionPanelList::new().children([ExpansionPanel::new(
                     fixed_header(|| {
                         Container::new()
-                            .padding(EdgeInsets::all(16.0).into())
+                            .padding(EdgeInsets::all(16.0))
                             .alignment(AlignmentGeometry::CENTER_LEFT)
                             .child(Text::new("Panel 1"))
                             .into_widget()

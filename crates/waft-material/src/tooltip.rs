@@ -374,13 +374,15 @@ impl Tooltip {
     }
 
     /// Dart `Tooltip(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> Tooltip {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> Tooltip {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }
 
     /// Dart `Tooltip(margin:)`.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> Tooltip {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> Tooltip {
+        let margin = margin.into();
         self.margin = Some(margin);
         self
     }

@@ -1435,7 +1435,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
                 .unwrap_or_else(|| {
                     Theme::of(app, context)
                         .color_scheme
-                        .on_surface
+                        .on_surface()
                         .with_opacity(0.12)
                 });
 
@@ -1497,10 +1497,12 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
                 // field content should be aligned. The text field has a horizontal padding of 16 pixels.
                 // To conform with the 16 pixels padding, a 4 pixels padding is added in front of the item label.
                 .child(
-                    Padding::new(
-                        EdgeInsetsDirectional::only(effective_input_start_gap, 0.0, 0.0, 0.0)
-                            .into(),
-                    )
+                    Padding::new(EdgeInsetsDirectional::only(
+                        effective_input_start_gap,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ))
                     .child(label),
                 );
             if options.enable_scroll_to_highlight {
@@ -2746,7 +2748,7 @@ impl DropdownMenuDefaultsM3 {
     fn new(app: &mut App, context: BuildContext) -> DropdownMenuDefaultsM3 {
         let disabled_color = Theme::of(app, context)
             .color_scheme
-            .on_surface
+            .on_surface()
             .with_opacity(0.38);
         DropdownMenuDefaultsM3 {
             dropdown_menu_theme_data: DropdownMenuThemeData::new().disabled_color(disabled_color),
@@ -2986,7 +2988,7 @@ pub(crate) mod tests {
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn is_item_highlighted(tester: &WidgetTester, theme: &ThemeData, label: &str) -> bool {
         let color = button_material(tester, label, |material| material.color);
-        color == Some(theme.color_scheme.on_surface.with_opacity(0.12))
+        color == Some(theme.color_scheme.on_surface().with_opacity(0.12))
     }
 
     /// Dart's `findMenuMaterial()`.
@@ -3127,7 +3129,10 @@ pub(crate) mod tests {
                     shape.eq_shape(&waft_painting::RoundedRectangleBorder::default())
                 }));
                 let text_style = material.text_style.as_ref().expect("a text style");
-                assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+                assert_eq!(
+                    text_style.color,
+                    Some(theme.color_scheme.on_surface().into())
+                );
                 assert_eq!(text_style.font_size, Some(14.0));
                 assert_eq!(text_style.height, Some(1.43));
             });
@@ -3244,7 +3249,7 @@ pub(crate) mod tests {
                 selected_item,
             );
 
-            let on_surface = theme.color_scheme.on_surface;
+            let on_surface = theme.color_scheme.on_surface();
             let on_surface_variant = theme.color_scheme.on_surface_variant();
             assert_eq!(
                 item_colors(tester, selected_item),
@@ -5760,7 +5765,7 @@ pub(crate) mod tests {
                             button_material(tester, search_result, |material| material.color);
                         assert_eq!(
                             color,
-                            Some(theme.color_scheme.on_surface.with_opacity(0.12))
+                            Some(theme.color_scheme.on_surface().with_opacity(0.12))
                         );
                     }
                     for non_highlight in other_items {
@@ -5985,7 +5990,7 @@ pub(crate) mod tests {
             assert!(paints_rrect_of_color(
                 tester,
                 decorator,
-                theme.color_scheme.primary
+                theme.color_scheme.primary()
             ));
         });
     }
@@ -6965,7 +6970,7 @@ pub(crate) mod tests {
     fn a_disabled_menu_shows_its_text_in_the_disabled_color() {
         test_widgets(|tester| {
             let theme = theme(tester);
-            let disabled_color = theme.color_scheme.on_surface.with_opacity(0.38);
+            let disabled_color = theme.color_scheme.on_surface().with_opacity(0.38);
             let entries: Rc<[DropdownMenuEntry<String>]> =
                 Rc::from(vec![DropdownMenuEntry::new("One".to_owned(), "One")]);
             let build_dropdown_menu = |is_enabled: bool| {

@@ -42,8 +42,8 @@ use waft_foundation::{
 };
 use waft_painting::{
     Alignment, AlignmentDirectional, AlignmentGeometry, BorderSide, CircleBorder, EdgeInsets,
-    EdgeInsetsDirectional, OutlinedBorderRef, ShapeBorderRef, ShapeDecoration, TextOverflow,
-    TextStyle, axis_direction_is_reversed,
+    EdgeInsetsDirectional, EdgeInsetsGeometry, OutlinedBorderRef, ShapeBorderRef, ShapeDecoration,
+    TextOverflow, TextStyle, axis_direction_is_reversed,
 };
 use waft_rendering::{
     BoxConstraints, CrossAxisAlignment, CustomPainter, MainAxisAlignment, MainAxisSize,
@@ -1100,7 +1100,7 @@ impl State for DatePickerDialogState {
             } else {
                 MAX_TEXT_SCALE_FACTOR
             },
-            Padding::new(EdgeInsets::symmetric(0.0, 8.0).into()).child(
+            Padding::new(EdgeInsets::symmetric(0.0, 8.0)).child(
                 Align::new()
                     .alignment(AlignmentGeometry::from(AlignmentDirectional::CENTER_END))
                     .child(OverflowBar::new().spacing(8.0).children(vec![
@@ -1181,19 +1181,17 @@ impl State for DatePickerDialogState {
                             INPUT_FORM_LANDSCAPE_HEIGHT
                         })
                         .child(
-                            Padding::new(EdgeInsets::symmetric(0.0, 24.0).into()).child(
-                                Shortcuts::new(
-                                    DatePickerDialogState::form_shortcut_map(),
-                                    Column::new()
-                                        .main_axis_alignment(MainAxisAlignment::Center)
-                                        .children([Flexible::new(
-                                            MediaQuery::with_clamped_text_scaling(
-                                                None, 0.0, 2.0, field,
-                                            ),
-                                        )
-                                        .into_widget()]),
-                                ),
-                            ),
+                            Padding::new(EdgeInsets::symmetric(0.0, 24.0)).child(Shortcuts::new(
+                                DatePickerDialogState::form_shortcut_map(),
+                                Column::new()
+                                    .main_axis_alignment(MainAxisAlignment::Center)
+                                    .children([Flexible::new(
+                                        MediaQuery::with_clamped_text_scaling(
+                                            None, 0.0, 2.0, field,
+                                        ),
+                                    )
+                                    .into_widget()]),
+                            )),
                         ),
                 )
                 .key(form_key.clone().into())
@@ -1548,9 +1546,9 @@ impl StatelessWidget for DatePickerHeader {
                             )
                             .child(
                                 material.child(
-                                    Padding::new(
-                                        EdgeInsetsDirectional::only(24.0, 0.0, 12.0, 12.0).into(),
-                                    )
+                                    Padding::new(EdgeInsetsDirectional::only(
+                                        24.0, 0.0, 12.0, 12.0,
+                                    ))
                                     .child(
                                         Column::new()
                                             .cross_axis_alignment(CrossAxisAlignment::Start)
@@ -1570,14 +1568,14 @@ impl StatelessWidget for DatePickerHeader {
             Orientation::Landscape => {
                 let mut children = vec![
                     SizedBox::new().height(16.0).into_widget(),
-                    Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE).into())
+                    Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE))
                         .child(help)
                         .into_widget(),
                     SizedBox::new()
                         .height(if self.is_short { 16.0 } else { 56.0 })
                         .into_widget(),
                     Expanded::new(
-                        Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE).into())
+                        Padding::new(EdgeInsets::symmetric(0.0, HEADER_PADDING_LANDSCAPE))
                             .child(title),
                     )
                     .into_widget(),
@@ -1585,9 +1583,9 @@ impl StatelessWidget for DatePickerHeader {
                 if let Some(entry_mode_button) = &self.entry_mode_button {
                     children.push(
                         Padding::new(if theme.use_material3 {
-                            EdgeInsetsDirectional::only(8.0, 0.0, 4.0, 6.0).into()
+                            EdgeInsetsGeometry::directional(8.0, 0.0, 4.0, 6.0)
                         } else {
-                            EdgeInsets::symmetric(0.0, 4.0).into()
+                            EdgeInsetsGeometry::symmetric(0.0, 4.0)
                         })
                         .child(
                             Semantics::new()
@@ -2629,7 +2627,7 @@ impl State for DateRangePickerDialogState {
                         INPUT_FORM_LANDSCAPE_HEIGHT
                     })
                     .child(
-                        Padding::new(EdgeInsets::symmetric(0.0, 24.0).into()).child(
+                        Padding::new(EdgeInsets::symmetric(0.0, 24.0)).child(
                             Column::new().children([
                                 Spacer::new().into_widget(),
                                 InputDateRangePicker {
@@ -2974,7 +2972,7 @@ impl StatelessWidget for CalendarRangePickerDialog {
             && let Some(entry_mode_button) = &self.entry_mode_button
         {
             bottom_row.push(
-                Padding::new(EdgeInsets::symmetric(0.0, 8.0).into())
+                Padding::new(EdgeInsets::symmetric(0.0, 8.0))
                     .child(IconTheme::new(
                         icon_theme.clone(),
                         entry_mode_button.clone(),
@@ -3562,7 +3560,7 @@ impl StatelessWidget for DayHeaders {
         let color_scheme = &theme_data.color_scheme;
         let text_style = apply_color(
             theme_data.text_theme.title_small.clone(),
-            Some(color_scheme.on_surface),
+            Some(color_scheme.on_surface()),
         )
         .expect("the text theme has titleSmall");
         let localizations = <dyn MaterialLocalizations>::of(app, context);
@@ -4004,7 +4002,7 @@ impl State for MonthItemState {
         };
         let month_style = apply_color(
             text_theme.body_medium.clone(),
-            Some(theme_data.color_scheme.on_surface),
+            Some(theme_data.color_scheme.on_surface()),
         )
         .expect("the text theme has bodyMedium");
         Column::new()
@@ -4016,7 +4014,7 @@ impl State for MonthItemState {
                     ..BoxConstraints::new()
                 })
                 .child(
-                    Padding::new(EdgeInsets::symmetric(0.0, 16.0).into()).child(
+                    Padding::new(EdgeInsets::symmetric(0.0, 16.0)).child(
                         Align::new()
                             .alignment(AlignmentGeometry::from(AlignmentDirectional::CENTER_START))
                             .child(
@@ -4232,21 +4230,21 @@ impl State for DayItemState {
             });
             if widget.is_disabled {
                 #[allow(deprecated)]
-                let disabled = color_scheme.on_surface.with_opacity(0.38);
+                let disabled = color_scheme.on_surface().with_opacity(0.38);
                 item_style = apply_color(item_style, Some(disabled));
             }
         } else if widget.is_disabled {
             #[allow(deprecated)]
-            let disabled = color_scheme.on_surface.with_opacity(0.38);
+            let disabled = color_scheme.on_surface().with_opacity(0.38);
             item_style = apply_color(item_style, Some(disabled));
         } else if widget.is_today {
             // The current day gets a different text color and a custom shape border.
-            item_style = apply_color(item_style, Some(color_scheme.primary));
+            item_style = apply_color(item_style, Some(color_scheme.primary()));
             let today_side: BorderSide = date_picker_theme
                 .today_border
                 .or_else(|| defaults.today_border(app))
                 .expect("the defaults give a today border")
-                .copy_with(Some(color_scheme.primary), None, None, None);
+                .copy_with(Some(color_scheme.primary()), None, None, None);
             decoration = Some(ShapeDecoration::new(ShapeBorderRef::from(
                 day_shape.copy_with(Some(today_side)),
             )));
@@ -4511,7 +4509,7 @@ impl StatelessWidget for InputDateRangePickerDialog {
             ..BoxConstraints::new()
         })
         .child(
-            Padding::new(EdgeInsets::symmetric(0.0, 8.0).into()).child(
+            Padding::new(EdgeInsets::symmetric(0.0, 8.0)).child(
                 Align::new()
                     .alignment(AlignmentGeometry::from(AlignmentDirectional::CENTER_END))
                     .child(OverflowBar::new().spacing(8.0).children(vec![
@@ -5893,7 +5891,7 @@ pub(crate) mod tests {
                             material.clip_behavior,
                         )
                     });
-                assert_eq!(color, Some(theme.color_scheme.surface));
+                assert_eq!(color, Some(theme.color_scheme.surface()));
                 assert_eq!(shadow_color, Some(theme.shadow_color));
                 assert_eq!(elevation, 24.0);
                 assert_eq!(shape, Some(rounded(4.0)));
@@ -6739,7 +6737,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_eq!(
                 day_decoration_color(tester, "30"),
-                Some(theme.color_scheme.primary)
+                Some(theme.color_scheme.primary())
             );
         }
 
@@ -6831,7 +6829,7 @@ pub(crate) mod tests {
             assert_day_overlay(
                 tester,
                 false,
-                theme.color_scheme.on_primary.with_opacity(0.08),
+                theme.color_scheme.on_primary().with_opacity(0.08),
             );
         }
 
@@ -6852,7 +6850,7 @@ pub(crate) mod tests {
             assert_day_overlay(
                 tester,
                 false,
-                theme.color_scheme.on_primary.with_opacity(opacity),
+                theme.color_scheme.on_primary().with_opacity(opacity),
             );
         }
 
@@ -6869,7 +6867,7 @@ pub(crate) mod tests {
             assert_day_overlay(
                 tester,
                 true,
-                theme.color_scheme.on_primary.with_opacity(opacity),
+                theme.color_scheme.on_primary().with_opacity(opacity),
             );
             tester.up(&pointer);
         }
@@ -8693,7 +8691,7 @@ pub(crate) mod tests {
                 prepare_picker(tester, &Prepare::new());
                 let theme = m2(&tester.cell.borrow());
                 let properties = dialog_properties(tester);
-                assert_eq!(properties.color, Some(theme.color_scheme.surface));
+                assert_eq!(properties.color, Some(theme.color_scheme.surface()));
                 assert_eq!(properties.shadow_color, Some(Colors::TRANSPARENT));
                 assert_eq!(properties.surface_tint_color, Some(Colors::TRANSPARENT));
                 assert_eq!(properties.elevation, 0.0);
@@ -8733,7 +8731,7 @@ pub(crate) mod tests {
                 prepare_picker(tester, &Prepare::input_mode());
                 let theme = m2(&tester.cell.borrow());
                 let properties = dialog_properties(tester);
-                assert_eq!(properties.color, Some(theme.color_scheme.surface));
+                assert_eq!(properties.color, Some(theme.color_scheme.surface()));
                 assert_eq!(properties.shadow_color, Some(theme.shadow_color));
                 assert_eq!(properties.surface_tint_color, None);
                 assert_eq!(properties.elevation, 24.0);
@@ -8796,11 +8794,11 @@ pub(crate) mod tests {
                     .widget(scaffold, |scaffold: &crate::scaffold::Scaffold| {
                         scaffold.background_color
                     });
-                assert_eq!(background_color, Some(theme.color_scheme.surface));
+                assert_eq!(background_color, Some(theme.color_scheme.surface()));
 
                 let app_bar = tester.element(find::by_type::<crate::app_bar::AppBar>().at(0));
                 let icon_theme =
-                    waft_widgets::IconThemeData::new().color(theme.color_scheme.on_primary);
+                    waft_widgets::IconThemeData::new().color(theme.color_scheme.on_primary());
                 let (app_bar_icon_theme, actions_icon_theme, elevation, scrolled_under, background) =
                     tester.widget(app_bar, |app_bar: &crate::app_bar::AppBar| {
                         (
@@ -8817,7 +8815,7 @@ pub(crate) mod tests {
                 assert_eq!(scrolled_under, None);
                 assert_eq!(
                     background.map(|color| color.color()),
-                    Some(theme.color_scheme.primary)
+                    Some(theme.color_scheme.primary())
                 );
             });
         }

@@ -322,7 +322,7 @@ impl Dialog {
         padding: EdgeInsets,
         child: WidgetRef,
     ) -> WidgetRef {
-        AnimatedPadding::new(padding.into(), self.inset_animation_duration)
+        AnimatedPadding::new(padding, self.inset_animation_duration)
             .curve(Rc::clone(&self.inset_animation_curve))
             .child(
                 MediaQuery::remove_view_insets(app, context, true, true, true, true, child)
@@ -774,7 +774,8 @@ impl AlertDialog {
     }
 
     /// Dart `AlertDialog(iconPadding:)`.
-    pub fn icon_padding(mut self, icon_padding: EdgeInsetsGeometry) -> AlertDialog {
+    pub fn icon_padding(mut self, icon_padding: impl Into<EdgeInsetsGeometry>) -> AlertDialog {
+        let icon_padding = icon_padding.into();
         self.icon_padding = Some(icon_padding);
         self
     }
@@ -792,7 +793,8 @@ impl AlertDialog {
     }
 
     /// Dart `AlertDialog(titlePadding:)`.
-    pub fn title_padding(mut self, title_padding: EdgeInsetsGeometry) -> AlertDialog {
+    pub fn title_padding(mut self, title_padding: impl Into<EdgeInsetsGeometry>) -> AlertDialog {
+        let title_padding = title_padding.into();
         self.title_padding = Some(title_padding);
         self
     }
@@ -810,7 +812,11 @@ impl AlertDialog {
     }
 
     /// Dart `AlertDialog(contentPadding:)`.
-    pub fn content_padding(mut self, content_padding: EdgeInsetsGeometry) -> AlertDialog {
+    pub fn content_padding(
+        mut self,
+        content_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> AlertDialog {
+        let content_padding = content_padding.into();
         self.content_padding = Some(content_padding);
         self
     }
@@ -828,7 +834,11 @@ impl AlertDialog {
     }
 
     /// Dart `AlertDialog(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> AlertDialog {
+    pub fn actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> AlertDialog {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }
@@ -867,7 +877,8 @@ impl AlertDialog {
     }
 
     /// Dart `AlertDialog(buttonPadding:)`.
-    pub fn button_padding(mut self, button_padding: EdgeInsetsGeometry) -> AlertDialog {
+    pub fn button_padding(mut self, button_padding: impl Into<EdgeInsetsGeometry>) -> AlertDialog {
+        let button_padding = button_padding.into();
         self.button_padding = Some(button_padding);
         self
     }
@@ -1042,15 +1053,12 @@ impl AlertDialog {
                 icon_theme = icon_theme.color(color);
             }
             icon_widget = Some(
-                Padding::new(
-                    EdgeInsets::only(
-                        effective_icon_padding.left * padding_scale_factor,
-                        effective_icon_padding.top * padding_scale_factor,
-                        effective_icon_padding.right * padding_scale_factor,
-                        effective_icon_padding.bottom,
-                    )
-                    .into(),
-                )
+                Padding::new(EdgeInsets::only(
+                    effective_icon_padding.left * padding_scale_factor,
+                    effective_icon_padding.top * padding_scale_factor,
+                    effective_icon_padding.right * padding_scale_factor,
+                    effective_icon_padding.bottom,
+                ))
                 .child(IconTheme::new(icon_theme, icon.clone()))
                 .into_widget(),
             );
@@ -1068,19 +1076,16 @@ impl AlertDialog {
                 .map(|padding| padding.resolve(text_direction))
                 .unwrap_or(default_title_padding);
             title_widget = Some(
-                Padding::new(
-                    EdgeInsets::only(
-                        effective_title_padding.left * padding_scale_factor,
-                        if self.icon.is_none() {
-                            effective_title_padding.top * padding_scale_factor
-                        } else {
-                            effective_title_padding.top
-                        },
-                        effective_title_padding.right * padding_scale_factor,
-                        effective_title_padding.bottom,
-                    )
-                    .into(),
-                )
+                Padding::new(EdgeInsets::only(
+                    effective_title_padding.left * padding_scale_factor,
+                    if self.icon.is_none() {
+                        effective_title_padding.top * padding_scale_factor
+                    } else {
+                        effective_title_padding.top
+                    },
+                    effective_title_padding.right * padding_scale_factor,
+                    effective_title_padding.bottom,
+                ))
                 .child(
                     DefaultTextStyle::new(
                         self.title_text_style
@@ -1117,19 +1122,16 @@ impl AlertDialog {
                 .map(|padding| padding.resolve(text_direction))
                 .unwrap_or(default_content_padding);
             content_widget = Some(
-                Padding::new(
-                    EdgeInsets::only(
-                        effective_content_padding.left * padding_scale_factor,
-                        if self.title.is_none() && self.icon.is_none() {
-                            effective_content_padding.top * padding_scale_factor
-                        } else {
-                            effective_content_padding.top
-                        },
-                        effective_content_padding.right * padding_scale_factor,
-                        effective_content_padding.bottom,
-                    )
-                    .into(),
-                )
+                Padding::new(EdgeInsets::only(
+                    effective_content_padding.left * padding_scale_factor,
+                    if self.title.is_none() && self.icon.is_none() {
+                        effective_content_padding.top * padding_scale_factor
+                    } else {
+                        effective_content_padding.top
+                    },
+                    effective_content_padding.right * padding_scale_factor,
+                    effective_content_padding.bottom,
+                ))
                 .child(DefaultTextStyle::new(
                     self.content_text_style
                         .clone()
@@ -1378,11 +1380,7 @@ impl StatelessWidget for SimpleDialogOption {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        let mut padding = Padding::new(
-            self.padding
-                .unwrap_or(EdgeInsets::symmetric(8.0, 24.0))
-                .into(),
-        );
+        let mut padding = Padding::new(self.padding.unwrap_or(EdgeInsets::symmetric(8.0, 24.0)));
         padding.child = self.child.clone();
         let mut ink_well = InkWell::new().child(padding);
         ink_well.ink_response.on_tap = self.on_pressed.clone();
@@ -1541,7 +1539,8 @@ impl SimpleDialog {
     }
 
     /// Dart `SimpleDialog(titlePadding:)`.
-    pub fn title_padding(mut self, title_padding: EdgeInsetsGeometry) -> SimpleDialog {
+    pub fn title_padding(mut self, title_padding: impl Into<EdgeInsetsGeometry>) -> SimpleDialog {
+        let title_padding = title_padding.into();
         self.title_padding = title_padding;
         self
     }
@@ -1559,7 +1558,11 @@ impl SimpleDialog {
     }
 
     /// Dart `SimpleDialog(contentPadding:)`.
-    pub fn content_padding(mut self, content_padding: EdgeInsetsGeometry) -> SimpleDialog {
+    pub fn content_padding(
+        mut self,
+        content_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> SimpleDialog {
+        let content_padding = content_padding.into();
         self.content_padding = content_padding;
         self
     }
@@ -1692,19 +1695,16 @@ impl StatelessWidget for SimpleDialog {
         if let Some(title) = &self.title {
             let effective_title_padding = self.title_padding.resolve(text_direction);
             title_widget = Some(
-                Padding::new(
-                    EdgeInsets::only(
-                        effective_title_padding.left * padding_scale_factor,
-                        effective_title_padding.top * padding_scale_factor,
-                        effective_title_padding.right * padding_scale_factor,
-                        if self.children.is_none() {
-                            effective_title_padding.bottom * padding_scale_factor
-                        } else {
-                            effective_title_padding.bottom
-                        },
-                    )
-                    .into(),
-                )
+                Padding::new(EdgeInsets::only(
+                    effective_title_padding.left * padding_scale_factor,
+                    effective_title_padding.top * padding_scale_factor,
+                    effective_title_padding.right * padding_scale_factor,
+                    if self.children.is_none() {
+                        effective_title_padding.bottom * padding_scale_factor
+                    } else {
+                        effective_title_padding.bottom
+                    },
+                ))
                 .child(DefaultTextStyle::new(
                     effective_title_text_style,
                     Semantics::new()
@@ -1724,19 +1724,16 @@ impl StatelessWidget for SimpleDialog {
             content_widget = Some(
                 Flexible::new(
                     SingleChildScrollView::new()
-                        .padding(
-                            EdgeInsets::only(
-                                effective_content_padding.left * padding_scale_factor,
-                                if self.title.is_none() {
-                                    effective_content_padding.top * padding_scale_factor
-                                } else {
-                                    effective_content_padding.top
-                                },
-                                effective_content_padding.right * padding_scale_factor,
-                                effective_content_padding.bottom * padding_scale_factor,
-                            )
-                            .into(),
-                        )
+                        .padding(EdgeInsets::only(
+                            effective_content_padding.left * padding_scale_factor,
+                            if self.title.is_none() {
+                                effective_content_padding.top * padding_scale_factor
+                            } else {
+                                effective_content_padding.top
+                            },
+                            effective_content_padding.right * padding_scale_factor,
+                            effective_content_padding.bottom * padding_scale_factor,
+                        ))
                         .child(DefaultTextStyle::new(
                             self.content_text_style
                                 .clone()
@@ -3278,7 +3275,9 @@ pub(crate) mod tests {
     fn material3_dialog_fullscreen_defaults() {
         test_widgets(|tester| {
             let dialog_text_m3 = "Fullscreen Dialog - M3";
-            let expected = material3_theme(&tester.cell.borrow()).color_scheme.surface;
+            let expected = material3_theme(&tester.cell.borrow())
+                .color_scheme
+                .surface();
             pump_with_dialog(
                 tester,
                 material3_theme,

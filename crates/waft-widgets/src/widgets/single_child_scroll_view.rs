@@ -174,7 +174,8 @@ impl SingleChildScrollView {
     }
 
     /// Dart `SingleChildScrollView(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> SingleChildScrollView {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> SingleChildScrollView {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

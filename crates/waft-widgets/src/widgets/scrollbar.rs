@@ -1547,8 +1547,8 @@ macro_rules! raw_scrollbar_setters {
         }
 
         /// Dart `padding:`.
-        pub fn padding(mut self, padding: waft_painting::EdgeInsetsGeometry) -> $name {
-            self.raw_scrollbar.padding = Some(padding);
+        pub fn padding(mut self, padding: impl Into<waft_painting::EdgeInsetsGeometry>) -> $name {
+            self.raw_scrollbar.padding = Some(padding.into());
             self
         }
     };

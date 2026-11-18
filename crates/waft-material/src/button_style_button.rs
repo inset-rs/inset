@@ -1412,7 +1412,7 @@ mod tests {
         ) -> Box<dyn ButtonStyleGetters> {
             let theme = Theme::of(app, context);
             let color_scheme = &theme.color_scheme;
-            let on_primary = color_scheme.on_primary;
+            let on_primary = color_scheme.on_primary();
             Box::new(
                 ButtonStyle::new()
                     .text_style(Rc::new(WidgetStatePropertyAll::new(
@@ -1420,15 +1420,15 @@ mod tests {
                     )))
                     .background_color(
                         <dyn ButtonStyleButton>::default_color(
-                            Some(color_scheme.primary),
-                            Some(color_scheme.on_surface.with_opacity(0.12)),
+                            Some(color_scheme.primary()),
+                            Some(color_scheme.on_surface().with_opacity(0.12)),
                         )
                         .expect("both colors"),
                     )
                     .foreground_color(
                         <dyn ButtonStyleButton>::default_color(
                             Some(on_primary),
-                            Some(color_scheme.on_surface.with_opacity(0.38)),
+                            Some(color_scheme.on_surface().with_opacity(0.38)),
                         )
                         .expect("both colors"),
                     )
@@ -1759,8 +1759,8 @@ mod tests {
         // This is a regression test for https://github.com/flutter/flutter/issues/387
         test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
-            let background_color = color_scheme.primary;
-            let disabled_background_color = color_scheme.on_surface.with_opacity(0.12);
+            let background_color = color_scheme.primary();
+            let disabled_background_color = color_scheme.on_surface().with_opacity(0.12);
             let build_frame = |tester: &WidgetTester, enabled: bool| {
                 let theme = ThemeData::from(color_scheme.clone())
                     .use_material3(false)

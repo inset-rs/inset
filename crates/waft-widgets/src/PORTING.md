@@ -371,6 +371,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the arguments arrive through fluent setters, so they are only complete once the chain ends (basic.rs's assert entry).
   Affect: a contradictory configuration panics where the app widget is handed to the tree, not on its first build.
 
+- Change: a `home` or `routes` app without `page_route_builder` builds plain `PageRouteBuilder`s with a jump cut, where Dart asserts in debug that the builder is set.
+  Reason: framework — `WidgetsApp` is the app widget a WinUI app builds, since Waft has no WinUI app shell, so it gives the route `MaterialApp` and `CupertinoApp` give their apps instead of requiring every app to write the same builder; a kit app sets its own.
+  Affect: `WidgetsApp::new(color).home(Home)` shows `Home` without a builder and without the first-frame abort, with no page transition.
+
 - Change: `WidgetsApp::default_shortcuts` and `default_actions` build a fresh value per call, with new action objects.
   Reason: language — an `Rc` or an arena handle cannot be a `const`, and Dart's `defaultActions` is one mutable map of shared action objects.
   Affect: modifying the returned map changes only the app it is passed to, where Dart's global map is shared by every `WidgetsApp`.

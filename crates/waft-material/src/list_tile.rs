@@ -2238,7 +2238,7 @@ impl ListTileThemeDataGetters for LisTileDefaultsM2 {
     }
 
     fn selected_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn icon_color(&self, app: &mut App) -> Option<AnyColor> {
@@ -4082,7 +4082,7 @@ pub(crate) mod tests {
             let color_scheme = m3(&tester.cell.borrow()).color_scheme;
             assert_eq!(
                 slot_icon_colors(tester, m3, true),
-                [Some(color_scheme.primary); 4]
+                [Some(color_scheme.primary()); 4]
             );
             assert_eq!(
                 slot_icon_colors(tester, m3, false),
@@ -4138,7 +4138,7 @@ pub(crate) mod tests {
                 colors,
                 [
                     Some(theme.color_scheme.on_surface_variant()),
-                    Some(theme.color_scheme.on_surface),
+                    Some(theme.color_scheme.on_surface()),
                     Some(theme.color_scheme.on_surface_variant()),
                     Some(theme.color_scheme.on_surface_variant()),
                 ]
@@ -5589,12 +5589,12 @@ pub(crate) mod tests {
 
             assert_eq!(
                 slot_icon_colors(light, true),
-                [Some(light_color_scheme.primary); 4]
+                [Some(light_color_scheme.primary()); 4]
             );
             assert_eq!(slot_icon_colors(light, false), [Some(Colors::BLACK45); 4]);
             assert_eq!(
                 slot_icon_colors(dark, true),
-                [Some(dark_color_scheme.primary); 4]
+                [Some(dark_color_scheme.primary()); 4]
             );
             // For this configuration, ListTile defers to the default IconTheme.
             // The default dark theme's IconTheme has color:white

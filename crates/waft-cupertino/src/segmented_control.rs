@@ -241,7 +241,11 @@ impl<T: Copy + Eq + Hash + Debug + 'static> CupertinoSegmentedControl<T> {
     }
 
     /// Dart `CupertinoSegmentedControl(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> CupertinoSegmentedControl<T> {
+    pub fn padding(
+        mut self,
+        padding: impl Into<EdgeInsetsGeometry>,
+    ) -> CupertinoSegmentedControl<T> {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

@@ -1012,9 +1012,9 @@ impl State for SelectableTextState {
                 cursor_opacity_animates = false;
                 cursor_color = widget_cursor_color
                     .or(style_cursor_color)
-                    .unwrap_or(theme.color_scheme.primary);
+                    .unwrap_or(theme.color_scheme.primary());
                 selection_color = style_selection_color
-                    .unwrap_or_else(|| theme.color_scheme.primary.with_opacity(0.40));
+                    .unwrap_or_else(|| theme.color_scheme.primary().with_opacity(0.40));
             }
             TargetPlatform::Linux | TargetPlatform::Windows => {
                 force_press_enabled = false;
@@ -1023,9 +1023,9 @@ impl State for SelectableTextState {
                 cursor_opacity_animates = false;
                 cursor_color = widget_cursor_color
                     .or(style_cursor_color)
-                    .unwrap_or(theme.color_scheme.primary);
+                    .unwrap_or(theme.color_scheme.primary());
                 selection_color = style_selection_color
-                    .unwrap_or_else(|| theme.color_scheme.primary.with_opacity(0.40));
+                    .unwrap_or_else(|| theme.color_scheme.primary().with_opacity(0.40));
             }
         }
         app.get_mut(self).force_press_enabled = Some(force_press_enabled);

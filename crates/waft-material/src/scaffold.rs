@@ -6161,7 +6161,7 @@ mod tests {
                     .with_background(Colors::GREEN.primary());
                 ThemeData::builder().color_scheme(color_scheme).build(&app)
             };
-            let surface = theme.color_scheme.surface;
+            let surface = theme.color_scheme.surface();
             let root = material_app(
                 theme,
                 Scaffold::new().body(SizedBox::expand()).into_widget(),
@@ -7926,7 +7926,7 @@ mod tests {
                                 app,
                                 scaffold,
                                 move |app, context| {
-                                    let primary = Theme::of(app, context).color_scheme.primary;
+                                    let primary = Theme::of(app, context).color_scheme.primary();
                                     SizedBox::expand()
                                         .child(
                                             ColoredBox::new(primary)

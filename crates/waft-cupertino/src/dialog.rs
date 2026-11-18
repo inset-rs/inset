@@ -627,7 +627,7 @@ impl State for CupertinoAlertDialogState {
                             + EdgeInsets::symmetric(24.0, 40.0);
                         let body = self.build_body(app, context);
                         let widget = self.widget(app).clone();
-                        AnimatedPadding::new(padding.into(), widget.inset_animation_duration)
+                        AnimatedPadding::new(padding, widget.inset_animation_duration)
                             .curve(widget.inset_animation_curve)
                             .child(
                                 MediaQuery::remove_view_insets(
@@ -2929,7 +2929,7 @@ impl StatelessWidget for CupertinoAlertContentSection {
         let mut title_content_group = Vec::new();
         if let Some(title) = &self.title {
             title_content_group.push(
-                Padding::new(self.title_padding.expect("asserted above").into())
+                Padding::new(self.title_padding.expect("asserted above"))
                     .child(
                         DefaultTextStyle::new(
                             self.title_text_style.clone().expect("asserted above"),
@@ -2942,7 +2942,7 @@ impl StatelessWidget for CupertinoAlertContentSection {
         }
         if let Some(message) = &self.message {
             title_content_group.push(
-                Padding::new(self.message_padding.expect("asserted above").into())
+                Padding::new(self.message_padding.expect("asserted above"))
                     .child(
                         DefaultTextStyle::new(
                             self.message_text_style.clone().expect("asserted above"),
@@ -2958,7 +2958,7 @@ impl StatelessWidget for CupertinoAlertContentSection {
         if let Some(additional) = self.additional_padding_between_title_and_message
             && title_content_group.len() > 1
         {
-            title_content_group.insert(1, Padding::new(additional.into()).into_widget());
+            title_content_group.insert(1, Padding::new(additional).into_widget());
         }
 
         CupertinoScrollbar::new(

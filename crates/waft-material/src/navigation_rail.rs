@@ -1162,7 +1162,7 @@ impl State for RailDestinationState {
                 widget
                     .icon_theme
                     .copy_with()
-                    .color(theme.color_scheme.on_surface.with_opacity(0.38))
+                    .color(theme.color_scheme.on_surface().with_opacity(0.38))
             } else {
                 widget.icon_theme.clone()
             },
@@ -1174,7 +1174,7 @@ impl State for RailDestinationState {
                 widget
                     .label_text_style
                     .copy_with()
-                    .color(theme.color_scheme.on_surface.with_opacity(0.38))
+                    .color(theme.color_scheme.on_surface().with_opacity(0.38))
             } else {
                 widget.label_text_style.clone()
             },
@@ -1457,16 +1457,16 @@ impl State for RailDestinationState {
         }
 
         let colors = &Theme::of(app, context).color_scheme;
-        let primary_color_alpha_modified = (colors.primary.alpha() as f64) < 255.0;
+        let primary_color_alpha_modified = (colors.primary().alpha() as f64) < 255.0;
         let effective_splash_color = if primary_color_alpha_modified {
-            colors.primary
+            colors.primary()
         } else {
-            colors.primary.with_opacity(0.12)
+            colors.primary().with_opacity(0.12)
         };
         let effective_hover_color = if primary_color_alpha_modified {
-            colors.primary
+            colors.primary()
         } else {
-            colors.primary.with_opacity(0.04)
+            colors.primary().with_opacity(0.04)
         };
         let widget = self.widget(app);
         let mut stack_children = vec![
@@ -1836,7 +1836,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM2 {
     fn background_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.surface)
+        Some(colors.surface())
     }
 
     fn unselected_label_text_style(&self, app: &mut App) -> Option<TextStyle> {
@@ -1849,7 +1849,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM2 {
                 .as_ref()
                 .expect("the text theme has bodyLarge")
                 .copy_with()
-                .color(colors.on_surface.with_opacity(0.64)),
+                .color(colors.on_surface().with_opacity(0.64)),
         )
     }
 
@@ -1863,7 +1863,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM2 {
                 .as_ref()
                 .expect("the text theme has bodyLarge")
                 .copy_with()
-                .color(colors.primary),
+                .color(colors.primary()),
         )
     }
 
@@ -1873,7 +1873,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM2 {
         Some(
             IconThemeData::new()
                 .size(24.0)
-                .color(colors.on_surface)
+                .color(colors.on_surface())
                 .opacity(0.64),
         )
     }
@@ -1884,7 +1884,7 @@ impl NavigationRailThemeDataGetters for NavigationRailDefaultsM2 {
         Some(
             IconThemeData::new()
                 .size(24.0)
-                .color(colors.primary)
+                .color(colors.primary())
                 .opacity(1.0),
         )
     }
@@ -4367,7 +4367,7 @@ mod tests {
             let root = {
                 let app = tester.cell.borrow();
                 let mut color_scheme = crate::color_scheme::ColorScheme::light();
-                color_scheme.primary = Colors::TRANSPARENT;
+                color_scheme = color_scheme.with_primary(Colors::TRANSPARENT);
                 let theme = ThemeData::builder()
                     .color_scheme(color_scheme)
                     // Material 3 defaults to InkSparkle which is not testable using paints.

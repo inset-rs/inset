@@ -747,7 +747,7 @@ impl State for PaginatedDataTableState {
         }
         if let Some(actions) = &widget.actions {
             header_widgets.extend(actions.iter().map(|action| {
-                Padding::new(EdgeInsetsDirectional::only(24.0 - 8.0 * 2.0, 0.0, 0.0, 0.0).into())
+                Padding::new(EdgeInsetsDirectional::only(24.0 - 8.0 * 2.0, 0.0, 0.0, 0.0))
                     // 8.0 is the default padding of an icon button
                     .child(action.clone())
                     .into_widget()
@@ -850,7 +850,7 @@ impl State for PaginatedDataTableState {
                 .clone()
                 .expect("the theme's text theme has titleMedium")
                 .copy_with()
-                .color(theme_data.color_scheme.secondary)
+                .color(theme_data.color_scheme.secondary())
         } else {
             theme_data
                 .text_theme
@@ -886,10 +886,9 @@ impl State for PaginatedDataTableState {
                                         None,
                                         IconThemeData::new().opacity(0.54),
                                         ink.child(
-                                            Padding::new(
-                                                EdgeInsetsDirectional::only(24.0, 0.0, 14.0, 0.0)
-                                                    .into(),
-                                            )
+                                            Padding::new(EdgeInsetsDirectional::only(
+                                                24.0, 0.0, 14.0, 0.0,
+                                            ))
                                             .child(
                                                 Row::new()
                                                     .main_axis_alignment(MainAxisAlignment::End)

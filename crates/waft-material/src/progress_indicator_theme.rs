@@ -847,7 +847,7 @@ mod tests {
                     // Active indicator.
                     arc()
                         .in_rect(arc_rect)
-                        .color(colors.primary)
+                        .color(colors.primary())
                         .stroke_width(4.0)
                         .stroke_cap(StrokeCap::Round),
                 ]
@@ -874,7 +874,7 @@ mod tests {
                     // Active indicator.
                     arc()
                         .in_rect(Rect::from_ltrb(-0.0, -0.0, 36.0, 36.0))
-                        .color(colors.primary)
+                        .color(colors.primary())
                         .stroke_width(4.0),
                 ]
             ));
@@ -909,9 +909,9 @@ mod tests {
                     ))
                     .color(colors.secondary_container()),
                     // Stop indicator.
-                    circle().at(198.0, 2.0).radius(2.0).color(colors.primary),
+                    circle().at(198.0, 2.0).radius(2.0).color(colors.primary()),
                     // Active track.
-                    rrect(RRect::from_ltrbr(0.0, 0.0, 100.0, 4.0, radius)).color(colors.primary),
+                    rrect(RRect::from_ltrbr(0.0, 0.0, 100.0, 4.0, radius)).color(colors.primary()),
                 ]
             ));
         });
@@ -935,7 +935,7 @@ mod tests {
                     // Track.
                     rect(Rect::from_ltrb(0.0, 0.0, 200.0, 4.0)).color(colors.secondary_container()),
                     // Active track.
-                    rect(Rect::from_ltrb(0.0, 0.0, 100.0, 4.0)).color(colors.primary),
+                    rect(Rect::from_ltrb(0.0, 0.0, 100.0, 4.0)).color(colors.primary()),
                 ]
             ));
         });

@@ -92,19 +92,21 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(
-                        colors
-                            .on_surface
-                            .with_values(Some(0.1), None, None, None, None),
-                    );
+                    return Some(colors.on_surface().with_values(
+                        Some(0.1),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if toggleable && states.contains(&WidgetState::Selected) {
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
                 if toggleable {
                     return Some(colors.surface_container());
                 }
-                Some(colors.primary)
+                Some(colors.primary())
             })
         })
     }
@@ -117,19 +119,21 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(
-                        colors
-                            .on_surface
-                            .with_values(Some(0.38), None, None, None, None),
-                    );
+                    return Some(colors.on_surface().with_values(
+                        Some(0.38),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if toggleable && states.contains(&WidgetState::Selected) {
-                    return Some(colors.on_primary);
+                    return Some(colors.on_primary());
                 }
                 if toggleable {
                     return Some(colors.on_surface_variant());
                 }
-                Some(colors.on_primary)
+                Some(colors.on_primary())
             })
         })
     }
@@ -142,7 +146,7 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
             move |states| {
                 if toggleable && states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.on_primary.with_values(
+                        return Some(colors.on_primary().with_values(
                             Some(0.1),
                             None,
                             None,
@@ -151,7 +155,7 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
                         ));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.on_primary.with_values(
+                        return Some(colors.on_primary().with_values(
                             Some(0.08),
                             None,
                             None,
@@ -160,7 +164,7 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
                         ));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.on_primary.with_values(
+                        return Some(colors.on_primary().with_values(
                             Some(0.1),
                             None,
                             None,
@@ -199,25 +203,31 @@ impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
                     }
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(
-                        colors
-                            .on_primary
-                            .with_values(Some(0.1), None, None, None, None),
-                    );
+                    return Some(colors.on_primary().with_values(
+                        Some(0.1),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(
-                        colors
-                            .on_primary
-                            .with_values(Some(0.08), None, None, None, None),
-                    );
+                    return Some(colors.on_primary().with_values(
+                        Some(0.08),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(
-                        colors
-                            .on_primary
-                            .with_values(Some(0.1), None, None, None, None),
-                    );
+                    return Some(colors.on_primary().with_values(
+                        Some(0.1),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 Some(Colors::TRANSPARENT)
             },

@@ -49,7 +49,7 @@ impl SliderThemeDataGetters for RangeSliderDefaultsM3 {
     fn active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn inactive_track_color(&self, app: &mut App) -> Option<Color> {
@@ -61,19 +61,19 @@ impl SliderThemeDataGetters for RangeSliderDefaultsM3 {
     fn disabled_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn disabled_inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(1.0))
+        Some(colors.on_primary().with_opacity(1.0))
     }
 
     fn inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
@@ -91,31 +91,31 @@ impl SliderThemeDataGetters for RangeSliderDefaultsM3 {
     fn disabled_inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface)
+        Some(colors.on_surface())
     }
 
     fn thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn overlapping_shape_stroke_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.surface)
+        Some(colors.surface())
     }
 
     fn disabled_thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn overlay_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.12).into())
+        Some(colors.primary().with_opacity(0.12).into())
     }
 
     fn value_indicator_text_style(&self, app: &mut App) -> Option<TextStyle> {

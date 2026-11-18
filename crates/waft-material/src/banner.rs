@@ -763,7 +763,7 @@ impl MaterialBannerThemeDataGetters for BannerDefaultsM2 {
     }
 
     fn background_color(&self, _app: &mut App) -> Option<Color> {
-        Some(self.theme.color_scheme.surface)
+        Some(self.theme.color_scheme.surface())
     }
 
     fn content_text_style(&self, _app: &mut App) -> Option<TextStyle> {

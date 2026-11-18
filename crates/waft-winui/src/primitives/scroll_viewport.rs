@@ -335,7 +335,8 @@ impl ScrollViewport {
     }
 
     /// Sets the inset around scrolling content.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> Self {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> Self {
+        let padding = padding.into();
         self.padding = padding;
         self
     }

@@ -54,7 +54,7 @@ impl SliderThemeDataGetters for SliderDefaultsM3 {
     fn active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn inactive_track_color(&self, app: &mut App) -> Option<Color> {
@@ -66,31 +66,31 @@ impl SliderThemeDataGetters for SliderDefaultsM3 {
     fn secondary_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.54))
+        Some(colors.primary().with_opacity(0.54))
     }
 
     fn disabled_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn disabled_inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn disabled_secondary_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(1.0))
+        Some(colors.on_primary().with_opacity(1.0))
     }
 
     fn inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
@@ -108,25 +108,25 @@ impl SliderThemeDataGetters for SliderDefaultsM3 {
     fn disabled_inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface)
+        Some(colors.on_surface())
     }
 
     fn thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn disabled_thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.38))
+        Some(colors.on_surface().with_opacity(0.38))
     }
 
     fn overlay_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
+        let primary = colors.primary();
         Some(
             WidgetStateColor::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Dragged) {

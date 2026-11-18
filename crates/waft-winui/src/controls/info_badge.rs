@@ -247,9 +247,7 @@ impl StatelessWidget for InfoBadge {
                     .unwrap_or_else(|| Brush::Solid(self.style.background(&resources))),
                 corner_radius: self.corner_radius,
             })
-            .child(
-                Padding::new(EdgeInsets::from_ltrb(left, top, right, bottom).into()).child(content),
-            );
+            .child(Padding::new(EdgeInsets::from_ltrb(left, top, right, bottom)).child(content));
         ConstrainedBox::new(BoxConstraints {
             min_width: resources.info_badge_min_width,
             max_width: f64::INFINITY,

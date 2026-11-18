@@ -494,7 +494,7 @@ impl AnimatedWidget for TabStyle {
             TextStyle::lerp(Some(&unselected_style), Some(&selected_style), value)
         }
         .expect("two styles lerp to a style");
-        let default_icon_color = match theme.color_scheme.brightness {
+        let default_icon_color = match theme.color_scheme.brightness() {
             Brightness::Light => K_DEFAULT_ICON_DARK_COLOR,
             Brightness::Dark => K_DEFAULT_ICON_LIGHT_COLOR,
         };
@@ -4311,7 +4311,7 @@ impl State for TabPageSelectorState {
         let (color, selected_color) = (widget.color, widget.selected_color);
         let fix_color = color.unwrap_or(Colors::TRANSPARENT);
         let fix_selected_color =
-            selected_color.unwrap_or_else(|| Theme::of(app, context).color_scheme.secondary);
+            selected_color.unwrap_or_else(|| Theme::of(app, context).color_scheme.secondary());
         let selected_color_tween = ColorTween::new(app, Some(fix_color), Some(fix_selected_color));
         let previous_color_tween = ColorTween::new(app, Some(fix_selected_color), Some(fix_color));
         let localizations = <dyn MaterialLocalizations>::of(app, context);
@@ -4382,10 +4382,10 @@ impl TabBarThemeDataGetters for TabsDefaultsM2 {
         } else {
             Colors::BLUE.primary()
         };
-        Some(if colors.secondary == primary_color {
+        Some(if colors.secondary() == primary_color {
             Colors::WHITE
         } else {
-            colors.secondary
+            colors.secondary()
         })
     }
 
@@ -5004,7 +5004,7 @@ pub(crate) mod tests {
                 &tester.painted_ops(tab_bar_box.as_object()),
                 &[waft_rendering::testing::PaintCall::rrect_at(
                     rrect,
-                    Some(theme.color_scheme.primary),
+                    Some(theme.color_scheme.primary()),
                 )],
             );
 
@@ -5032,7 +5032,7 @@ pub(crate) mod tests {
             assert!(
                 lines[divider + 1..].iter().any(|line| is_line(
                     line,
-                    theme.color_scheme.primary,
+                    theme.color_scheme.primary(),
                     Some(INDICATOR_WEIGHT_TAB),
                     Offset::new(INDICATOR_LEFT, INDICATOR_Y),
                     Offset::new(INDICATOR_RIGHT, INDICATOR_Y),
@@ -5380,7 +5380,7 @@ pub(crate) mod tests {
                 assert_label_styles(
                     tester,
                     "A",
-                    theme.color_scheme.primary,
+                    theme.color_scheme.primary(),
                     "C",
                     theme.color_scheme.on_surface_variant(),
                 );
@@ -5401,7 +5401,7 @@ pub(crate) mod tests {
                 assert_label_styles(
                     tester,
                     "A",
-                    theme.color_scheme.on_surface,
+                    theme.color_scheme.on_surface(),
                     "C",
                     theme.color_scheme.on_surface_variant(),
                 );
@@ -5433,7 +5433,7 @@ pub(crate) mod tests {
                 let tab_bar = only::<TabBar>(tester);
                 let primary = {
                     let mut app = tester.cell.borrow_mut();
-                    Theme::of(&mut app, tab_bar).color_scheme.primary
+                    Theme::of(&mut app, tab_bar).color_scheme.primary()
                 };
                 let expected_indicator = Rect::from_ltrb(
                     label_center.dx() - 12.0,
@@ -5500,7 +5500,7 @@ pub(crate) mod tests {
                 assert!(
                     lines[divider + 1..].iter().any(|line| is_line(
                         line,
-                        theme.color_scheme.primary,
+                        theme.color_scheme.primary(),
                         Some(INDICATOR_WEIGHT),
                         Offset::new(INDICATOR_LEFT, INDICATOR_Y),
                         Offset::new(INDICATOR_RIGHT, INDICATOR_Y),
@@ -5567,9 +5567,9 @@ pub(crate) mod tests {
                 let colors = &theme.color_scheme;
                 check_default_overlay(
                     tester,
-                    colors.primary.with_opacity(0.08),
-                    colors.primary.with_opacity(0.1),
-                    colors.on_surface.with_opacity(0.08),
+                    colors.primary().with_opacity(0.08),
+                    colors.primary().with_opacity(0.1),
+                    colors.on_surface().with_opacity(0.08),
                 );
             });
         }
@@ -5588,9 +5588,9 @@ pub(crate) mod tests {
                 let colors = &theme.color_scheme;
                 check_default_overlay(
                     tester,
-                    colors.on_surface.with_opacity(0.08),
-                    colors.on_surface.with_opacity(0.1),
-                    colors.on_surface.with_opacity(0.08),
+                    colors.on_surface().with_opacity(0.08),
+                    colors.on_surface().with_opacity(0.1),
+                    colors.on_surface().with_opacity(0.08),
                 );
             });
         }
@@ -12116,8 +12116,8 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 tester.pump_and_settle();
-                let unselected = with_opacity(theme.color_scheme.on_surface, 0.08);
-                let selected = with_opacity(theme.color_scheme.primary, 0.08);
+                let unselected = with_opacity(theme.color_scheme.on_surface(), 0.08);
+                let selected = with_opacity(theme.color_scheme.primary(), 0.08);
                 assert!(!paints_rect_of(&ink_features_painted(tester), unselected));
                 assert!(!paints_rect_of(&ink_features_painted(tester), selected));
 
@@ -12166,8 +12166,8 @@ pub(crate) mod tests {
                 tester.pump_widget(material_app(theme.clone(), frame));
 
                 tester.pump_and_settle();
-                let unselected = with_opacity(theme.color_scheme.on_surface, 0.1);
-                let selected = with_opacity(theme.color_scheme.primary, 0.1);
+                let unselected = with_opacity(theme.color_scheme.on_surface(), 0.1);
+                let selected = with_opacity(theme.color_scheme.primary(), 0.1);
                 assert!(!paints_rect_of(&ink_features_painted(tester), unselected));
                 assert!(!paints_rect_of(&ink_features_painted(tester), selected));
 
@@ -12200,7 +12200,7 @@ pub(crate) mod tests {
                 tester.pump_widget(material_app(theme.clone(), frame));
 
                 tester.pump_and_settle();
-                let pressed = with_opacity(theme.color_scheme.primary, 0.1);
+                let pressed = with_opacity(theme.color_scheme.primary(), 0.1);
                 assert!(!paints_rect_of(&ink_features_painted(tester), pressed));
 
                 // Press unselected tab.
@@ -13813,7 +13813,7 @@ pub(crate) mod tests {
                 // The iconTheme color isn't applied to the selected icon.
                 assert_eq!(
                     icon_color(tester, &selected_icon),
-                    Some(theme.color_scheme.primary)
+                    Some(theme.color_scheme.primary())
                 );
                 // The iconTheme color is applied to the unselected icon.
                 assert_eq!(

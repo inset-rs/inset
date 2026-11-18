@@ -259,7 +259,7 @@ mod tests {
             let text_style = material.text_style.as_ref().expect("a text style");
             assert_eq!(
                 text_style.color.as_deref().copied(),
-                Some(color_scheme.primary)
+                Some(color_scheme.primary())
             );
             assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));
             assert_eq!(text_style.font_size, Some(14.0));

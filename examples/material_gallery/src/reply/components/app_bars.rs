@@ -155,8 +155,8 @@ pub fn email_detail_app_bar(
                 .tooltip("Back")
                 .style(
                     IconButton::style_from()
-                        .background_color(color_scheme.surface)
-                        .foreground_color(color_scheme.on_surface)
+                        .background_color(color_scheme.surface())
+                        .foreground_color(color_scheme.on_surface())
                         .build(),
                 ),
             ),

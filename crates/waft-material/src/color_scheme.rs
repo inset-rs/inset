@@ -1,10 +1,10 @@
 //! Flutter counterpart: material_ui's `color_scheme.dart`.
 //!
-//! `ColorScheme`'s nullable colours are private `Option`s read through getters that fall back
-//! to another colour, as Dart's `_primaryContainer ?? primary`; they are set with the `with_*`
-//! setters. `fromSeed` and `fromSwatch` take builders, since their arguments decide every
-//! colour at once. `fromImageProvider` waits for reading an image's pixels (see this folder's
-//! `PORTING.md`).
+//! Every colour of a `ColorScheme` is read through a method (`scheme.primary()`), and its fields
+//! are private: Dart reads properties, and the nullable colours keep Flutter's fallbacks inside
+//! the getter, as Dart's `_primaryContainer ?? primary`; they are set with the `with_*` setters.
+//! `fromSeed` and `fromSwatch` take builders, since their arguments decide every colour at once.
+//! `fromImageProvider` waits for reading an image's pixels (see this folder's `PORTING.md`).
 
 use std::rc::Rc;
 
@@ -153,15 +153,15 @@ impl DynamicSchemeVariant {
 ///{@macro material_ui.colors.settingColors}
 #[derive(Clone, Debug)]
 pub struct ColorScheme {
-    pub brightness: Brightness,
+    brightness: Brightness,
     /// The color displayed most frequently across your app’s screens and components.
-    pub primary: Color,
+    primary: Color,
     /// A color that's clearly legible when drawn on `primary`.
     ///
     /// To ensure that an app is accessible, a contrast ratio between
     /// `primary` and `on_primary` of at least 4.5:1 is recommended. See
     /// <https://www.w3.org/TR/UNDERSTANDING-WCAG20/visual-audio-contrast-contrast.html>.
-    pub on_primary: Color,
+    on_primary: Color,
     primary_container: Option<Color>,
     on_primary_container: Option<Color>,
     primary_fixed: Option<Color>,
@@ -170,13 +170,13 @@ pub struct ColorScheme {
     on_primary_fixed_variant: Option<Color>,
     /// An accent color used for less prominent components in the UI, such as
     /// filter chips, while expanding the opportunity for color expression.
-    pub secondary: Color,
+    secondary: Color,
     /// A color that's clearly legible when drawn on `secondary`.
     ///
     /// To ensure that an app is accessible, a contrast ratio between
     /// `secondary` and `on_secondary` of at least 4.5:1 is recommended. See
     /// <https://www.w3.org/TR/UNDERSTANDING-WCAG20/visual-audio-contrast-contrast.html>.
-    pub on_secondary: Color,
+    on_secondary: Color,
     secondary_container: Option<Color>,
     on_secondary_container: Option<Color>,
     secondary_fixed: Option<Color>,
@@ -193,23 +193,23 @@ pub struct ColorScheme {
     on_tertiary_fixed_variant: Option<Color>,
     /// The color to use for input validation errors, e.g. for
     /// `InputDecoration.errorText`.
-    pub error: Color,
+    error: Color,
     /// A color that's clearly legible when drawn on `error`.
     ///
     /// To ensure that an app is accessible, a contrast ratio between
     /// `error` and `on_error` of at least 4.5:1 is recommended. See
     /// <https://www.w3.org/TR/UNDERSTANDING-WCAG20/visual-audio-contrast-contrast.html>.
-    pub on_error: Color,
+    on_error: Color,
     error_container: Option<Color>,
     on_error_container: Option<Color>,
     /// The background color for widgets like `Scaffold`.
-    pub surface: Color,
+    surface: Color,
     /// A color that's clearly legible when drawn on `surface`.
     ///
     /// To ensure that an app is accessible, a contrast ratio between
     /// `surface` and `on_surface` of at least 4.5:1 is recommended. See
     /// <https://www.w3.org/TR/UNDERSTANDING-WCAG20/visual-audio-contrast-contrast.html>.
-    pub on_surface: Color,
+    on_surface: Color,
     surface_variant: Option<Color>,
     surface_dim: Option<Color>,
     surface_bright: Option<Color>,
@@ -1077,6 +1077,21 @@ impl ColorScheme {
         ThemeData::estimate_brightness_for_color(color)
     }
 
+    /// The [`Brightness`] of this scheme.
+    pub fn brightness(&self) -> Brightness {
+        self.brightness
+    }
+
+    /// The color displayed most frequently across your app’s screens and components.
+    pub fn primary(&self) -> Color {
+        self.primary
+    }
+
+    /// A color that's clearly legible when drawn on [`primary`](Self::primary).
+    pub fn on_primary(&self) -> Color {
+        self.on_primary
+    }
+
     /// A color used for elements needing less emphasis than `primary`.
     pub fn primary_container(&self) -> Color {
         self.primary_container.unwrap_or(self.primary)
@@ -1113,6 +1128,17 @@ impl ColorScheme {
     /// `on_primary_fixed`.
     pub fn on_primary_fixed_variant(&self) -> Color {
         self.on_primary_fixed_variant.unwrap_or(self.on_primary)
+    }
+
+    /// An accent color used for less prominent components in the UI, such as filter chips,
+    /// while expanding the opportunity for color expression.
+    pub fn secondary(&self) -> Color {
+        self.secondary
+    }
+
+    /// A color that's clearly legible when drawn on [`secondary`](Self::secondary).
+    pub fn on_secondary(&self) -> Color {
+        self.on_secondary
     }
 
     /// A color used for elements needing less emphasis than `secondary`.
@@ -1209,6 +1235,16 @@ impl ColorScheme {
             .unwrap_or_else(|| self.on_tertiary())
     }
 
+    /// The color to use for input validation errors, e.g. for an `InputDecoration`'s error text.
+    pub fn error(&self) -> Color {
+        self.error
+    }
+
+    /// A color that's clearly legible when drawn on [`error`](Self::error).
+    pub fn on_error(&self) -> Color {
+        self.on_error
+    }
+
     /// A color used for error elements needing less emphasis than `error`.
     pub fn error_container(&self) -> Color {
         self.error_container.unwrap_or(self.error)
@@ -1222,6 +1258,16 @@ impl ColorScheme {
     /// <https://www.w3.org/TR/UNDERSTANDING-WCAG20/visual-audio-contrast-contrast.html>.
     pub fn on_error_container(&self) -> Color {
         self.on_error_container.unwrap_or(self.on_error)
+    }
+
+    /// The background color for widgets like `Scaffold`.
+    pub fn surface(&self) -> Color {
+        self.surface
+    }
+
+    /// A color that's clearly legible when drawn on [`surface`](Self::surface).
+    pub fn on_surface(&self) -> Color {
+        self.on_surface
     }
 
     /// A color variant of `surface` that can be used for differentiation against

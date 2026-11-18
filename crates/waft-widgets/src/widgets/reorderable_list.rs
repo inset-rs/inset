@@ -378,7 +378,8 @@ impl ReorderableList {
     }
 
     /// Dart `ReorderableList(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> ReorderableList {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> ReorderableList {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

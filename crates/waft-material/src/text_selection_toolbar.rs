@@ -1106,16 +1106,18 @@ impl TextSelectionToolbarContainer {
     const DEFAULT_COLOR_DARK: Color = Color::new(0xff424242);
 
     fn get_color(app: &App, color_scheme: &ColorScheme) -> Color {
-        let is_default_surface = match color_scheme.brightness {
-            Brightness::Light => ThemeData::new(app).color_scheme.surface == color_scheme.surface,
+        let is_default_surface = match color_scheme.brightness() {
+            Brightness::Light => {
+                ThemeData::new(app).color_scheme.surface() == color_scheme.surface()
+            }
             Brightness::Dark => {
-                ThemeData::dark(app, None).color_scheme.surface == color_scheme.surface
+                ThemeData::dark(app, None).color_scheme.surface() == color_scheme.surface()
             }
         };
         if !is_default_surface {
-            return color_scheme.surface;
+            return color_scheme.surface();
         }
-        match color_scheme.brightness {
+        match color_scheme.brightness() {
             Brightness::Light => Self::DEFAULT_COLOR_LIGHT,
             Brightness::Dark => Self::DEFAULT_COLOR_DARK,
         }
@@ -1453,7 +1455,7 @@ mod tests {
         for index in 0..2 {
             test_widgets(|tester| {
                 let color_scheme = color_schemes(tester)[index].clone();
-                let brightness = color_scheme.brightness;
+                let brightness = color_scheme.brightness();
                 pump_toolbar_under(tester, color_scheme);
                 assert_eq!(
                     toolbar_container_color(tester),

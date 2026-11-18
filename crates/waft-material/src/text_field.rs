@@ -1268,7 +1268,7 @@ impl TextFieldState {
             return color;
         }
         let context = self.context(app);
-        Theme::of(app, context).color_scheme.error
+        Theme::of(app, context).color_scheme.error()
     }
 
     fn get_effective_decoration(self: Handle<Self>, app: &mut App) -> InputDecoration {
@@ -1885,10 +1885,10 @@ impl State for TextFieldState {
                 } else {
                     widget_cursor_color
                         .or(selection_style_cursor_color)
-                        .unwrap_or(theme.color_scheme.primary)
+                        .unwrap_or(theme.color_scheme.primary())
                 };
                 selection_color = selection_style_selection_color
-                    .unwrap_or_else(|| theme.color_scheme.primary.with_opacity(0.40));
+                    .unwrap_or_else(|| theme.color_scheme.primary().with_opacity(0.40));
             }
             TargetPlatform::Linux => {
                 app.get_mut(self).force_press_enabled = false;
@@ -1900,10 +1900,10 @@ impl State for TextFieldState {
                 } else {
                     widget_cursor_color
                         .or(selection_style_cursor_color)
-                        .unwrap_or(theme.color_scheme.primary)
+                        .unwrap_or(theme.color_scheme.primary())
                 };
                 selection_color = selection_style_selection_color
-                    .unwrap_or_else(|| theme.color_scheme.primary.with_opacity(0.40));
+                    .unwrap_or_else(|| theme.color_scheme.primary().with_opacity(0.40));
                 handle_did_gain_accessibility_focus = Some(request_focus_on_accessibility_focus);
                 handle_did_lose_accessibility_focus = Some(unfocus_on_accessibility_focus_lost);
             }
@@ -1917,10 +1917,10 @@ impl State for TextFieldState {
                 } else {
                     widget_cursor_color
                         .or(selection_style_cursor_color)
-                        .unwrap_or(theme.color_scheme.primary)
+                        .unwrap_or(theme.color_scheme.primary())
                 };
                 selection_color = selection_style_selection_color
-                    .unwrap_or_else(|| theme.color_scheme.primary.with_opacity(0.40));
+                    .unwrap_or_else(|| theme.color_scheme.primary().with_opacity(0.40));
                 handle_did_gain_accessibility_focus = Some(request_focus_on_accessibility_focus);
                 handle_did_lose_accessibility_focus = Some(unfocus_on_accessibility_focus_lost);
             }
@@ -2285,7 +2285,7 @@ fn m2_counter_error_style(app: &mut App, context: BuildContext) -> TextStyle {
         .clone()
         .expect("the theme's text theme has a bodySmall")
         .copy_with()
-        .color(theme.color_scheme.error)
+        .color(theme.color_scheme.error())
 }
 
 // Part of material_ui's `generated/text_field_defaults_m3.g.dart`.
@@ -2334,7 +2334,7 @@ fn m3_counter_error_style(app: &mut App, context: BuildContext) -> TextStyle {
         .clone()
         .expect("the theme's text theme has a bodySmall")
         .copy_with()
-        .color(theme.color_scheme.error)
+        .color(theme.color_scheme.error())
 }
 
 #[cfg(test)]
@@ -5355,7 +5355,7 @@ mod tests {
     #[test]
     fn cursor_does_not_animate_on_android() {
         test_widgets(|tester| {
-            let default_cursor_color = theme(tester).color_scheme.primary;
+            let default_cursor_color = theme(tester).color_scheme.primary();
             let root = material_home(
                 theme(tester),
                 TextField::new()
@@ -5461,7 +5461,7 @@ mod tests {
             for platform in ALL_PLATFORMS {
                 let mut tester = WidgetTester::on(platform);
                 let theme = theme(&tester);
-                let primary = theme.color_scheme.primary;
+                let primary = theme.color_scheme.primary();
                 let root = material_home(theme, TextField::new().autofocus(true));
                 tester.pump_widget(root);
                 tester.pump();

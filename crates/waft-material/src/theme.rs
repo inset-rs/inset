@@ -1421,10 +1421,13 @@ mod tests {
                 },
             );
             assert_eq!(resolved.brightness(), Some(Brightness::Dark));
-            assert_eq!(resolved.primary_color(), any(material.color_scheme.primary));
+            assert_eq!(
+                resolved.primary_color(),
+                any(material.color_scheme.primary())
+            );
             assert_eq!(
                 resolved.primary_contrasting_color(),
-                any(material.color_scheme.on_primary)
+                any(material.color_scheme.on_primary())
             );
             assert_eq!(
                 resolved.scaffold_background_color(),
@@ -1438,7 +1441,7 @@ mod tests {
             // The text theme derives from the Material primary colour.
             assert_eq!(
                 resolved.text_theme().action_text_style().color,
-                Some(any(material.color_scheme.primary))
+                Some(any(material.color_scheme.primary()))
             );
             assert_eq!(
                 resolved

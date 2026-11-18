@@ -876,7 +876,7 @@ mod tests {
                         color_scheme.on_secondary_container(),
                     )
                 } else {
-                    (color_scheme.primary, color_scheme.on_primary)
+                    (color_scheme.primary(), color_scheme.on_primary())
                 };
                 let plain = |child: WidgetRef, on_pressed: Option<Listener>| {
                     if tonal {
@@ -930,8 +930,8 @@ mod tests {
                 tester.pump_and_settle();
                 check_defaults(
                     tester,
-                    color_scheme.on_surface.with_opacity(0.12),
-                    color_scheme.on_surface.with_opacity(0.38),
+                    color_scheme.on_surface().with_opacity(0.12),
+                    color_scheme.on_surface().with_opacity(0.38),
                     0.0,
                 );
             }
@@ -1070,7 +1070,7 @@ mod tests {
                 let overlay = if tonal {
                     theme.color_scheme.on_secondary_container()
                 } else {
-                    theme.color_scheme.on_primary
+                    theme.color_scheme.on_primary()
                 };
                 let button = if tonal {
                     FilledButton::tonal(Some(pressed()), Some(text("FilledButton")))

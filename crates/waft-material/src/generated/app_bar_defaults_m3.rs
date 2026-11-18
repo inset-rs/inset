@@ -46,13 +46,13 @@ impl AppBarThemeDataGetters for AppBarDefaultsM3 {
     fn background_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.surface)
+        Some(colors.surface())
     }
 
     fn foreground_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface)
+        Some(colors.on_surface())
     }
 
     fn shadow_color(&self, _app: &mut App) -> Option<Color> {
@@ -66,7 +66,7 @@ impl AppBarThemeDataGetters for AppBarDefaultsM3 {
     fn icon_theme(&self, app: &mut App) -> Option<IconThemeData> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(IconThemeData::new().color(colors.on_surface).size(24.0))
+        Some(IconThemeData::new().color(colors.on_surface()).size(24.0))
     }
 
     fn actions_icon_theme(&self, app: &mut App) -> Option<IconThemeData> {
@@ -136,14 +136,14 @@ impl ScrollUnderFlexibleConfig for MediumScrollUnderFlexibleConfig {
         self.text_theme
             .title_large
             .as_ref()
-            .map(|style| style.apply().color(self.colors.on_surface).into_style())
+            .map(|style| style.apply().color(self.colors.on_surface()).into_style())
     }
 
     fn expanded_text_style(&self) -> Option<TextStyle> {
         self.text_theme
             .headline_small
             .as_ref()
-            .map(|style| style.apply().color(self.colors.on_surface).into_style())
+            .map(|style| style.apply().color(self.colors.on_surface()).into_style())
     }
 
     fn expanded_title_padding(&self) -> EdgeInsetsGeometry {
@@ -176,14 +176,14 @@ impl ScrollUnderFlexibleConfig for LargeScrollUnderFlexibleConfig {
         self.text_theme
             .title_large
             .as_ref()
-            .map(|style| style.apply().color(self.colors.on_surface).into_style())
+            .map(|style| style.apply().color(self.colors.on_surface()).into_style())
     }
 
     fn expanded_text_style(&self) -> Option<TextStyle> {
         self.text_theme
             .headline_medium
             .as_ref()
-            .map(|style| style.apply().color(self.colors.on_surface).into_style())
+            .map(|style| style.apply().color(self.colors.on_surface()).into_style())
     }
 
     fn expanded_title_padding(&self) -> EdgeInsetsGeometry {

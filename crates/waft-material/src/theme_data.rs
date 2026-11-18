@@ -901,7 +901,7 @@ impl ThemeData {
     /// [`Brightness::Light`] and white if the theme is constructed with
     /// [`Brightness::Dark`].
     pub fn brightness(&self) -> Brightness {
-        self.color_scheme.brightness
+        self.color_scheme.brightness()
     }
 
     /// Used to obtain a particular [`ThemeExtension`] from [`extensions`](Self::extensions).
@@ -2338,7 +2338,7 @@ impl ThemeDataBuilder {
         debug_assert!(
             color_scheme.is_none()
                 || brightness.is_none()
-                || color_scheme.as_ref().map(|scheme| scheme.brightness) == brightness,
+                || color_scheme.as_ref().map(|scheme| scheme.brightness()) == brightness,
             "ThemeData.brightness does not match ColorScheme.brightness. \
              Either override ColorScheme.brightness or ThemeData.brightness to \
              match the other."
@@ -2347,7 +2347,7 @@ impl ThemeDataBuilder {
         debug_assert!(color_scheme_seed.is_none() || primary_swatch.is_none());
         debug_assert!(color_scheme_seed.is_none() || primary_color.is_none());
         let effective_brightness = brightness
-            .or(color_scheme.as_ref().map(|scheme| scheme.brightness))
+            .or(color_scheme.as_ref().map(|scheme| scheme.brightness()))
             .unwrap_or(Brightness::Light);
         let is_dark = effective_brightness == Brightness::Dark;
         if color_scheme_seed.is_some() || use_material3 {
@@ -2365,23 +2365,23 @@ impl ThemeDataBuilder {
 
             // For surfaces that use primary color in light themes and surface color in dark
             let primary_surface_color = if is_dark {
-                color_scheme.surface
+                color_scheme.surface()
             } else {
-                color_scheme.primary
+                color_scheme.primary()
             };
             let on_primary_surface_color = if is_dark {
-                color_scheme.on_surface
+                color_scheme.on_surface()
             } else {
-                color_scheme.on_primary
+                color_scheme.on_primary()
             };
 
             // Default some of the color settings to values from the color scheme
             primary_color.get_or_insert(primary_surface_color);
-            canvas_color.get_or_insert(color_scheme.surface);
-            scaffold_background_color.get_or_insert(color_scheme.surface);
-            card_color.get_or_insert(color_scheme.surface);
+            canvas_color.get_or_insert(color_scheme.surface());
+            scaffold_background_color.get_or_insert(color_scheme.surface());
+            card_color.get_or_insert(color_scheme.surface());
             divider_color.get_or_insert(color_scheme.outline());
-            dialog_background_color.get_or_insert(color_scheme.surface);
+            dialog_background_color.get_or_insert(color_scheme.surface());
             indicator_color.get_or_insert(on_primary_surface_color);
             apply_elevation_overlay_color.get_or_insert(brightness == Some(Brightness::Dark));
         }
@@ -2609,10 +2609,10 @@ impl ThemeDataBuilder {
             }
         });
         let indicator_color =
-            indicator_color.unwrap_or(if color_scheme.secondary == primary_color {
+            indicator_color.unwrap_or(if color_scheme.secondary() == primary_color {
                 Colors::WHITE
             } else {
-                color_scheme.secondary
+                color_scheme.secondary()
             });
 
         ThemeData {
@@ -2749,28 +2749,28 @@ impl ThemeDataFromBuilder {
     #[allow(deprecated)]
     pub fn build(self, app: &App) -> ThemeData {
         let color_scheme = self.color_scheme;
-        let is_dark = color_scheme.brightness == Brightness::Dark;
+        let is_dark = color_scheme.brightness() == Brightness::Dark;
 
         // For surfaces that use primary color in light themes and surface color in dark
         let primary_surface_color = if is_dark {
-            color_scheme.surface
+            color_scheme.surface()
         } else {
-            color_scheme.primary
+            color_scheme.primary()
         };
         let on_primary_surface_color = if is_dark {
-            color_scheme.on_surface
+            color_scheme.on_surface()
         } else {
-            color_scheme.on_primary
+            color_scheme.on_primary()
         };
 
         let mut builder = ThemeData::builder()
-            .brightness(color_scheme.brightness)
+            .brightness(color_scheme.brightness())
             .primary_color(primary_surface_color)
-            .canvas_color(color_scheme.surface)
-            .scaffold_background_color(color_scheme.surface)
-            .card_color(color_scheme.surface)
-            .divider_color(color_scheme.on_surface.with_opacity(0.12))
-            .dialog_background_color(color_scheme.surface)
+            .canvas_color(color_scheme.surface())
+            .scaffold_background_color(color_scheme.surface())
+            .card_color(color_scheme.surface())
+            .divider_color(color_scheme.on_surface().with_opacity(0.12))
+            .dialog_background_color(color_scheme.surface())
             .indicator_color(on_primary_surface_color)
             .apply_elevation_overlay_color(is_dark)
             .color_scheme(color_scheme);
@@ -3611,7 +3611,7 @@ impl CupertinoThemeDataOverrides for MaterialBasedCupertinoThemeData {
         cupertino_override_theme
             .primary_color
             .clone()
-            .unwrap_or_else(|| AnyColor::new(self.material_theme.color_scheme.primary))
+            .unwrap_or_else(|| AnyColor::new(self.material_theme.color_scheme.primary()))
     }
 
     fn primary_contrasting_color(
@@ -3621,7 +3621,7 @@ impl CupertinoThemeDataOverrides for MaterialBasedCupertinoThemeData {
         cupertino_override_theme
             .primary_contrasting_color
             .clone()
-            .unwrap_or_else(|| AnyColor::new(self.material_theme.color_scheme.on_primary))
+            .unwrap_or_else(|| AnyColor::new(self.material_theme.color_scheme.on_primary()))
     }
 
     fn scaffold_background_color(
@@ -4223,14 +4223,14 @@ mod tests {
             let dark_medium = theme(Brightness::Dark, ContrastLevel::MEDIUM);
             let dark_high = theme(Brightness::Dark, ContrastLevel::HIGH);
 
-            assert_ne!(standard.primary, medium.primary);
-            assert_eq!(medium.primary, Color::new(0xFF4F378B));
-            assert_eq!(medium.on_surface, Color::new(0xFF000000));
-            assert_eq!(high.primary, Color::new(0xFF381E72));
+            assert_ne!(standard.primary(), medium.primary());
+            assert_eq!(medium.primary(), Color::new(0xFF4F378B));
+            assert_eq!(medium.on_surface(), Color::new(0xFF000000));
+            assert_eq!(high.primary(), Color::new(0xFF381E72));
             assert_eq!(high.on_surface_variant(), Color::new(0xFF000000));
-            assert_eq!(dark_medium.primary, Color::new(0xFFEADDFF));
-            assert_eq!(dark_medium.on_surface, Color::new(0xFFFFFFFF));
-            assert_eq!(dark_high.primary, Color::new(0xFFF6EDFF));
+            assert_eq!(dark_medium.primary(), Color::new(0xFFEADDFF));
+            assert_eq!(dark_medium.on_surface(), Color::new(0xFFFFFFFF));
+            assert_eq!(dark_high.primary(), Color::new(0xFFF6EDFF));
             assert_eq!(dark_high.on_surface_variant(), Color::new(0xFFFFFFFF));
         });
     }
@@ -4402,16 +4402,16 @@ mod tests {
                 .build(app);
             let scheme = &theme.color_scheme;
             let expected = [
-                (scheme.primary, Color::new(0xFF36618E)),
-                (scheme.on_primary, Color::new(0xFFFFFFFF)),
+                (scheme.primary(), Color::new(0xFF36618E)),
+                (scheme.on_primary(), Color::new(0xFFFFFFFF)),
                 (scheme.primary_container(), Color::new(0xFFD1E4FF)),
                 (scheme.on_primary_container(), Color::new(0xFF194975)),
                 (scheme.primary_fixed(), Color::new(0xFFD1E4FF)),
                 (scheme.primary_fixed_dim(), Color::new(0xFFA0CAFD)),
                 (scheme.on_primary_fixed(), Color::new(0xFF001D36)),
                 (scheme.on_primary_fixed_variant(), Color::new(0xFF194975)),
-                (scheme.secondary, Color::new(0xFF535F70)),
-                (scheme.on_secondary, Color::new(0xFFFFFFFF)),
+                (scheme.secondary(), Color::new(0xFF535F70)),
+                (scheme.on_secondary(), Color::new(0xFFFFFFFF)),
                 (scheme.secondary_container(), Color::new(0xFFD7E3F7)),
                 (scheme.on_secondary_container(), Color::new(0xFF3B4858)),
                 (scheme.secondary_fixed(), Color::new(0xFFD7E3F7)),
@@ -4426,15 +4426,15 @@ mod tests {
                 (scheme.tertiary_fixed_dim(), Color::new(0xFFD6BEE4)),
                 (scheme.on_tertiary_fixed(), Color::new(0xFF251431)),
                 (scheme.on_tertiary_fixed_variant(), Color::new(0xFF523F5F)),
-                (scheme.error, Color::new(0xFFBA1A1A)),
-                (scheme.on_error, Color::new(0xFFFFFFFF)),
+                (scheme.error(), Color::new(0xFFBA1A1A)),
+                (scheme.on_error(), Color::new(0xFFFFFFFF)),
                 (scheme.error_container(), Color::new(0xFFFFDAD6)),
                 (scheme.on_error_container(), Color::new(0xFF93000A)),
                 (scheme.outline(), Color::new(0xFF73777F)),
                 (scheme.outline_variant(), Color::new(0xFFC3C7CF)),
                 (scheme.background(), Color::new(0xFFF8F9FF)),
                 (scheme.on_background(), Color::new(0xFF191C20)),
-                (scheme.surface, Color::new(0xFFF8F9FF)),
+                (scheme.surface(), Color::new(0xFFF8F9FF)),
                 (scheme.surface_bright(), Color::new(0xFFF8F9FF)),
                 (scheme.surface_dim(), Color::new(0xFFD8DAE0)),
                 (scheme.surface_container_lowest(), Color::new(0xFFFFFFFF)),
@@ -4442,7 +4442,7 @@ mod tests {
                 (scheme.surface_container(), Color::new(0xFFECEEF4)),
                 (scheme.surface_container_high(), Color::new(0xFFE6E8EE)),
                 (scheme.surface_container_highest(), Color::new(0xFFE1E2E8)),
-                (scheme.on_surface, Color::new(0xFF191C20)),
+                (scheme.on_surface(), Color::new(0xFF191C20)),
                 (scheme.surface_variant(), Color::new(0xFFDFE2EB)),
                 (scheme.on_surface_variant(), Color::new(0xFF43474E)),
                 (scheme.inverse_surface(), Color::new(0xFF2E3135)),
@@ -4455,15 +4455,15 @@ mod tests {
             for (index, (actual, expected)) in expected.into_iter().enumerate() {
                 assert_eq!(actual, expected, "colour {index}");
             }
-            assert_eq!(scheme.brightness, Brightness::Light);
+            assert_eq!(scheme.brightness(), Brightness::Light);
 
-            assert_eq!(theme.primary_color, scheme.primary);
-            assert_eq!(theme.canvas_color, scheme.surface);
-            assert_eq!(theme.scaffold_background_color, scheme.surface);
-            assert_eq!(theme.card_color, scheme.surface);
+            assert_eq!(theme.primary_color, scheme.primary());
+            assert_eq!(theme.canvas_color, scheme.surface());
+            assert_eq!(theme.scaffold_background_color, scheme.surface());
+            assert_eq!(theme.card_color, scheme.surface());
             assert_eq!(theme.divider_color, scheme.outline());
-            assert_eq!(theme.dialog_background_color, scheme.surface);
-            assert_eq!(theme.indicator_color, scheme.on_primary);
+            assert_eq!(theme.dialog_background_color, scheme.surface());
+            assert_eq!(theme.indicator_color, scheme.on_primary());
             assert!(!theme.apply_elevation_overlay_color);
         });
     }
@@ -4477,16 +4477,16 @@ mod tests {
                 .build(app);
             let scheme = &theme.color_scheme;
             let expected = [
-                (scheme.primary, Color::new(0xFFA0CAFD)),
-                (scheme.on_primary, Color::new(0xFF003258)),
+                (scheme.primary(), Color::new(0xFFA0CAFD)),
+                (scheme.on_primary(), Color::new(0xFF003258)),
                 (scheme.primary_container(), Color::new(0xFF194975)),
                 (scheme.on_primary_container(), Color::new(0xFFD1E4FF)),
                 (scheme.primary_fixed(), Color::new(0xFFD1E4FF)),
                 (scheme.primary_fixed_dim(), Color::new(0xFFA0CAFD)),
                 (scheme.on_primary_fixed(), Color::new(0xFF001D36)),
                 (scheme.on_primary_fixed_variant(), Color::new(0xFF194975)),
-                (scheme.secondary, Color::new(0xFFBBC7DB)),
-                (scheme.on_secondary, Color::new(0xFF253140)),
+                (scheme.secondary(), Color::new(0xFFBBC7DB)),
+                (scheme.on_secondary(), Color::new(0xFF253140)),
                 (scheme.secondary_container(), Color::new(0xFF3B4858)),
                 (scheme.on_secondary_container(), Color::new(0xFFD7E3F7)),
                 (scheme.secondary_fixed(), Color::new(0xFFD7E3F7)),
@@ -4501,15 +4501,15 @@ mod tests {
                 (scheme.tertiary_fixed_dim(), Color::new(0xFFD6BEE4)),
                 (scheme.on_tertiary_fixed(), Color::new(0xFF251431)),
                 (scheme.on_tertiary_fixed_variant(), Color::new(0xFF523F5F)),
-                (scheme.error, Color::new(0xFFFFB4AB)),
-                (scheme.on_error, Color::new(0xFF690005)),
+                (scheme.error(), Color::new(0xFFFFB4AB)),
+                (scheme.on_error(), Color::new(0xFF690005)),
                 (scheme.error_container(), Color::new(0xFF93000A)),
                 (scheme.on_error_container(), Color::new(0xFFFFDAD6)),
                 (scheme.outline(), Color::new(0xFF8D9199)),
                 (scheme.outline_variant(), Color::new(0xFF43474E)),
                 (scheme.background(), Color::new(0xFF111418)),
                 (scheme.on_background(), Color::new(0xFFE1E2E8)),
-                (scheme.surface, Color::new(0xFF111418)),
+                (scheme.surface(), Color::new(0xFF111418)),
                 (scheme.surface_dim(), Color::new(0xFF111418)),
                 (scheme.surface_bright(), Color::new(0xFF36393E)),
                 (scheme.surface_container_lowest(), Color::new(0xFF0B0E13)),
@@ -4517,7 +4517,7 @@ mod tests {
                 (scheme.surface_container(), Color::new(0xFF1D2024)),
                 (scheme.surface_container_high(), Color::new(0xFF272A2F)),
                 (scheme.surface_container_highest(), Color::new(0xFF32353A)),
-                (scheme.on_surface, Color::new(0xFFE1E2E8)),
+                (scheme.on_surface(), Color::new(0xFFE1E2E8)),
                 (scheme.surface_variant(), Color::new(0xFF43474E)),
                 (scheme.on_surface_variant(), Color::new(0xFFC3C7CF)),
                 (scheme.inverse_surface(), Color::new(0xFFE1E2E8)),
@@ -4530,15 +4530,15 @@ mod tests {
             for (index, (actual, expected)) in expected.into_iter().enumerate() {
                 assert_eq!(actual, expected, "colour {index}");
             }
-            assert_eq!(scheme.brightness, Brightness::Dark);
+            assert_eq!(scheme.brightness(), Brightness::Dark);
 
-            assert_eq!(theme.primary_color, scheme.surface);
-            assert_eq!(theme.canvas_color, scheme.surface);
-            assert_eq!(theme.scaffold_background_color, scheme.surface);
-            assert_eq!(theme.card_color, scheme.surface);
+            assert_eq!(theme.primary_color, scheme.surface());
+            assert_eq!(theme.canvas_color, scheme.surface());
+            assert_eq!(theme.scaffold_background_color, scheme.surface());
+            assert_eq!(theme.card_color, scheme.surface());
             assert_eq!(theme.divider_color, scheme.outline());
-            assert_eq!(theme.dialog_background_color, scheme.surface);
-            assert_eq!(theme.indicator_color, scheme.on_surface);
+            assert_eq!(theme.dialog_background_color, scheme.surface());
+            assert_eq!(theme.indicator_color, scheme.on_surface());
             assert!(theme.apply_elevation_overlay_color);
         });
     }
@@ -4552,16 +4552,16 @@ mod tests {
                 let theme = Box::new(constructor(app));
                 let scheme = &theme.color_scheme;
                 let expected = [
-                    (scheme.primary, Color::new(0xFF6750A4)),
-                    (scheme.on_primary, Color::new(0xFFFFFFFF)),
+                    (scheme.primary(), Color::new(0xFF6750A4)),
+                    (scheme.on_primary(), Color::new(0xFFFFFFFF)),
                     (scheme.primary_container(), Color::new(0xFFEADDFF)),
                     (scheme.on_primary_container(), Color::new(0xFF4F378B)),
                     (scheme.primary_fixed(), Color::new(0xFFEADDFF)),
                     (scheme.primary_fixed_dim(), Color::new(0xFFD0BCFF)),
                     (scheme.on_primary_fixed(), Color::new(0xFF21005D)),
                     (scheme.on_primary_fixed_variant(), Color::new(0xFF4F378B)),
-                    (scheme.secondary, Color::new(0xFF625B71)),
-                    (scheme.on_secondary, Color::new(0xFFFFFFFF)),
+                    (scheme.secondary(), Color::new(0xFF625B71)),
+                    (scheme.on_secondary(), Color::new(0xFFFFFFFF)),
                     (scheme.secondary_container(), Color::new(0xFFE8DEF8)),
                     (scheme.on_secondary_container(), Color::new(0xFF4A4458)),
                     (scheme.secondary_fixed(), Color::new(0xFFE8DEF8)),
@@ -4576,15 +4576,15 @@ mod tests {
                     (scheme.tertiary_fixed_dim(), Color::new(0xFFEFB8C8)),
                     (scheme.on_tertiary_fixed(), Color::new(0xFF31111D)),
                     (scheme.on_tertiary_fixed_variant(), Color::new(0xFF633B48)),
-                    (scheme.error, Color::new(0xFFB3261E)),
-                    (scheme.on_error, Color::new(0xFFFFFFFF)),
+                    (scheme.error(), Color::new(0xFFB3261E)),
+                    (scheme.on_error(), Color::new(0xFFFFFFFF)),
                     (scheme.error_container(), Color::new(0xFFF9DEDC)),
                     (scheme.on_error_container(), Color::new(0xFF8C1D18)),
                     (scheme.outline(), Color::new(0xFF79747E)),
                     (scheme.background(), Color::new(0xFFFEF7FF)),
                     (scheme.on_background(), Color::new(0xFF1D1B20)),
-                    (scheme.surface, Color::new(0xFFFEF7FF)),
-                    (scheme.on_surface, Color::new(0xFF1D1B20)),
+                    (scheme.surface(), Color::new(0xFFFEF7FF)),
+                    (scheme.on_surface(), Color::new(0xFF1D1B20)),
                     (scheme.surface_variant(), Color::new(0xFFE7E0EC)),
                     (scheme.on_surface_variant(), Color::new(0xFF49454F)),
                     (scheme.surface_bright(), Color::new(0xFFFEF7FF)),
@@ -4602,15 +4602,15 @@ mod tests {
                 for (index, (actual, expected)) in expected.into_iter().enumerate() {
                     assert_eq!(actual, expected, "colour {index}");
                 }
-                assert_eq!(scheme.brightness, Brightness::Light);
+                assert_eq!(scheme.brightness(), Brightness::Light);
 
-                assert_eq!(theme.primary_color, scheme.primary);
-                assert_eq!(theme.canvas_color, scheme.surface);
-                assert_eq!(theme.scaffold_background_color, scheme.surface);
-                assert_eq!(theme.card_color, scheme.surface);
+                assert_eq!(theme.primary_color, scheme.primary());
+                assert_eq!(theme.canvas_color, scheme.surface());
+                assert_eq!(theme.scaffold_background_color, scheme.surface());
+                assert_eq!(theme.card_color, scheme.surface());
                 assert_eq!(theme.divider_color, scheme.outline());
-                assert_eq!(theme.dialog_background_color, scheme.surface);
-                assert_eq!(theme.indicator_color, scheme.on_primary);
+                assert_eq!(theme.dialog_background_color, scheme.surface());
+                assert_eq!(theme.indicator_color, scheme.on_primary());
                 assert!(!theme.apply_elevation_overlay_color);
             }
         });
@@ -4622,16 +4622,16 @@ mod tests {
             let theme = ThemeData::dark(app, None);
             let scheme = &theme.color_scheme;
             let expected = [
-                (scheme.primary, Color::new(0xFFD0BCFF)),
-                (scheme.on_primary, Color::new(0xFF381E72)),
+                (scheme.primary(), Color::new(0xFFD0BCFF)),
+                (scheme.on_primary(), Color::new(0xFF381E72)),
                 (scheme.primary_container(), Color::new(0xFF4F378B)),
                 (scheme.on_primary_container(), Color::new(0xFFEADDFF)),
                 (scheme.primary_fixed(), Color::new(0xFFEADDFF)),
                 (scheme.primary_fixed_dim(), Color::new(0xFFD0BCFF)),
                 (scheme.on_primary_fixed(), Color::new(0xFF21005D)),
                 (scheme.on_primary_fixed_variant(), Color::new(0xFF4F378B)),
-                (scheme.secondary, Color::new(0xFFCCC2DC)),
-                (scheme.on_secondary, Color::new(0xFF332D41)),
+                (scheme.secondary(), Color::new(0xFFCCC2DC)),
+                (scheme.on_secondary(), Color::new(0xFF332D41)),
                 (scheme.secondary_container(), Color::new(0xFF4A4458)),
                 (scheme.on_secondary_container(), Color::new(0xFFE8DEF8)),
                 (scheme.secondary_fixed(), Color::new(0xFFE8DEF8)),
@@ -4646,15 +4646,15 @@ mod tests {
                 (scheme.tertiary_fixed_dim(), Color::new(0xFFEFB8C8)),
                 (scheme.on_tertiary_fixed(), Color::new(0xFF31111D)),
                 (scheme.on_tertiary_fixed_variant(), Color::new(0xFF633B48)),
-                (scheme.error, Color::new(0xFFF2B8B5)),
-                (scheme.on_error, Color::new(0xFF601410)),
+                (scheme.error(), Color::new(0xFFF2B8B5)),
+                (scheme.on_error(), Color::new(0xFF601410)),
                 (scheme.error_container(), Color::new(0xFF8C1D18)),
                 (scheme.on_error_container(), Color::new(0xFFF9DEDC)),
                 (scheme.outline(), Color::new(0xFF938F99)),
                 (scheme.background(), Color::new(0xFF141218)),
                 (scheme.on_background(), Color::new(0xFFE6E0E9)),
-                (scheme.surface, Color::new(0xFF141218)),
-                (scheme.on_surface, Color::new(0xFFE6E0E9)),
+                (scheme.surface(), Color::new(0xFF141218)),
+                (scheme.on_surface(), Color::new(0xFFE6E0E9)),
                 (scheme.surface_variant(), Color::new(0xFF49454F)),
                 (scheme.on_surface_variant(), Color::new(0xFFCAC4D0)),
                 (scheme.surface_bright(), Color::new(0xFF3B383E)),
@@ -4672,15 +4672,15 @@ mod tests {
             for (index, (actual, expected)) in expected.into_iter().enumerate() {
                 assert_eq!(actual, expected, "colour {index}");
             }
-            assert_eq!(scheme.brightness, Brightness::Dark);
+            assert_eq!(scheme.brightness(), Brightness::Dark);
 
-            assert_eq!(theme.primary_color, scheme.surface);
-            assert_eq!(theme.canvas_color, scheme.surface);
-            assert_eq!(theme.scaffold_background_color, scheme.surface);
-            assert_eq!(theme.card_color, scheme.surface);
+            assert_eq!(theme.primary_color, scheme.surface());
+            assert_eq!(theme.canvas_color, scheme.surface());
+            assert_eq!(theme.scaffold_background_color, scheme.surface());
+            assert_eq!(theme.card_color, scheme.surface());
             assert_eq!(theme.divider_color, scheme.outline());
-            assert_eq!(theme.dialog_background_color, scheme.surface);
-            assert_eq!(theme.indicator_color, scheme.on_surface);
+            assert_eq!(theme.dialog_background_color, scheme.surface());
+            assert_eq!(theme.indicator_color, scheme.on_surface());
             assert!(theme.apply_elevation_overlay_color);
         });
     }
@@ -4692,11 +4692,11 @@ mod tests {
             let theme = ThemeData::from(light_colors.clone()).build(app);
 
             assert_eq!(theme.brightness(), Brightness::Light);
-            assert_eq!(theme.primary_color, light_colors.primary);
-            assert_eq!(theme.card_color, light_colors.surface);
-            assert_eq!(theme.canvas_color, light_colors.surface);
-            assert_eq!(theme.scaffold_background_color, light_colors.surface);
-            assert_eq!(theme.dialog_background_color, light_colors.surface);
+            assert_eq!(theme.primary_color, light_colors.primary());
+            assert_eq!(theme.card_color, light_colors.surface());
+            assert_eq!(theme.canvas_color, light_colors.surface());
+            assert_eq!(theme.scaffold_background_color, light_colors.surface());
+            assert_eq!(theme.dialog_background_color, light_colors.surface());
             assert!(!theme.apply_elevation_overlay_color);
         });
     }
@@ -4709,11 +4709,11 @@ mod tests {
 
             assert_eq!(theme.brightness(), Brightness::Dark);
             // in dark theme's the color used for main components is surface instead of primary
-            assert_eq!(theme.primary_color, dark_colors.surface);
-            assert_eq!(theme.card_color, dark_colors.surface);
-            assert_eq!(theme.canvas_color, dark_colors.surface);
-            assert_eq!(theme.scaffold_background_color, dark_colors.surface);
-            assert_eq!(theme.dialog_background_color, dark_colors.surface);
+            assert_eq!(theme.primary_color, dark_colors.surface());
+            assert_eq!(theme.card_color, dark_colors.surface());
+            assert_eq!(theme.canvas_color, dark_colors.surface());
+            assert_eq!(theme.scaffold_background_color, dark_colors.surface());
+            assert_eq!(theme.dialog_background_color, dark_colors.surface());
             assert!(theme.apply_elevation_overlay_color);
         });
     }
@@ -5769,12 +5769,12 @@ mod tests {
 
             // The brightness parameter only overrides ColorScheme.brightness.
             assert_eq!(theme.brightness(), Brightness::Dark);
-            assert_eq!(theme.color_scheme.brightness, Brightness::Dark);
-            assert_eq!(theme.primary_color, light_colors.primary);
-            assert_eq!(theme.card_color, light_colors.surface);
-            assert_eq!(theme.canvas_color, light_colors.surface);
-            assert_eq!(theme.scaffold_background_color, light_colors.surface);
-            assert_eq!(theme.dialog_background_color, light_colors.surface);
+            assert_eq!(theme.color_scheme.brightness(), Brightness::Dark);
+            assert_eq!(theme.primary_color, light_colors.primary());
+            assert_eq!(theme.card_color, light_colors.surface());
+            assert_eq!(theme.canvas_color, light_colors.surface());
+            assert_eq!(theme.scaffold_background_color, light_colors.surface());
+            assert_eq!(theme.dialog_background_color, light_colors.surface());
             assert!(!theme.apply_elevation_overlay_color);
         });
     }
@@ -5788,7 +5788,7 @@ mod tests {
                 .brightness(Brightness::Dark)
                 .color_scheme(ColorScheme::light())
                 .build();
-            assert_eq!(brightness_first.color_scheme.brightness, Brightness::Dark);
+            assert_eq!(brightness_first.color_scheme.brightness(), Brightness::Dark);
         });
     }
 

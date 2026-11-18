@@ -190,7 +190,7 @@ impl ProgressIndicatorData {
         {
             return color;
         }
-        Theme::of(app, context).color_scheme.primary
+        Theme::of(app, context).color_scheme.primary()
     }
 }
 
@@ -2340,7 +2340,7 @@ impl ProgressIndicatorThemeDataGetters for CircularProgressIndicatorDefaultsM2 {
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn stroke_width(&self, _app: &mut App) -> Option<f64> {
@@ -2378,7 +2378,7 @@ impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM2 {
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn linear_track_color(&self, app: &mut App) -> Option<Color> {
@@ -2422,7 +2422,7 @@ impl ProgressIndicatorThemeDataGetters for CircularProgressIndicatorDefaultsM3Ye
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn stroke_width(&self, _app: &mut App) -> Option<f64> {
@@ -2460,7 +2460,7 @@ impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM3Year
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn linear_track_color(&self, app: &mut App) -> Option<Color> {
@@ -3009,7 +3009,7 @@ pub(crate) mod tests {
                 &painted_by::<LinearProgressIndicator>(tester),
                 &[
                     rect(track).color(default_theme.color_scheme.secondary_container()),
-                    rect(active).color(default_theme.color_scheme.primary),
+                    rect(active).color(default_theme.color_scheme.primary()),
                 ]
             ));
 
@@ -3878,7 +3878,7 @@ pub(crate) mod tests {
     #[test]
     fn linear_progress_indicator_default_stop_indicator_when_year2023_is_false() {
         test_widgets(|tester| {
-            let primary = theme(&tester.cell.borrow()).color_scheme.primary;
+            let primary = theme(&tester.cell.borrow()).color_scheme.primary();
             pump_linear_2024(
                 tester,
                 TextDirection::Ltr,
@@ -3904,7 +3904,7 @@ pub(crate) mod tests {
     #[test]
     fn indeterminate_linear_progress_indicator_does_not_paint_stop_indicator() {
         test_widgets(|tester| {
-            let primary = theme(&tester.cell.borrow()).color_scheme.primary;
+            let primary = theme(&tester.cell.borrow()).color_scheme.primary();
             let stop_indicator = [circle().at(198.0, 2.0).radius(2.0).color(primary)];
 
             // Determinate LinearProgressIndicator paints stop indicator.
@@ -3990,7 +3990,7 @@ pub(crate) mod tests {
     #[test]
     fn stop_indicator_size_cannot_be_larger_than_the_progress_indicator() {
         test_widgets(|tester| {
-            let primary = theme(&tester.cell.borrow()).color_scheme.primary;
+            let primary = theme(&tester.cell.borrow()).color_scheme.primary();
             // Test stop indicator radius equals to minHeight, then larger than minHeight: the
             // radius is clamped to minHeight.
             for stop_indicator_radius in [10.0, 30.0] {
@@ -4036,7 +4036,7 @@ pub(crate) mod tests {
                     ))
                     .color(colors.secondary_container()),
                     // Active track.
-                    rrect(RRect::from_ltrbr(0.0, 0.0, 100.0, 4.0, radius)).color(colors.primary),
+                    rrect(RRect::from_ltrbr(0.0, 0.0, 100.0, 4.0, radius)).color(colors.primary()),
                 ]
             ));
 
@@ -4059,7 +4059,8 @@ pub(crate) mod tests {
                     ))
                     .color(colors.secondary_container()),
                     // Active track.
-                    rrect(RRect::from_ltrbr(100.0, 0.0, 200.0, 4.0, radius)).color(colors.primary),
+                    rrect(RRect::from_ltrbr(100.0, 0.0, 200.0, 4.0, radius))
+                        .color(colors.primary()),
                 ]
             ));
         });
@@ -4088,7 +4089,7 @@ pub(crate) mod tests {
                         circle(),
                         // Active indicator.
                         rrect(RRect::from_ltrbr(0.0, 0.0, 100.0, 4.0, radius))
-                            .color(colors.primary),
+                            .color(colors.primary()),
                     ]
                 ));
             }
@@ -4138,7 +4139,7 @@ pub(crate) mod tests {
                     // Active indicator.
                     arc()
                         .in_rect(arc_rect)
-                        .color(colors.primary)
+                        .color(colors.primary())
                         .stroke_width(4.0)
                         .stroke_cap(StrokeCap::Round),
                 ]
@@ -4171,7 +4172,7 @@ pub(crate) mod tests {
                     // Active indicator.
                     arc()
                         .in_rect(Rect::from_ltrb(2.0, 2.0, 38.0, 38.0))
-                        .color(colors.primary)
+                        .color(colors.primary())
                         .stroke_width(4.0)
                         .stroke_cap(StrokeCap::Round),
                 ]

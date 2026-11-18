@@ -2218,7 +2218,7 @@ mod tests {
             let primary = Rc::new(Cell::new(Color::new(0)));
             let build_chip = |tester: &mut WidgetTester, seed_color: Color| {
                 let color_scheme = ColorScheme::from_seed(seed_color).build();
-                primary.set(color_scheme.primary);
+                primary.set(color_scheme.primary());
                 let side_primary = Rc::clone(&primary);
                 let theme = ThemeData::builder()
                     .color_scheme(color_scheme)

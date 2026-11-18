@@ -569,7 +569,11 @@ impl MenuAnchor {
     }
 
     /// Dart `MenuAnchor(reservedPadding:)`.
-    pub fn reserved_padding(mut self, reserved_padding: EdgeInsetsGeometry) -> MenuAnchor {
+    pub fn reserved_padding(
+        mut self,
+        reserved_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> MenuAnchor {
+        let reserved_padding = reserved_padding.into();
         self.reserved_padding = Some(reserved_padding);
         self
     }
@@ -6608,7 +6612,10 @@ mod tests {
                         &waft_painting::RoundedRectangleBorder::default()
                     ));
                     let text_style = material.text_style.as_ref().expect("a text style");
-                    assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+                    assert_eq!(
+                        text_style.color,
+                        Some(theme.color_scheme.on_surface().into())
+                    );
                     assert_eq!(text_style.font_size, Some(14.0));
                     assert_eq!(text_style.height, Some(1.43));
                 });
@@ -6632,7 +6639,10 @@ mod tests {
                         &waft_painting::RoundedRectangleBorder::default()
                     ));
                     let text_style = material.text_style.as_ref().expect("a text style");
-                    assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+                    assert_eq!(
+                        text_style.color,
+                        Some(theme.color_scheme.on_surface().into())
+                    );
                     assert_eq!(text_style.font_size, Some(14.0));
                     assert_eq!(text_style.height, Some(1.43));
                 });
@@ -6666,7 +6676,7 @@ mod tests {
                             .into_widget()
                     },
                 );
-                let disabled = theme.color_scheme.on_surface.with_opacity(0.38);
+                let disabled = theme.color_scheme.on_surface().with_opacity(0.38);
 
                 // Menu bar (horizontal menu).
                 let button = widget_with_text::<TextButton>(tester, &TestMenu::MainMenu5.label());

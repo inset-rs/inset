@@ -61,7 +61,7 @@ impl SearchBarThemeDataGetters for SearchBarDefaultsM3 {
     }
 
     fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Pressed) {
                 return Some(on_surface.with_opacity(0.1));
@@ -91,7 +91,7 @@ impl SearchBarThemeDataGetters for SearchBarDefaultsM3 {
     }
 
     fn text_style(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<TextStyle>>> {
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         let style = self
             .context
             .text_theme(app)

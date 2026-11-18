@@ -1253,7 +1253,7 @@ impl RadioThemeDataGetters for RadioDefaultsM2 {
     fn fill_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let disabled_color = theme.disabled_color;
-        let secondary = theme.color_scheme.secondary;
+        let secondary = theme.color_scheme.secondary();
         let unselected_widget_color = theme.unselected_widget_color;
         let fill_color = move |states: &WidgetStates| -> Color {
             if states.contains(&WidgetState::Disabled) {
@@ -1272,7 +1272,7 @@ impl RadioThemeDataGetters for RadioDefaultsM2 {
     fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let disabled_color = theme.disabled_color;
-        let secondary = theme.color_scheme.secondary;
+        let secondary = theme.color_scheme.secondary();
         let unselected_widget_color = theme.unselected_widget_color;
         let hover_color = theme.hover_color;
         let focus_color = theme.focus_color;
@@ -1832,8 +1832,8 @@ pub(crate) mod tests {
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
-                    circle(colors.primary),
-                    circle(colors.primary),
+                    circle(colors.primary()),
+                    circle(colors.primary()),
                 ],
             );
 
@@ -1852,7 +1852,7 @@ pub(crate) mod tests {
                 &[
                     any_rect(),
                     circle(Colors::ORANGE.shade500()),
-                    circle(colors.on_surface),
+                    circle(colors.on_surface()),
                 ],
             );
 
@@ -1865,8 +1865,8 @@ pub(crate) mod tests {
                 radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
-                    circle(colors.on_surface.with_opacity(0.38)),
-                    circle(colors.on_surface.with_opacity(0.38)),
+                    circle(colors.on_surface().with_opacity(0.38)),
+                    circle(colors.on_surface().with_opacity(0.38)),
                 ],
             );
         });
@@ -1943,8 +1943,8 @@ pub(crate) mod tests {
                 radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
-                    circle(colors.primary),
-                    circle(colors.primary),
+                    circle(colors.primary()),
+                    circle(colors.primary()),
                 ],
             );
 
@@ -1963,7 +1963,7 @@ pub(crate) mod tests {
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
                     circle(Colors::ORANGE.shade500()),
-                    circle(colors.on_surface).stroke_width(2.0),
+                    circle(colors.on_surface()).stroke_width(2.0),
                 ],
             );
 
@@ -1976,8 +1976,8 @@ pub(crate) mod tests {
                 radio_material::<i32>(tester),
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
-                    circle(colors.on_surface.with_opacity(0.38)),
-                    circle(colors.on_surface.with_opacity(0.38)),
+                    circle(colors.on_surface().with_opacity(0.38)),
+                    circle(colors.on_surface().with_opacity(0.38)),
                 ],
             );
         });
@@ -2382,7 +2382,7 @@ pub(crate) mod tests {
     #[test]
     fn material3_the_fill_color_resolves_in_hovered_and_focused_states() {
         test_widgets(|tester| {
-            let primary = m3(tester).color_scheme.primary;
+            let primary = m3(tester).color_scheme.primary();
             fill_color_in_hovered_and_focused_states(
                 tester,
                 true,
@@ -2606,12 +2606,12 @@ pub(crate) mod tests {
     fn default_colors(tester: &mut WidgetTester, m3_theme: bool) {
         let theme = if m3_theme { m3(tester) } else { m2(tester) };
         let selected = if m3_theme {
-            theme.color_scheme.primary
+            theme.color_scheme.primary()
         } else {
             Color::new(0xFF2196F3)
         };
         let disabled = if m3_theme {
-            theme.color_scheme.on_surface.with_opacity(0.38)
+            theme.color_scheme.on_surface().with_opacity(0.38)
         } else {
             Colors::BLACK38
         };
@@ -2687,7 +2687,7 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 radio_material::<bool>(tester),
-                &[circle(colors.secondary)],
+                &[circle(colors.secondary())],
             );
 
             // selected radio in pressed state
@@ -2699,8 +2699,8 @@ pub(crate) mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    circle(colors.secondary.with_alpha(0x1F)),
-                    circle(colors.secondary),
+                    circle(colors.secondary().with_alpha(0x1F)),
+                    circle(colors.secondary()),
                 ],
             );
 
@@ -2726,7 +2726,7 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 radio_material::<bool>(tester),
-                &[circle(theme.focus_color), circle(colors.secondary)],
+                &[circle(theme.focus_color), circle(colors.secondary())],
             );
 
             // unselected radio in focused state
@@ -2752,7 +2752,7 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 radio_material::<bool>(tester),
-                &[circle(theme.hover_color), circle(colors.secondary)],
+                &[circle(theme.hover_color), circle(colors.secondary())],
             );
         });
     }
@@ -2782,7 +2782,7 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 radio_material::<bool>(tester),
-                &[circle(colors.primary.with_opacity(1.0))],
+                &[circle(colors.primary().with_opacity(1.0))],
             );
 
             // selected radio in pressed state
@@ -2794,8 +2794,8 @@ pub(crate) mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    circle(colors.on_surface.with_opacity(0.1)),
-                    circle(colors.primary.with_opacity(1.0)),
+                    circle(colors.on_surface().with_opacity(0.1)),
+                    circle(colors.primary().with_opacity(1.0)),
                 ],
             );
 
@@ -2808,7 +2808,7 @@ pub(crate) mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    circle(colors.primary.with_opacity(0.1)),
+                    circle(colors.primary().with_opacity(0.1)),
                     circle(colors.on_surface_variant().with_opacity(1.0)),
                 ],
             );
@@ -2822,8 +2822,8 @@ pub(crate) mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    circle(colors.primary.with_opacity(0.1)),
-                    circle(colors.primary.with_opacity(1.0)),
+                    circle(colors.primary().with_opacity(0.1)),
+                    circle(colors.primary().with_opacity(1.0)),
                 ],
             );
 
@@ -2836,8 +2836,8 @@ pub(crate) mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    circle(colors.on_surface.with_opacity(0.1)),
-                    circle(colors.on_surface.with_opacity(1.0)),
+                    circle(colors.on_surface().with_opacity(0.1)),
+                    circle(colors.on_surface().with_opacity(1.0)),
                 ],
             );
 
@@ -2851,8 +2851,8 @@ pub(crate) mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    circle(colors.primary.with_opacity(0.08)),
-                    circle(colors.primary.with_opacity(1.0)),
+                    circle(colors.primary().with_opacity(0.08)),
+                    circle(colors.primary().with_opacity(1.0)),
                 ],
             );
         });
@@ -2965,11 +2965,11 @@ pub(crate) mod tests {
                 |theme| {
                     theme
                         .color_scheme
-                        .secondary
+                        .secondary()
                         .with_alpha(K_RADIAL_REACTION_ALPHA)
                 },
                 |theme| theme.focus_color,
-                |theme| theme.color_scheme.secondary,
+                |theme| theme.color_scheme.secondary(),
             );
         });
     }
@@ -2980,10 +2980,10 @@ pub(crate) mod tests {
             default_overlay_and_fill_colors_resolve_the_pressed_state(
                 tester,
                 true,
-                |theme| theme.color_scheme.primary.with_opacity(0.08),
-                |theme| theme.color_scheme.on_surface.with_opacity(0.1),
-                |theme| theme.color_scheme.primary.with_opacity(0.1),
-                |theme| theme.color_scheme.primary,
+                |theme| theme.color_scheme.primary().with_opacity(0.08),
+                |theme| theme.color_scheme.on_surface().with_opacity(0.1),
+                |theme| theme.color_scheme.primary().with_opacity(0.1),
+                |theme| theme.color_scheme.primary(),
             );
         });
     }
@@ -3060,7 +3060,7 @@ pub(crate) mod tests {
             .into_erased::<waft_widgets::AnyFocusNode>();
         focus_node.set_debug_label(&mut tester.cell.borrow_mut(), Some("radio".into()));
         let theme = m3(tester);
-        let primary = theme.color_scheme.primary;
+        let primary = theme.color_scheme.primary();
 
         tester.pump_widget(group_app(theme, 0, {
             let focus_node = focus_node.clone();
@@ -3228,8 +3228,8 @@ pub(crate) mod tests {
                 true,
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
-                    circle(colors.primary),
-                    circle(colors.primary).radius(ENABLED_INNER_RADIUS),
+                    circle(colors.primary()),
+                    circle(colors.primary()).radius(ENABLED_INNER_RADIUS),
                 ],
             );
             // Disabled.
@@ -3237,8 +3237,8 @@ pub(crate) mod tests {
                 false,
                 &[
                     rect(Color::new(0xffffffff), CENTER_RECT),
-                    circle(colors.on_surface.with_alpha(97)),
-                    circle(colors.on_surface.with_alpha(97)).radius(DISABLED_INNER_RADIUS),
+                    circle(colors.on_surface().with_alpha(97)),
+                    circle(colors.on_surface().with_alpha(97)).radius(DISABLED_INNER_RADIUS),
                 ],
             );
         });
@@ -3258,7 +3258,7 @@ pub(crate) mod tests {
                 }
                 None
             });
-            let primary = m3(tester).color_scheme.primary;
+            let primary = m3(tester).color_scheme.primary();
             resolves_in_hovered_and_focused_states(
                 tester,
                 move |radio| radio.inner_radius(inner_radius),

@@ -1676,9 +1676,9 @@ mod tests {
                 assert_eq!(selected_label.font_family, title_small.font_family);
                 assert_eq!(selected_label.font_size, Some(14.0));
                 let selected_color = if secondary {
-                    theme.color_scheme.on_surface
+                    theme.color_scheme.on_surface()
                 } else {
-                    theme.color_scheme.primary
+                    theme.color_scheme.primary()
                 };
                 assert_eq!(color_of(&selected_label), Some(selected_color));
                 let unselected_label = text_style(tester, TAB_2_TEXT);
@@ -1706,9 +1706,9 @@ mod tests {
 
                 // Test default indicator & divider color.
                 let (then_rrect, then_line) = if secondary {
-                    (None, Some(theme.color_scheme.primary))
+                    (None, Some(theme.color_scheme.primary()))
                 } else {
-                    (Some(theme.color_scheme.primary), None)
+                    (Some(theme.color_scheme.primary()), None)
                 };
                 assert!(paints_line_then(
                     tester,
@@ -2138,7 +2138,7 @@ mod tests {
                 let lines = painted_lines(tester, tab_bar_box.as_object());
                 #[allow(deprecated)]
                 let indicator_color = if use_material3 {
-                    theme.color_scheme.primary
+                    theme.color_scheme.primary()
                 } else {
                     theme.indicator_color
                 };
@@ -2667,7 +2667,7 @@ mod tests {
 
                 let theme = theme_with(tester, None, true);
                 tester.pump_widget(build.clone()(theme.clone()));
-                assert!(paints_rrect_color(tester, theme.color_scheme.primary));
+                assert!(paints_rrect_color(tester, theme.color_scheme.primary()));
 
                 let theme = theme_with(
                     tester,

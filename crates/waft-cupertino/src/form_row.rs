@@ -104,7 +104,8 @@ impl CupertinoFormRow {
     }
 
     /// Dart `CupertinoFormRow(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> CupertinoFormRow {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> CupertinoFormRow {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }

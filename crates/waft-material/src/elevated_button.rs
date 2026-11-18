@@ -427,10 +427,10 @@ impl ButtonStyleButton for ElevatedButton {
             }
         } else {
             let mut style_from = ElevatedButton::style_from()
-                .background_color(color_scheme.primary)
-                .foreground_color(color_scheme.on_primary)
-                .disabled_background_color(color_scheme.on_surface.with_opacity(0.12))
-                .disabled_foreground_color(color_scheme.on_surface.with_opacity(0.38))
+                .background_color(color_scheme.primary())
+                .foreground_color(color_scheme.on_primary())
+                .disabled_background_color(color_scheme.on_surface().with_opacity(0.12))
+                .disabled_foreground_color(color_scheme.on_surface().with_opacity(0.38))
                 .shadow_color(theme.shadow_color)
                 .elevation(2.0);
             if let Some(text_style) = theme.text_theme.label_large.clone() {
@@ -1055,7 +1055,7 @@ mod tests {
                     assert!(!material.border_on_foreground);
                     assert!(material.border_radius.is_none());
                     assert_eq!(material.clip_behavior, Clip::None);
-                    assert_eq!(material.color, Some(color_scheme.on_primary));
+                    assert_eq!(material.color, Some(color_scheme.on_primary()));
                     assert_eq!(material.elevation, elevation);
                     assert_eq!(material.shadow_color, Some(Color::new(0xff000000)));
                     assert!(
@@ -1068,7 +1068,7 @@ mod tests {
                     let text_style = material.text_style.as_ref().expect("a text style");
                     assert_eq!(
                         text_style.color.as_ref().map(|color| color.color()),
-                        Some(color_scheme.primary)
+                        Some(color_scheme.primary())
                     );
                     assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));
                     assert_eq!(text_style.font_size, Some(14.0));
@@ -1122,13 +1122,13 @@ mod tests {
             material(tester, |material| {
                 assert_eq!(
                     material.color,
-                    Some(color_scheme.on_surface.with_opacity(0.12))
+                    Some(color_scheme.on_surface().with_opacity(0.12))
                 );
                 assert_eq!(material.elevation, 0.0);
                 let text_style = material.text_style.as_ref().expect("a text style");
                 assert_eq!(
                     text_style.color.as_ref().map(|color| color.color()),
-                    Some(color_scheme.on_surface.with_opacity(0.38))
+                    Some(color_scheme.on_surface().with_opacity(0.38))
                 );
                 assert_eq!(material.r#type, MaterialType::Button);
             });
@@ -1267,7 +1267,7 @@ mod tests {
         test_widgets(|tester| {
             let focus_node = focus_node(tester);
             let theme = ThemeData::new(&tester.cell.borrow());
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             tester.pump_widget(material_app(
                 theme,
                 Center::new()
@@ -2240,7 +2240,7 @@ mod tests {
             let colors = theme.color_scheme.clone();
             for (is_selected, color) in [
                 (false, colors.surface_container_low()),
-                (true, colors.primary),
+                (true, colors.primary()),
             ] {
                 tester.pump_widget(material_app(
                     theme.clone(),
@@ -2543,33 +2543,33 @@ mod tests {
             );
             assert_eq!(
                 resolve(&style.background_color, &disabled),
-                Some(alpha(colors.on_surface, 0.1))
+                Some(alpha(colors.on_surface(), 0.1))
             );
             assert_eq!(
                 resolve(&style.foreground_color, &none),
-                Some(colors.primary)
+                Some(colors.primary())
             );
             assert_eq!(
                 resolve(&style.foreground_color, &disabled),
-                Some(alpha(colors.on_surface, 0.38))
+                Some(alpha(colors.on_surface(), 0.38))
             );
-            assert_eq!(resolve(&style.icon_color, &none), Some(colors.primary));
+            assert_eq!(resolve(&style.icon_color, &none), Some(colors.primary()));
             assert_eq!(
                 resolve(&style.icon_color, &disabled),
-                Some(alpha(colors.on_surface, 0.38))
+                Some(alpha(colors.on_surface(), 0.38))
             );
             assert_eq!(resolve(&style.overlay_color, &none), None);
             assert_eq!(
                 resolve(&style.overlay_color, &hovered),
-                Some(alpha(colors.primary, 0.08))
+                Some(alpha(colors.primary(), 0.08))
             );
             assert_eq!(
                 resolve(&style.overlay_color, &focused),
-                Some(alpha(colors.primary, 0.1))
+                Some(alpha(colors.primary(), 0.1))
             );
             assert_eq!(
                 resolve(&style.overlay_color, &pressed_states),
-                Some(alpha(colors.primary, 0.1))
+                Some(alpha(colors.primary(), 0.1))
             );
             let elevation = style.elevation.as_ref().expect("an elevation");
             assert_eq!(elevation.resolve(&none), Some(1.0));
@@ -2585,22 +2585,22 @@ mod tests {
             );
             assert_eq!(
                 resolve(&style.background_color, &selected),
-                Some(colors.primary)
+                Some(colors.primary())
             );
             assert_eq!(
                 resolve(&style.foreground_color, &selected),
-                Some(colors.on_primary)
+                Some(colors.on_primary())
             );
             assert_eq!(
                 resolve(&style.icon_color, &selected),
-                Some(colors.on_primary)
+                Some(colors.on_primary())
             );
             assert_eq!(
                 resolve(
                     &style.overlay_color,
                     &states(&[WidgetState::Selected, WidgetState::Hovered])
                 ),
-                Some(alpha(colors.on_primary, 0.08))
+                Some(alpha(colors.on_primary(), 0.08))
             );
             assert_eq!(
                 resolve(&style.background_color, &none),
@@ -2608,14 +2608,14 @@ mod tests {
             );
             assert_eq!(
                 resolve(&style.foreground_color, &none),
-                Some(colors.primary)
+                Some(colors.primary())
             );
             assert_eq!(
                 resolve(
                     &style.background_color,
                     &states(&[WidgetState::Selected, WidgetState::Disabled])
                 ),
-                Some(alpha(colors.on_surface, 0.1))
+                Some(alpha(colors.on_surface(), 0.1))
             );
         });
     }
@@ -2758,7 +2758,7 @@ mod tests {
             // Updating the controller changes only the appearance.
             controller.update(&mut tester.cell.borrow_mut(), WidgetState::Selected, true);
             tester.pump();
-            assert_eq!(background_color(tester), Some(colors.primary));
+            assert_eq!(background_color(tester), Some(colors.primary()));
 
             // Rebuilding with the same isSelected keeps the controller's value.
             build_button(tester, false);
@@ -2770,7 +2770,7 @@ mod tests {
                     .value()
                     .contains(&WidgetState::Selected)
             );
-            assert_eq!(background_color(tester), Some(colors.primary));
+            assert_eq!(background_color(tester), Some(colors.primary()));
 
             // Changing isSelected overwrites the controller's value.
             build_button(tester, true);

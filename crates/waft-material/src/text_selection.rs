@@ -118,7 +118,7 @@ impl TextSelectionControls for MaterialTextSelectionControls {
         let theme = Theme::of(app, context);
         let handle_color = TextSelectionTheme::of(app, context)
             .selection_handle_color
-            .unwrap_or(theme.color_scheme.primary);
+            .unwrap_or(theme.color_scheme.primary());
         let mut gesture_detector = GestureDetector::new().behavior(HitTestBehavior::Translucent);
         if let Some(on_tap) = on_tap {
             gesture_detector = gesture_detector.on_tap(on_tap);
@@ -662,19 +662,17 @@ mod tests {
                             .color(Colors::WHITE)
                             .height(800.0)
                             .width(800.0)
-                            .child(
-                                Padding::new(EdgeInsets::symmetric(0.0, 250.0).into()).child(
-                                    FittedBox::new().child(
-                                        material_text_selection_controls().build_handle(
-                                            app,
-                                            context,
-                                            TextSelectionHandleType::Right,
-                                            10.0,
-                                            None,
-                                        ),
+                            .child(Padding::new(EdgeInsets::symmetric(0.0, 250.0)).child(
+                                FittedBox::new().child(
+                                    material_text_selection_controls().build_handle(
+                                        app,
+                                        context,
+                                        TextSelectionHandleType::Right,
+                                        10.0,
+                                        None,
                                     ),
                                 ),
-                            )
+                            ))
                             .into_widget()
                     }),
                 )

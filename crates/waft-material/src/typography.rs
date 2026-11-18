@@ -2525,15 +2525,15 @@ impl TypographyMaterial2021Builder {
         // no color variation based on style as it was in previous
         // versions of Material Design.
         let color_scheme = &self.color_scheme;
-        let dark = if color_scheme.brightness == Brightness::Light {
-            color_scheme.on_surface
+        let dark = if color_scheme.brightness() == Brightness::Light {
+            color_scheme.on_surface()
         } else {
-            color_scheme.surface
+            color_scheme.surface()
         };
-        let light = if color_scheme.brightness == Brightness::Light {
-            color_scheme.surface
+        let light = if color_scheme.brightness() == Brightness::Light {
+            color_scheme.surface()
         } else {
-            color_scheme.on_surface
+            color_scheme.on_surface()
         };
         let black = base
             .black
@@ -2821,7 +2821,7 @@ mod tests {
                 for style in styles(&theme.text_theme) {
                     assert_eq!(
                         self::style(style).color,
-                        color(theme.color_scheme.on_surface)
+                        color(theme.color_scheme.on_surface())
                     );
                 }
             }
@@ -2855,12 +2855,12 @@ mod tests {
             .build();
         let black = style(&typography.black.body_medium);
         assert_eq!(black.font_family.as_deref(), Some("Custom"));
-        assert_eq!(black.color, color(light_scheme.on_surface));
-        assert_eq!(black.decoration_color, color(light_scheme.on_surface));
+        assert_eq!(black.color, color(light_scheme.on_surface()));
+        assert_eq!(black.decoration_color, color(light_scheme.on_surface()));
         let white = style(&typography.white.body_medium);
         assert_eq!(white.font_family.as_deref(), Some("Custom"));
-        assert_eq!(white.color, color(light_scheme.surface));
-        assert_eq!(white.decoration_color, color(light_scheme.surface));
+        assert_eq!(white.color, color(light_scheme.surface()));
+        assert_eq!(white.decoration_color, color(light_scheme.surface()));
     }
 
     #[test]
@@ -2884,7 +2884,7 @@ mod tests {
         assert_eq!(family(&typography.black.body_large), Some("Roboto"));
         assert_eq!(
             style(&typography.black.body_large).color,
-            color(light_scheme.on_surface)
+            color(light_scheme.on_surface())
         );
     }
 
@@ -2906,14 +2906,14 @@ mod tests {
         let light = Typography::material2021()
             .color_scheme(light_scheme.clone())
             .build();
-        expect_uniform(&light.black, light_scheme.on_surface);
-        expect_uniform(&light.white, light_scheme.surface);
+        expect_uniform(&light.black, light_scheme.on_surface());
+        expect_uniform(&light.white, light_scheme.surface());
 
         let dark = Typography::material2021()
             .color_scheme(dark_scheme.clone())
             .build();
-        expect_uniform(&dark.black, dark_scheme.surface);
-        expect_uniform(&dark.white, dark_scheme.on_surface);
+        expect_uniform(&dark.black, dark_scheme.surface());
+        expect_uniform(&dark.white, dark_scheme.on_surface());
     }
 
     #[test]

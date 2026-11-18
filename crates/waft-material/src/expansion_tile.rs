@@ -1462,11 +1462,11 @@ impl ExpansionTileThemeDataGetters for ExpansionTileDefaultsM2 {
     }
 
     fn text_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn icon_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn collapsed_text_color(&self, app: &mut App) -> Option<Color> {
@@ -2292,13 +2292,13 @@ pub(crate) mod tests {
                 icon_color.get(),
                 Some(theme.color_scheme.on_surface_variant())
             );
-            assert_eq!(text_color.get(), Some(theme.color_scheme.on_surface));
+            assert_eq!(text_color.get(), Some(theme.color_scheme.on_surface()));
 
             tester.tap(find::text("title"));
             tester.pump_and_settle();
 
-            assert_eq!(icon_color.get(), Some(theme.color_scheme.primary));
-            assert_eq!(text_color.get(), Some(theme.color_scheme.on_surface));
+            assert_eq!(icon_color.get(), Some(theme.color_scheme.primary()));
+            assert_eq!(text_color.get(), Some(theme.color_scheme.on_surface()));
         });
     }
 
@@ -2955,8 +2955,8 @@ pub(crate) mod tests {
             tester.tap(find::text("title"));
             tester.pump_and_settle();
 
-            assert_eq!(icon_color.get(), Some(theme.color_scheme.primary));
-            assert_eq!(text_color.get(), Some(theme.color_scheme.primary));
+            assert_eq!(icon_color.get(), Some(theme.color_scheme.primary()));
+            assert_eq!(text_color.get(), Some(theme.color_scheme.primary()));
         });
     }
 
@@ -2973,7 +2973,7 @@ pub(crate) mod tests {
                 m2,
                 Material::new().child(
                     Center::new().child(
-                        Padding::new(EdgeInsets::symmetric(0.0, 24.0).into()).child(
+                        Padding::new(EdgeInsets::symmetric(0.0, 24.0)).child(
                             ExpansionTile::new(test_text("title", &probe()))
                                 .key(expansion_tile_key.clone().into())
                                 .shape(rounded(16.0))

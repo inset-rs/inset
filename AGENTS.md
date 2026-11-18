@@ -76,4 +76,5 @@ A Flutter-shaped name on a different mechanism is a bug.
 - Do not commit unless asked.
 - Do not add a rule to this file or to the porting skill without asking.
 - Aim for a sensible design, not one that fits the existing code. When existing code would force an ugly design, don't follow it: raise it with the lead.
+- An API or mechanism agents use often should explain itself in its docs and shape; when an agent has to read Waft's source to use one, that is a bug to fix (in the docs or the API), and finding and fixing such issues is ongoing work.
 - Ask rather than invent when a special case appears. The rules may be wrong too.

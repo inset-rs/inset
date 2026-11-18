@@ -65,7 +65,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
     }
 
     fn sub_header_foreground_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).on_surface.with_opacity(0.6))
+        Some(self.context.colors(app).on_surface().with_opacity(0.6))
     }
 
     fn toggle_button_text_style(&self, app: &mut App) -> Option<TextStyle> {
@@ -110,7 +110,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
     }
 
     fn weekday_style(&self, app: &mut App) -> Option<TextStyle> {
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         self.context
             .text_theme(app)
             .body_large
@@ -124,7 +124,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
 
     fn day_foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, base) = (colors.on_primary, colors.on_surface);
+        let (on_primary, base) = (colors.on_primary(), colors.on_surface());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -139,7 +139,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
     }
 
     fn day_background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
-        let primary = self.context.colors(app).primary;
+        let primary = self.context.colors(app).primary();
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -153,7 +153,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
 
     fn day_overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, on_surface_variant) = (colors.on_primary, colors.on_surface_variant());
+        let (on_primary, on_surface_variant) = (colors.on_primary(), colors.on_surface_variant());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -187,7 +187,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
         app: &mut App,
     ) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, base) = (colors.on_primary, colors.primary);
+        let (on_primary, base) = (colors.on_primary(), colors.primary());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -210,7 +210,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
 
     fn today_border(&self, app: &mut App) -> Option<BorderSide> {
         Some(BorderSide {
-            color: self.context.colors(app).primary,
+            color: self.context.colors(app).primary(),
             ..BorderSide::default()
         })
     }
@@ -224,7 +224,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
         app: &mut App,
     ) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, base) = (colors.on_primary, colors.on_surface_variant());
+        let (on_primary, base) = (colors.on_primary(), colors.on_surface_variant());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -242,7 +242,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
         &self,
         app: &mut App,
     ) -> Option<WidgetStatePropertyRef<Option<Color>>> {
-        let primary = self.context.colors(app).primary;
+        let primary = self.context.colors(app).primary();
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -256,7 +256,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM3 {
 
     fn year_overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, on_surface_variant) = (colors.on_primary, colors.on_surface_variant());
+        let (on_primary, on_surface_variant) = (colors.on_primary(), colors.on_surface_variant());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {

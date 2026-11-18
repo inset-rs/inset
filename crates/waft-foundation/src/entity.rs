@@ -84,6 +84,13 @@ impl Debug for Subscription {
 }
 
 /// Strong, refcounted handle to a user store owned by [`App`].
+///
+/// An `Entity` is for the app's own data and the logic that changes it: the lines a note holds,
+/// the list a page shows, the ranking a client fetches. [`App::new_entity`] makes it,
+/// [`App::read`] and [`App::update`] read and change it, and [`Context::notify`] rebuilds the
+/// widgets that read it. It is not a Flutter object: a controller, an animation or a scroll
+/// position is a [`Ref`](crate::Ref), which [`App::create`] makes and which models Dart's
+/// reference to an object the framework keeps.
 pub struct Entity<T> {
     id: EntityId,
     keep: Rc<EntityKeep>,

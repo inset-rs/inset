@@ -148,13 +148,15 @@ impl TooltipThemeData {
     }
 
     /// Dart `TooltipThemeData(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> TooltipThemeData {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> TooltipThemeData {
+        let padding = padding.into();
         self.padding = Some(padding);
         self
     }
 
     /// Dart `TooltipThemeData(margin:)`.
-    pub fn margin(mut self, margin: EdgeInsetsGeometry) -> TooltipThemeData {
+    pub fn margin(mut self, margin: impl Into<EdgeInsetsGeometry>) -> TooltipThemeData {
+        let margin = margin.into();
         self.margin = Some(margin);
         self
     }

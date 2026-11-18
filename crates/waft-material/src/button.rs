@@ -428,7 +428,8 @@ impl RawMaterialButton {
     }
 
     /// Dart `RawMaterialButton(padding:)`.
-    pub fn padding(mut self, padding: EdgeInsetsGeometry) -> RawMaterialButton {
+    pub fn padding(mut self, padding: impl Into<EdgeInsetsGeometry>) -> RawMaterialButton {
+        let padding = padding.into();
         self.padding = padding;
         self
     }

@@ -420,7 +420,7 @@ mod tests {
                 Expected {
                     animation_duration: false,
                     color: Colors::TRANSPARENT,
-                    text_color: colors.on_surface,
+                    text_color: colors.on_surface(),
                     selected_icon: None,
                 },
             );
@@ -442,7 +442,7 @@ mod tests {
                 Expected {
                     animation_duration: false,
                     color: Colors::TRANSPARENT,
-                    text_color: colors.on_surface.with_opacity(0.38),
+                    text_color: colors.on_surface().with_opacity(0.38),
                     selected_icon: None,
                 },
             );

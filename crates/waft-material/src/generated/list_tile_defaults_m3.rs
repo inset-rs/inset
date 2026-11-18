@@ -44,7 +44,7 @@ impl ListTileThemeDataGetters for ListTileDefaultsM3 {
     }
 
     fn title_text_style(&self, app: &mut App) -> Option<TextStyle> {
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         Some(
             self.context
                 .text_theme(app)
@@ -83,7 +83,7 @@ impl ListTileThemeDataGetters for ListTileDefaultsM3 {
     }
 
     fn selected_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn icon_color(&self, app: &mut App) -> Option<AnyColor> {

@@ -65,7 +65,7 @@ impl ButtonStyleGetters for OutlinedIconButtonDefaultsM3 {
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
                     if states.contains(&WidgetState::Selected) {
-                        return Some(colors.on_surface.with_opacity(0.12));
+                        return Some(colors.on_surface().with_opacity(0.12));
                     }
                     return Some(Colors::TRANSPARENT);
                 }
@@ -84,7 +84,7 @@ impl ButtonStyleGetters for OutlinedIconButtonDefaultsM3 {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.38));
+                    return Some(colors.on_surface().with_opacity(0.38));
                 }
                 if states.contains(&WidgetState::Selected) {
                     return Some(colors.on_inverse_surface());
@@ -112,7 +112,7 @@ impl ButtonStyleGetters for OutlinedIconButtonDefaultsM3 {
                     }
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 if states.contains(&WidgetState::Hovered) {
                     return Some(colors.on_surface_variant().with_opacity(0.08));
@@ -175,7 +175,7 @@ impl ButtonStyleGetters for OutlinedIconButtonDefaultsM3 {
                 } else {
                     if states.contains(&WidgetState::Disabled) {
                         return Some(BorderSide {
-                            color: colors.on_surface.with_opacity(0.12),
+                            color: colors.on_surface().with_opacity(0.12),
                             ..BorderSide::default()
                         });
                     }

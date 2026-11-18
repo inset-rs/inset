@@ -132,14 +132,14 @@ fn selected_profile_image(app: &mut App, context: BuildContext) -> WidgetRef {
         .child(
             waft_widgets::DecoratedBox::new(
                 waft_painting::BoxDecoration::new()
-                    .color(color_scheme.primary)
+                    .color(color_scheme.primary())
                     .shape(waft_painting::BoxShape::Circle),
             )
             .child(
                 Center::new().child(
                     Icon::new(Some(Icons::check()))
                         .size(24.0)
-                        .color(color_scheme.on_primary),
+                        .color(color_scheme.on_primary()),
                 ),
             ),
         )

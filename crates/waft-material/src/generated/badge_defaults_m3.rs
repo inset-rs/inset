@@ -39,11 +39,11 @@ impl BadgeThemeDataGetters for BadgeDefaultsM3 {
     }
 
     fn background_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).error)
+        Some(self.context.colors(app).error())
     }
 
     fn text_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).on_error)
+        Some(self.context.colors(app).on_error())
     }
 
     fn text_style(&self, app: &mut App) -> Option<TextStyle> {

@@ -276,6 +276,20 @@ impl TextEditingController {
     /// string.
     ///
     /// The initial selection is `TextSelection::collapsed(-1, …)`.
+    ///
+    /// The `Ref` this answers is the keeper a field holds. A widget that takes the erased
+    /// controller, as Dart takes a `TextEditingController`, gets one that shares the count from
+    /// [`Retained::erase`]:
+    ///
+    /// ```
+    /// # use waft_foundation::{App, AppCell};
+    /// # use waft_widgets::{TextEditingController, TextEditingControllerRef};
+    /// let cell = AppCell::new();
+    /// let mut app = cell.borrow_mut();
+    /// let controller = TextEditingController::new(&mut app);
+    /// let field: TextEditingControllerRef = controller.erase();
+    /// assert_eq!(field.text_value(&app), "");
+    /// ```
     pub fn new(app: &mut App) -> Ref<TextEditingController> {
         TextEditingController::from_value(app, None)
     }

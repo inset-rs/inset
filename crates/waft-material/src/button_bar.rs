@@ -237,7 +237,7 @@ impl StatelessWidget for ButtonBar {
                     .children
                     .iter()
                     .map(|child| {
-                        Padding::new(EdgeInsets::symmetric(0.0, padding_unit).into())
+                        Padding::new(EdgeInsets::symmetric(0.0, padding_unit))
                             .child(child.clone())
                             .into_widget()
                     })
@@ -247,14 +247,14 @@ impl StatelessWidget for ButtonBar {
 
         match button_theme.layout_behavior {
             ButtonBarLayoutBehavior::Padded => {
-                Padding::new(EdgeInsets::symmetric(2.0 * padding_unit, padding_unit).into())
+                Padding::new(EdgeInsets::symmetric(2.0 * padding_unit, padding_unit))
                     .child(child)
                     .into_widget()
             }
             ButtonBarLayoutBehavior::Constrained => {
                 ConstrainedBox::new(BoxConstraints::new().min_height(52.0))
                     .child(
-                        Padding::new(EdgeInsets::symmetric(0.0, padding_unit).into())
+                        Padding::new(EdgeInsets::symmetric(0.0, padding_unit))
                             .child(Center::new().child(child)),
                     )
                     .into_widget()

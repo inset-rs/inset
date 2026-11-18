@@ -288,8 +288,9 @@ impl FloatingActionButtonThemeData {
     /// Dart `FloatingActionButtonThemeData(extendedPadding:)`.
     pub fn extended_padding(
         mut self,
-        extended_padding: EdgeInsetsGeometry,
+        extended_padding: impl Into<EdgeInsetsGeometry>,
     ) -> FloatingActionButtonThemeData {
+        let extended_padding = extended_padding.into();
         self.extended_padding = Some(extended_padding);
         self
     }

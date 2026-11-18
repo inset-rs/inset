@@ -841,7 +841,8 @@ impl AppBar {
     }
 
     /// Dart `AppBar(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> AppBar {
+    pub fn actions_padding(mut self, actions_padding: impl Into<EdgeInsetsGeometry>) -> AppBar {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }
@@ -2500,7 +2501,11 @@ impl SliverAppBar {
     }
 
     /// Dart `SliverAppBar(actionsPadding:)`.
-    pub fn actions_padding(mut self, actions_padding: EdgeInsetsGeometry) -> SliverAppBar {
+    pub fn actions_padding(
+        mut self,
+        actions_padding: impl Into<EdgeInsetsGeometry>,
+    ) -> SliverAppBar {
+        let actions_padding = actions_padding.into();
         self.actions_padding = Some(actions_padding);
         self
     }
@@ -3450,18 +3455,22 @@ impl AppBarThemeDataGetters for AppBarDefaultsM2 {
     fn background_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let dark = colors.brightness == waft_embedder::Brightness::Dark;
-        Some(if dark { colors.surface } else { colors.primary })
+        let dark = colors.brightness() == waft_embedder::Brightness::Dark;
+        Some(if dark {
+            colors.surface()
+        } else {
+            colors.primary()
+        })
     }
 
     fn foreground_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let dark = colors.brightness == waft_embedder::Brightness::Dark;
+        let dark = colors.brightness() == waft_embedder::Brightness::Dark;
         Some(if dark {
-            colors.on_surface
+            colors.on_surface()
         } else {
-            colors.on_primary
+            colors.on_primary()
         })
     }
 
@@ -4825,7 +4834,7 @@ mod tests {
                             .into_widget(),
                     ]);
                     if let Some(actions_padding) = actions_padding {
-                        app_bar = app_bar.actions_padding(actions_padding.into());
+                        app_bar = app_bar.actions_padding(actions_padding);
                     }
                     scaffold_with(app_bar).into_widget()
                 });
@@ -5129,7 +5138,7 @@ mod tests {
                 style.style.color.as_ref().expect("a color").a
             });
             let app = tester.cell.borrow();
-            let on_surface = ThemeData::new(&app).color_scheme.on_surface;
+            let on_surface = ThemeData::new(&app).color_scheme.on_surface();
             drop(app);
             #[expect(
                 deprecated,
@@ -5747,7 +5756,7 @@ mod tests {
             // Test the expanded title default color.
             let on_surface = ThemeData::new(&tester.cell.borrow())
                 .color_scheme
-                .on_surface;
+                .on_surface();
             assert_eq!(tester.text_color("AppBar Title"), on_surface);
 
             // Scroll the expanded app bar partially out of view.
@@ -6610,7 +6619,7 @@ mod tests {
             tester.pump_and_settle();
             let on_surface = ThemeData::new(&tester.cell.borrow())
                 .color_scheme
-                .on_surface;
+                .on_surface();
             #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
             let hover_color = on_surface.with_opacity(0.08);
             let ops = tester.painted_ops(tester.render_box_of(button).as_object());
