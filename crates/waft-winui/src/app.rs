@@ -115,11 +115,12 @@ pub struct FluentApp {
     pub home: Option<WidgetRef>,
 
     /// The light theme, and the one the app shows unless the mode and the platform ask for the
-    /// dark one. [`FluentTheme::light`] when neither theme is set.
+    /// dark one. [`FluentTheme::light`] when not set.
     pub theme: Option<FluentTheme>,
 
-    /// The theme shown when the mode is [`FluentThemeMode::Dark`], or the platform's bright and
-    /// the mode is [`FluentThemeMode::System`]. The light theme when not set.
+    /// The theme shown when the mode is [`FluentThemeMode::Dark`], or when the platform is dark
+    /// and the mode is [`FluentThemeMode::System`]. [`theme`](Self::theme) when not set, and
+    /// [`FluentTheme::dark`] when neither is, as a WinUI app follows the system's theme.
     pub dark_theme: Option<FluentTheme>,
 
     /// Which theme is shown. [`FluentThemeMode::System`] when not set.
@@ -155,8 +156,8 @@ pub struct FluentApp {
     /// See [`WidgetsApp::on_generate_title`].
     pub on_generate_title: Option<GenerateAppTitle>,
 
-    /// The name old Android versions show in the app switcher; the accent's `base` when not
-    /// set, as a Material app takes its theme's primary colour.
+    /// The colour old Android versions show the app in, in the app switcher; the accent's `base`
+    /// when not set, as a Material app takes its theme's primary colour.
     pub color: Option<Color>,
 
     /// See [`WidgetsApp::locale`].

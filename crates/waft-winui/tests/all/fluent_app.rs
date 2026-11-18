@@ -115,3 +115,28 @@ fn a_fluent_app_installs_the_icon_font_when_it_mounts() {
     let painting = PaintingBinding::instance(&mut app);
     assert!(painting.has_fonts(&app), "the icon font was registered");
 }
+
+#[test]
+fn the_system_mode_follows_the_platform_brightness() {
+    for (brightness, theme) in [
+        (waft_embedder::Brightness::Light, Theme::Light),
+        (waft_embedder::Brightness::Dark, Theme::Dark),
+    ] {
+        let mut tester =
+            WidgetTester::with_platform(waft_test::TestPlatform::new().with_brightness(brightness));
+        let (page, seen, _built) = probe();
+        tester.pump_widget(
+            FluentApp::new()
+                .theme(FluentTheme::new(Theme::Light, ACCENT))
+                .dark_theme(FluentTheme::new(Theme::Dark, ACCENT))
+                .home(page)
+                .into_widget(),
+        );
+        tester.pump_and_settle();
+        assert_eq!(
+            seen.get(),
+            Some((theme, ACCENT)),
+            "on a {brightness:?} platform"
+        );
+    }
+}

@@ -56,6 +56,8 @@ pub fn run_feature(app: &mut App, feature: Feature) {
     run_app_with(
         app,
         FluentApp::new()
+            // The gallery's own toggle picks its palette, starting light whatever the platform's.
+            .theme_mode(FluentThemeMode::Light)
             .title("WinUI Gallery")
             .debug_show_checked_mode_banner(false)
             .home(Gallery {
