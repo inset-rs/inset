@@ -126,20 +126,7 @@ impl ShellDialogs {
             .window(parent)
             .and_then(|window| hwnd(&*window));
         let showing = Showing::default();
-        let close = {
-            let showing = Rc::clone(&showing);
-            move || {
-                run_soon(Box::new(move || {
-                    let Some(dialog) = showing.borrow_mut().take() else {
-                        return;
-                    };
-                    // SAFETY: the dialog showing, closed from the thread that made it, outside
-                    // every call into the app; it answers the app's future as if cancelled.
-                    let _ = unsafe { dialog.Close(HRESULT::from_win32(ERROR_CANCELLED.0)) };
-                }));
-            }
-        };
-        let (answer, answered) = dialog_answer(close);
+        let (answer, answered) = dialog_answer(close_on_drop(Rc::clone(&showing)));
         run_soon(Box::new(move || {
             let _apartment = Apartment::enter();
             let shown = match &request {
@@ -160,9 +147,7 @@ impl ShellDialogs {
             };
             answer.give(match shown {
                 Ok(chosen) => Ok(chosen),
-                Err(error) if error.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => {
-                    Ok(Vec::new())
-                }
+                Err(error) if error.code() == cancelled() => Ok(Vec::new()),
                 Err(error) => Err(FileDialogError::Failed(error.message())),
             });
         }));
@@ -170,24 +155,69 @@ impl ShellDialogs {
     }
 }
 
-/// The dialog showing, which a dropped future closes: `None` once it has closed or before it
-/// shows. The main thread's alone, where the dialog is made and closed.
-type Showing = Rc<RefCell<Option<IFileDialog>>>;
+/// Where a dialog is, which its dropped future reads to close it. The main thread's alone, where
+/// the dialog is made, shown and closed.
+type Showing = Rc<RefCell<Shown>>;
 
-/// Notes `dialog` as showing, so a dropped future closes it, and answers it as showing no longer:
-/// dropped with the dialog's own call, after which nothing closes it.
+#[derive(Default)]
+enum Shown {
+    /// Asked for, not made yet: a future dropped now keeps it from showing at all.
+    #[default]
+    NotYet,
+    /// Made, and showing until its call returns.
+    Showing(IFileDialog),
+    /// Answered, closed, or dropped before it showed: nothing is left to close.
+    Over,
+}
+
+/// Closes the dialog `showing` follows, for a future the app drops before the dialog answers: one
+/// not made yet never shows, and one showing is closed from the hidden window's procedure, which
+/// its modal loop runs, outside every call into the app.
+fn close_on_drop(showing: Showing) -> impl FnOnce() {
+    move || {
+        {
+            let mut shown = showing.borrow_mut();
+            if matches!(*shown, Shown::NotYet) {
+                *shown = Shown::Over;
+                return;
+            }
+        }
+        run_soon(Box::new(move || {
+            let Shown::Showing(dialog) = showing.replace(Shown::Over) else {
+                return;
+            };
+            // SAFETY: the dialog showing, closed from the thread that made it, whose modal loop
+            // runs this; it returns from its `Show` as if cancelled.
+            let _ = unsafe { dialog.Close(cancelled()) };
+        }));
+    }
+}
+
+/// What a dialog's `Show` returns once cancelled, by the user or by `Close`.
+fn cancelled() -> HRESULT {
+    HRESULT::from_win32(ERROR_CANCELLED.0)
+}
+
+/// Notes `dialog` as showing, so a dropped future closes it, until dropped with the dialog's own
+/// call, after which nothing closes it.
 struct ShowingDialog<'a>(&'a Showing);
 
-impl ShowingDialog<'_> {
-    fn new(showing: &Showing, dialog: &IFileDialog) -> ShowingDialog<'_> {
-        *showing.borrow_mut() = Some(dialog.clone());
-        ShowingDialog(showing)
+impl<'a> ShowingDialog<'a> {
+    /// Notes `dialog` as showing, or answers it cancelled when its future was dropped before it
+    /// could show.
+    fn new(showing: &'a Showing, dialog: &IFileDialog) -> windows::core::Result<ShowingDialog<'a>> {
+        let mut shown = showing.borrow_mut();
+        if matches!(*shown, Shown::Over) {
+            return Err(cancelled().into());
+        }
+        *shown = Shown::Showing(dialog.clone());
+        Ok(ShowingDialog(showing))
     }
 }
 
 impl Drop for ShowingDialog<'_> {
     fn drop(&mut self) {
-        *self.0.borrow_mut() = None;
+        *self.0.borrow_mut() = Shown::Over;
     }
 }
 
@@ -202,7 +232,7 @@ fn show_open(
     // SAFETY: the shell's own dialog class, made on this thread, which COM was entered on.
     let dialog: IFileOpenDialog =
         unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)? };
-    let _showing = ShowingDialog::new(showing, &dialog);
+    let _showing = ShowingDialog::new(showing, &dialog)?;
     // SAFETY: plain calls on the dialog made above, with values that outlive each call.
     unsafe {
         let mut options = dialog.GetOptions()? | FOS_FORCEFILESYSTEM;
@@ -238,7 +268,7 @@ fn show_save(
     // SAFETY: the shell's own dialog class, made on this thread, which COM was entered on.
     let dialog: IFileSaveDialog =
         unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)? };
-    let _showing = ShowingDialog::new(showing, &dialog);
+    let _showing = ShowingDialog::new(showing, &dialog)?;
     // SAFETY: plain calls on the dialog made above, with values that outlive each call.
     unsafe {
         dialog.SetOptions(dialog.GetOptions()? | FOS_FORCEFILESYSTEM)?;
