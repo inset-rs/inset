@@ -1206,6 +1206,15 @@ impl RenderEditable {
         Some(rect.shift(paint_offset))
     }
 
+    /// The font requests the editable's laid-out paragraph could not satisfy, or `None`
+    /// before layout.
+    pub fn font_demand(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> Option<&waft_embedder::valo::FontDemand> {
+        self.get(app).text_painter.font_demand()
+    }
+
     /// Returns the [`TextPosition`] closest to the given global point.
     pub fn get_position_for_point(
         self: RenderHandle<Self>,
@@ -2670,24 +2679,33 @@ mod tests {
         );
 
         let cjk = TextRange::new(1, 2);
-        let before = editable
+        editable
             .get_rect_for_composing_range(&mut app, cjk)
             .expect("an uncovered CJK character still occupies .notdef space");
+        // The face's metrics cannot tell the two apart: a CJK glyph and .notdef are both an
+        // em wide on some systems, and the line's box over either is the same. The paragraph's
+        // demand can: the gated codepoint is unresolved until the source answers with a face.
+        let unresolved = |editable: &RenderHandle<RenderEditable>, app: &App| {
+            editable
+                .font_demand(app)
+                .is_some_and(|demand| demand.codepoints.iter().any(|(found, _)| *found == '你'))
+        };
+        assert!(
+            unresolved(&editable, &app),
+            "the gated face leaves the CJK codepoint unresolved"
+        );
 
         allow_non_ascii.set(true);
         PaintingBinding::instance(&mut app).handle_system_fonts_did_change(&mut app);
         SchedulerBinding::handle_begin_frame(&mut app, &[], None);
         pump_frame(&mut app, EnginePhase::Layout);
 
-        let after = editable
+        editable
             .get_rect_for_composing_range(&mut app, cjk)
-            .expect("systemFontsDidChange rebuilds the painter against the new face");
-        // The fallback face's ascent and descent replace the primary font's around
-        // .notdef. The advance alone cannot tell them apart: both .notdef and a CJK glyph
-        // are an em wide on some systems, so the whole box is compared.
-        assert_ne!(
-            before, after,
-            "the CJK glyph replaces .notdef once its face is available"
+            .expect("the rebuilt paragraph still places the CJK character");
+        assert!(
+            !unresolved(&editable, &app),
+            "the CJK codepoint resolves once its face is available"
         );
     }
 }
