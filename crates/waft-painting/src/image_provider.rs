@@ -1194,7 +1194,7 @@ mod tests {
         // Flutter's "Notifies listeners of chunk events".
         const CHUNK_SIZE: usize = 8;
         let url = "https://example.test/photo.png";
-        let image_bytes = vec![0u8; TRANSPARENT_IMAGE_LENGTH];
+        let image_bytes = [0u8; TRANSPARENT_IMAGE_LENGTH];
         let chunks: Vec<Vec<u8>> = image_bytes.chunks(CHUNK_SIZE).map(<[u8]>::to_vec).collect();
         let client =
             MockHttpClient::new().answering(url, MockResponse::new().chunks(chunks.clone()));
