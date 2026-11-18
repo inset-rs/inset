@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use crate::ViewId;
-use crate::files::Files;
+use crate::files::ReadFileFuture;
 
 /// The system's file dialogs. `parent` is the view whose window a dialog belongs to, which the
 /// system shows it on, as a sheet where it has them (macOS); without one it stands alone.
@@ -270,18 +270,21 @@ impl PickedFile {
             PickedFile::Stream(stream) => stream.url(),
         }
     }
+}
 
-    /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path through the platform's
-    /// file system, a handle from its start to its end, and a stream through, which uses it up.
-    /// It takes the pick, so the read can be awaited later, in a task, with nothing borrowed.
-    pub fn read_all(self, files: &dyn Files) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>>>> {
-        match self {
-            PickedFile::Path(path) => files.read(&path),
-            PickedFile::Handle(handle) => Box::pin(async move { read_handle(&*handle).await }),
-            PickedFile::Stream(mut stream) => {
-                Box::pin(async move { read_stream(&mut *stream).await })
-            }
-        }
+impl dyn FileHandle {
+    /// The whole file, from its start to its end, as Flutter's `XFile.readAsBytes` reads a web
+    /// pick. A picked path is read by the platform's file service (`Platform::files`), not here:
+    /// a handle reads itself, a path is only a name.
+    pub fn read_all(self: Box<Self>) -> ReadFileFuture {
+        Box::pin(async move { read_handle(&*self).await })
+    }
+}
+
+impl dyn FileStream {
+    /// The whole stream, read through, which uses it up.
+    pub fn read_all(mut self: Box<Self>) -> ReadFileFuture {
+        Box::pin(async move { read_stream(&mut *self).await })
     }
 }
 
@@ -315,49 +318,6 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use crate::files::{
-        FileMetadataFuture, FileOperationFuture, ListFilesFuture, OpenFileFuture, ReadFileFuture,
-        WriteFileFuture,
-    };
-
-    /// The platform's file system in these tests: the machine's, read at once, so a path is
-    /// read without a thread of the framework's.
-    struct Disk;
-
-    impl Files for Disk {
-        fn read(&self, path: &std::path::Path) -> ReadFileFuture {
-            let bytes = std::fs::read(path);
-            Box::pin(std::future::ready(bytes))
-        }
-
-        fn write(&self, _path: &std::path::Path, _bytes: &[u8]) -> WriteFileFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-
-        fn open(&self, _path: &std::path::Path, _mode: crate::OpenMode) -> OpenFileFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-
-        fn metadata(&self, _path: &std::path::Path) -> FileMetadataFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-
-        fn list(&self, _path: &std::path::Path) -> ListFilesFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-
-        fn create_folder(&self, _path: &std::path::Path) -> FileOperationFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-
-        fn rename(&self, _from: &std::path::Path, _to: &std::path::Path) -> FileOperationFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-
-        fn delete(&self, _path: &std::path::Path) -> FileOperationFuture {
-            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
-        }
-    }
 
     /// A handle over bytes in memory, read a few at a time.
     struct Bytes(RefCell<Vec<u8>>);
@@ -408,18 +368,7 @@ mod tests {
 
     #[test]
     fn a_handle_is_read_whole_in_pieces() {
-        let picked = PickedFile::Handle(Box::new(Bytes(RefCell::new(b"hello, file".to_vec()))));
-        assert_eq!(now(picked.read_all(&Disk)).unwrap(), b"hello, file");
-    }
-
-    #[test]
-    fn a_path_is_read_through_the_platforms_files() {
-        let path = std::env::temp_dir().join(format!("waft-read-all-{}", std::process::id()));
-        std::fs::write(&path, b"on disk").unwrap();
-        let picked = PickedFile::Path(path.clone());
-        assert_eq!(now(picked.read_all(&Disk)).unwrap(), b"on disk");
-        std::fs::remove_file(path).unwrap();
-        let missing = PickedFile::Path(PathBuf::from("/no/such/waft/file"));
-        assert!(now(missing.read_all(&Disk)).is_err());
+        let handle: Box<dyn FileHandle> = Box::new(Bytes(RefCell::new(b"hello, file".to_vec())));
+        assert_eq!(now(handle.read_all()).unwrap(), b"hello, file");
     }
 }

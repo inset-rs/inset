@@ -182,7 +182,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **Files**
 - `Platform::files`, `Files::read`, `write`, `open`, `metadata`, `list`, `create_folder`, `rename`, `delete`, `File`, `OpenMode`, `Metadata`, `FileKind`, `ListedEntry`
-- Read a path whole, write one whole, open one to read and write at an offset and stream, answer what a path is, what a folder holds, and rename and delete, each through a future; run blocking file work off the main thread on the host's threads, and answer `None` where the host has no file system, as a browser tab has none. `FileImage` and a picked path read through it; picked files are read by `PickedFile::read_all`, which takes it.
+- Read a path whole, write one whole, open one to read and write at an offset and stream, answer what a path is, what a folder holds, and rename and delete, each through a future; run blocking file work off the main thread on the host's threads, and answer `None` where the host has no file system, as a browser tab has none. `FileImage` and a picked path read through it; a picked handle or stream reads itself (`read_all` on `FileHandle` and `FileStream`).
 
 Windows' and Linux's HTTP clients, Android's, and an image cache on disk are not built yet: their hosts answer `None` for HTTP and files until then.
 
