@@ -17,6 +17,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 arboard = "3"
 async-task = "4"
+bytes = "1"
 http = "1"
 indexmap = "2"
 waft = { version = "0.7.0", path = "crates/waft" }

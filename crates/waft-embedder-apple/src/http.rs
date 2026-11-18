@@ -4,19 +4,17 @@
 //! reuse without any of that written here.
 //!
 //! A response's head arrives as soon as the session has it, and its body streams as the data
-//! arrives. Dropping the response or the future cancels its task. Request bodies are read whole
-//! before the request is made: `NSURLSession` takes a body as data or as an `NSInputStream`, and
-//! this does not wrap a Waft future in one. A body made with trailers to send fails here, as
-//! `NSURLSession` sends none, rather than dropping them quietly.
+//! arrives. Dropping the response or the future cancels its task. A request body is read whole
+//! once before the request is made: `NSURLSession` takes a body as data or as an `NSInputStream`,
+//! and this does not wrap a Waft future in one. That one copy is kept, so a 307 or a 308 is
+//! followed for any body, streamed or not, with its bytes set back on the session's request. The
+//! method is the one the session proposes: a 303 (or a 301 or 302) may have switched it to GET,
+//! which carries no body, and then the kept bytes are let go. A body made with trailers to send
+//! fails here with [`HttpError::HttpRequestTrailerSectionSize`], as `NSURLSession` sends none,
+//! rather than dropping them quietly.
 //!
 //! Redirects are counted here so that a policy's limit is the one that applies, and TLS
-//! challenges are left to the session's default handling. A redirect that resends its body — a
-//! 307 or a 308 — is resent only when the body can be
-//! ([`Body::try_clone`](waft_embedder::Body::try_clone)): the client keeps the request's method
-//! and bytes and sets them on the session's new request, so the resend is this client's rather
-//! than the session's undocumented one. A body that streams cannot be sent again, so the
-//! redirect response is the answer, as reqwest answers it, rather than a request whose body went
-//! with the first try.
+//! challenges are left to the session's default handling.
 //!
 //! `NSHTTPURLResponse` joins a repeated response header into one value, and says nothing of the
 //! protocol version, so a response answers each header once and as HTTP/1.1 whatever was spoken.
@@ -193,24 +191,15 @@ async fn load(
     let url = url_of(request.uri())?;
     let method = request.method().as_str().to_owned();
     let headers = request.headers().clone();
-    // `NSURLSession` sends no request trailers, so a body made to carry them fails here rather
-    // than sending a request that would lose them.
-    if request.body_mut().take_trailers().is_some() {
-        return Err(HttpError::Internal(Some(
-            "NSURLSession cannot send trailers".to_owned(),
-        )));
-    }
-    // What a 307 or 308 resends: the method and the bytes, kept only for a body that can be
-    // sent again, as a stream's cannot.
-    let replay = match request.body().try_clone() {
-        Some(mut again) => Some(Replay {
-            method: method.clone(),
-            bytes: again.read_all().await?,
-        }),
-        None => None,
-    };
+    // The body is read whole once, both to send and to send again if a 307 or a 308 resends it.
     let bytes = request.body_mut().read_all().await?;
-    exchange.set_replay(replay);
+    // `NSURLSession` sends no request trailers, so a body that carries them fails here with the
+    // one case that says a trailer section must be empty, rather than losing them.
+    if request.body_mut().trailers().await?.is_some() {
+        return Err(HttpError::HttpRequestTrailerSectionSize(Some(0)));
+    }
+    let body = (!bytes.is_empty()).then(|| SharedBody(NSData::from_vec(bytes)));
+    exchange.set_body(body.clone());
     let request = NSMutableURLRequest::new();
     request.setURL(Some(&url));
     request.setHTTPMethod(&NSString::from_str(&method));
@@ -230,9 +219,7 @@ async fn load(
             &NSString::from_str(name.as_str()),
         );
     }
-    if !bytes.is_empty() {
-        request.setHTTPBody(Some(&NSData::from_vec(bytes)));
-    }
+    request.setHTTPBody(body.as_ref().map(|body| &*body.0));
     let task = session.dataTaskWithRequest(&request);
     exchanges
         .lock()
@@ -329,17 +316,20 @@ struct State {
     error: Option<HttpError>,
     redirects_left: usize,
     redirect_policy: RedirectPolicy,
-    /// What a 307 or 308 resends, kept for a body that can be sent again.
-    replay: Option<Replay>,
+    /// The body of the request that was sent, kept for a 307 or a 308 to send again.
+    body: Option<SharedBody>,
 }
 
-/// What a redirect that resends its request carries: the method and the bytes of one whose body
-/// can be sent again.
+/// A request body kept across the session's queue and the app's thread: `NSData` is immutable,
+/// which objc2's generated types do not say, so its bytes are never changed after it is made and
+/// its retain and release are thread-safe.
 #[derive(Clone)]
-struct Replay {
-    method: String,
-    bytes: Vec<u8>,
-}
+struct SharedBody(Retained<NSData>);
+
+// SAFETY: an `NSData` cannot be changed after it is made; only its bytes are read, from whichever
+// queue the session sends the request on.
+unsafe impl Send for SharedBody {}
+unsafe impl Sync for SharedBody {}
 
 /// How much a response's delivered but unread data may hold before its task is suspended: 256
 /// KiB, plus at most the piece the session was already delivering.
@@ -365,7 +355,7 @@ impl Exchange {
                 error: None,
                 redirects_left,
                 redirect_policy: options.redirects,
-                replay: None,
+                body: None,
             }),
         }
     }
@@ -391,9 +381,9 @@ impl Exchange {
         self.lock().task = Some(task.clone());
     }
 
-    /// Stores what a redirect resends, which a request whose body can be sent again gives.
-    fn set_replay(&self, replay: Option<Replay>) {
-        self.lock().replay = replay;
+    /// Stores the body of the request being sent, which a 307 or a 308 sends again.
+    fn set_body(&self, body: Option<SharedBody>) {
+        self.lock().body = body;
     }
 
     fn chunk(&self, bytes: Vec<u8>) {
@@ -469,11 +459,11 @@ impl Exchange {
         wake(body_waiter);
     }
 
-    /// Counts a redirect against the policy and matches it to what the exchange kept: what to
-    /// do with it. One past the policy's limit fails the exchange at once, so the answer is the
-    /// error rather than the redirect; a 307 or 308 goes on only with a body that can be sent
-    /// again, and is the answer otherwise.
-    fn redirect(&self, status: u16) -> Redirect {
+    /// Counts a redirect against the policy and matches it to the body the exchange keeps: what
+    /// to do with it. One past the policy's limit fails the exchange at once, so the answer is
+    /// the error rather than the redirect; a 307 or 308 sends the body of the request that was
+    /// sent again.
+    fn redirect(&self, status: u16, method: &str) -> Redirect {
         let mut state = self.lock();
         match state.redirect_policy {
             RedirectPolicy::Never => Redirect::Answer,
@@ -491,26 +481,19 @@ impl Exchange {
             }
             RedirectPolicy::Follow { .. } => {
                 state.redirects_left -= 1;
+                // The session proposes the request that follows: a 303, or a 301 or 302, may
+                // switch it to GET or HEAD, which carry no body, so a later 307 must not bring
+                // the first request's body back.
+                if method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD") {
+                    state.body = None;
+                }
                 if status == 307 || status == 308 {
-                    if state.replay.is_some() {
-                        Redirect::Resend
-                    } else {
-                        Redirect::Answer
-                    }
+                    Redirect::Resend(state.body.clone())
                 } else {
                     Redirect::Follow
                 }
             }
         }
-    }
-
-    /// What a redirect that resends its request carries, which only an exchange that kept its
-    /// body's bytes answers.
-    fn resend(&self) -> Replay {
-        self.lock()
-            .replay
-            .clone()
-            .expect("a redirect resends only what an exchange kept")
     }
 
     /// Wakes both waiters, after a failure set by a timer or a redirect limit.
@@ -528,9 +511,9 @@ impl Exchange {
 enum Redirect {
     /// The session goes on to the new location.
     Follow,
-    /// The session goes on to the new location, with the request's method and body set back on
-    /// its request: a 307 or a 308.
-    Resend,
+    /// The session goes on to the new location, with this body set back on its request: a 307 or
+    /// a 308.
+    Resend(Option<SharedBody>),
     /// The redirect response is the answer.
     Answer,
     /// The exchange has failed; its task is cancelled.
@@ -649,25 +632,26 @@ define_class!(
         ) {
             abort_on_panic(|| {
                 let status = u16::try_from(response.statusCode()).unwrap_or(0);
-                let Some(exchange) = self.ivars().get(task) else {
-                    task.cancel();
-                    completion.call((std::ptr::null_mut(),));
-                    return;
+                let method = request
+                    .HTTPMethod()
+                    .map(|method| method.to_string())
+                    .unwrap_or_default();
+                let redirect = match self.ivars().get(task) {
+                    Some(exchange) => exchange.redirect(status, &method),
+                    None => Redirect::Fail,
                 };
-                match exchange.redirect(status) {
+                match redirect {
                     Redirect::Follow => {
                         let request = request as *const NSURLRequest as *mut NSURLRequest;
                         completion.call((request,));
                     }
-                    Redirect::Resend => {
-                        let resend = exchange.resend();
-                        // A mutable copy of the session's request, which carries its headers and
-                        // timeout, with the method and body the redirect keeps set on it, so the
-                        // resend is this client's rather than the session's undocumented one.
+                    Redirect::Resend(body) => {
+                        // The session proposes the request with its method and URL; only the body
+                        // is set back on it, so the resend is this client's rather than the
+                        // session's undocumented one.
                         let again: Retained<NSMutableURLRequest> = request.mutableCopy();
-                        again.setHTTPMethod(&NSString::from_str(&resend.method));
-                        if !resend.bytes.is_empty() {
-                            again.setHTTPBody(Some(&NSData::from_vec(resend.bytes)));
+                        if let Some(body) = &body {
+                            again.setHTTPBody(Some(&body.0));
                         }
                         let held: &NSURLRequest = &again;
                         completion.call((held as *const NSURLRequest as *mut NSURLRequest,));

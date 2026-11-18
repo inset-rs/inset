@@ -20,6 +20,7 @@ serde = ["dep:serde"]
 [dependencies]
 # The request and response values of HTTP: methods, URIs, statuses and headers, whose shapes
 # every platform's client and the framework's own users share.
+bytes.workspace = true
 http.workspace = true
 indexmap.workspace = true
 raw-window-handle.workspace = true
