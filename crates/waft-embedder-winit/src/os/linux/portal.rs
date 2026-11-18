@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use zbus::blocking::Connection;
 use zbus::blocking::Proxy;
 use zbus::export::serde::Serialize;
+use zbus::message::{Flags, Message};
 use zbus::proxy::CacheProperties;
 use zbus::zvariant::{DynamicType, OwnedValue, Value};
 
@@ -76,10 +77,10 @@ where
         &body(options),
     )?;
     close.made(&connection, &path);
-    let response = responses
-        .next()
-        .ok_or_else(|| zbus::Error::Failure("the portal closed without an answer".to_owned()))?;
+    let response = responses.next();
     close.done();
+    let response = response
+        .ok_or_else(|| zbus::Error::Failure("the portal closed without an answer".to_owned()))?;
     let (code, results) = response.body().deserialize()?;
     Ok(Response { code, results })
 }
@@ -95,7 +96,7 @@ enum Closing {
     /// Not made yet.
     Waiting,
     /// Not made yet, and closed as soon as it is.
-    ClosingEarly,
+    CloseOnceMade,
     /// Made, over the connection whose call closes it, at its path.
     Made(Connection, String),
     /// Answered, or never made: nothing left to close.
@@ -118,7 +119,7 @@ impl Closer {
                     *closing = Closing::Made(connection.clone(), path.to_owned());
                     false
                 }
-                Closing::ClosingEarly => {
+                Closing::CloseOnceMade => {
                     *closing = Closing::Done;
                     true
                 }
@@ -126,7 +127,7 @@ impl Closer {
             }
         };
         if close_early {
-            let _ = close_request(connection, path);
+            close_request(connection.clone(), path);
         }
     }
 
@@ -137,7 +138,7 @@ impl Closer {
             let mut closing = locked(&self.0);
             match &mut *closing {
                 Closing::Waiting => {
-                    *closing = Closing::ClosingEarly;
+                    *closing = Closing::CloseOnceMade;
                     None
                 }
                 Closing::Made(connection, path) => {
@@ -145,11 +146,11 @@ impl Closer {
                     *closing = Closing::Done;
                     Some(made)
                 }
-                Closing::ClosingEarly | Closing::Done => None,
+                Closing::CloseOnceMade | Closing::Done => None,
             }
         };
         if let Some((connection, path)) = made {
-            let _ = close_request(&connection, &path);
+            close_request(connection, &path);
         }
     }
 
@@ -159,16 +160,20 @@ impl Closer {
     }
 }
 
-/// Asks the portal to close the request at `path`, as its Cancel button does.
-fn close_request(connection: &Connection, path: &str) -> zbus::Result<()> {
-    let request: Proxy<'_> = zbus::blocking::proxy::Builder::new(connection)
-        .destination(PORTAL)?
-        .path(path)?
-        .interface(REQUEST)?
-        .cache_properties(CacheProperties::No)
-        .build()?;
-    request.call_method("Close", &())?;
-    Ok(())
+/// Asks the portal to close the request at `path`, as its Cancel button does, and closes the
+/// request's own connection. The portal sends no `Response` for a closed request, so the closed
+/// connection is what ends the asking thread's wait; and the call waits for no reply, as the app
+/// may drop its future on its own thread.
+fn close_request(connection: Connection, path: &str) {
+    let close = Message::method_call(path, "Close")
+        .and_then(|call| call.destination(PORTAL))
+        .and_then(|call| call.interface(REQUEST))
+        .and_then(|call| call.with_flags(Flags::NoReplyExpected))
+        .and_then(|call| call.build(&()));
+    if let Ok(close) = close {
+        let _ = connection.send(&close);
+    }
+    let _ = connection.close();
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {
