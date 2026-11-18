@@ -183,6 +183,5 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 # `os/macos`, `os/windows`, `os/linux/wayland` and `os/linux/dmabuf` (libwayland's proxies, GBM,
 # DRM and dma-buf ioctls), `os/linux/local_time` (the C library's `localtime_r`) and the tests'
 # AppKit support, for a local event monitor, alone allow it.
-
 [lints.rust]
 unsafe_code = "deny"

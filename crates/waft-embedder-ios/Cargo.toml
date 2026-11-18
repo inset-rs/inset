@@ -62,6 +62,5 @@ objc2-foundation = { version = "0.3", features = ["NSRange"] }
 # UIKit's classes, delegates and notices, Core Animation's display link and the pasteboard's
 # blocks need `unsafe`, which the workspace forbids; here it is denied instead, and the modules
 # that define a class or call such an API alone allow it, each saying why.
-
 [lints.rust]
 unsafe_code = "deny"

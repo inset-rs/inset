@@ -46,6 +46,5 @@ ndk-sys = { version = "0.6", features = ["bitmap"] }
 # The NDK's C APIs — `NativeActivity`'s callbacks, the choreographer, the native window, surface
 # controls, hardware buffers, JNI — and Vulkan's need `unsafe`, which the workspace forbids; here it
 # is denied instead, and the modules that call them allow it.
-
 [lints.rust]
 unsafe_code = "deny"

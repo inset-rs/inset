@@ -4,7 +4,7 @@
 //! over them on the app's GPU device (`gpu_interop`); Core Animation's compositor of composition
 //! layers (`composition`) and its clock beside the host's (`media_time`); AVFoundation's players
 //! and cameras (`media`), and Media Accessibility's caption settings (`caption_appearance`); HTTP
-//! over `NSURLSession` (`http`) and the file system on Grand Central Dispatch's threads (`files`);
+//! over `NSURLSession` (`http`) and the file system on the host's `Dispatcher` threads (`files`);
 //! the notification center (`notifications`); the local time zone, from the C library
 //! (`local_time`); and for their pasteboards, the UTIs the framework's MIME
 //! types are named by (`pasteboard_types`), the app's futures run on its main thread on behalf of
