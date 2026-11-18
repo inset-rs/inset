@@ -1,7 +1,6 @@
 //! Flutter counterpart: material_ui's `adaptive_text_selection_toolbar.dart`.
 //!
-//! `AdaptiveTextSelectionToolbar.selectable` and `.selectableRegion` wait on
-//! `SelectableRegion`.
+//! `AdaptiveTextSelectionToolbar.selectable` waits on `SelectableText`.
 
 use std::fmt::{self, Debug};
 
@@ -14,7 +13,7 @@ use waft_foundation::{App, Handle, Listener};
 use waft_painting::AlignmentGeometry;
 use waft_widgets::{
     BuildContext, ClipboardStatus, ContextMenuButtonItem, ContextMenuButtonType, EditableText,
-    EditableTextState, IntoWidget, KeyRef, SizedBox, StatelessWidget, Text,
+    EditableTextState, IntoWidget, KeyRef, SelectableRegionState, SizedBox, StatelessWidget, Text,
     TextSelectionToolbarAnchors, WidgetRef,
 };
 
@@ -194,6 +193,19 @@ impl AdaptiveTextSelectionToolbar {
             children: None,
             button_items: Some(editable_text_state.context_menu_button_items(app)),
             anchors: editable_text_state.context_menu_anchors(app),
+        }
+    }
+
+    /// Dart `AdaptiveTextSelectionToolbar.selectableRegion`.
+    pub fn selectable_region(
+        app: &mut App,
+        selectable_region_state: Handle<SelectableRegionState>,
+    ) -> AdaptiveTextSelectionToolbar {
+        AdaptiveTextSelectionToolbar {
+            key: None,
+            children: None,
+            button_items: Some(selectable_region_state.context_menu_button_items(app)),
+            anchors: selectable_region_state.context_menu_anchors(app),
         }
     }
 

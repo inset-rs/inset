@@ -108,6 +108,7 @@ Ported against: 34b89b2086d4
 - text_selection.rs → text_selection.dart
 - desktop_text_selection.rs → desktop_text_selection.dart
 - adaptive_text_selection_toolbar.rs → adaptive_text_selection_toolbar.dart
+- selection_area.rs → selection_area.dart
 - spell_check_suggestions_toolbar_layout_delegate.rs → spell_check_suggestions_toolbar_layout_delegate.dart
 - spell_check_suggestions_toolbar.rs → spell_check_suggestions_toolbar.dart
 - generated/navigation_bar_defaults_m3.rs → generated/navigation_bar_defaults_m3.g.dart
@@ -765,9 +766,10 @@ Ported against: 34b89b2086d4
 - input_decorator.rs: cases waiting for `TextField` ('OutlineInputBorder radius carries over when lerping'; the four M3 and four M2 alignLabelWithHint multiline cases; 'InputDecorator counter text, widget, and null'; 'Material2 - InputDecorator suffixIcon color in error state'; 'uses alphabetic baseline for CJK layout'; 'helper text and character counter do not overlap'). Trigger: the next edit of input_decorator.rs (`text_field.rs` exists).
 - text_selection_toolbar.rs: `_TextSelectionToolbarItemsLayoutElement` and its `debugVisitOnstageChildren` (and Cupertino's); test_support's `is_onstage` reads the `ToolbarItemsParentData.should_paint` of the children those two lay out. Trigger: `Element::debug_visit_onstage_children` in waft-widgets.
 - text_selection_toolbar.rs: `_RenderTextSelectionToolbarItemsLayout.visitChildrenForSemantics`. Trigger: the semantics tree.
-- adaptive_text_selection_toolbar.rs: `AdaptiveTextSelectionToolbar.selectable` and `.selectableRegion`. Trigger: `SelectableRegion`.
+- adaptive_text_selection_toolbar.rs: `AdaptiveTextSelectionToolbar.selectable`. Trigger: `SelectableText`.
 - spell_check_suggestions_toolbar.rs: nothing gives `EditableTextState` spell-check results, so `build_button_items` answers `None`. Trigger: widgets' spell-check fetch.
 - adaptive_text_selection_toolbar.rs: adaptive_text_selection_toolbar_test 'Can build from EditableTextState' and 'getEditableTextButtonItems builds the correct button items per-platform'. Trigger: `RenderEditable`'s tap / long-press recognizers.
+- selection_area.rs: selection_area_test's FittedBox handle-transform cases, its toolbar and handle-drag cases, and 'Does not crash when long pressing on padding after dragging': they need the Material handles' painted geometry, which the test handle controls do not draw. Trigger: the Material selection handles' paint in a test.
 - spell_check_suggestions_toolbar.rs: spell_check_suggestions_toolbar_test 'buildSuggestionButtons only considers the first three suggestions' and 'buildButtonItems builds only a delete button when no suggestions'. Trigger: widgets' spell-check fetch.
 - text_selection_toolbar.rs, text_selection.rs: text_selection_toolbar_test 'can create and use a custom toolbar'; text_selection_test's 'Text selection menu overflow (Android)' group, 'menu position' group, 'Paste only appears when clipboard has contents', 'does not crash when long press is cancelled after unmounting', "selection handle's GestureDetector should not cover the entire screen". Trigger: the next edit of these files (`TextField` exists).
 - text_field.rs, text_form_field.rs, selectable_text.rs: `strutStyle`. Trigger: `StrutStyle`.
