@@ -26,6 +26,10 @@ Ported against: aa3207e6
 
 ## text_control.rs → TextBoxBase
 
+- Change: a multiline `TextBox` with no `max_lines` gives its editor `EditableText.expands`, so the editor fills the height its parent gives and scrolls once the text passes it.
+  Reason: framework — WinUI's `TextBox` stretches to its slot by default through `VerticalAlignment="Stretch"`, while Flutter's matching mechanism is `EditableText(expands: true)`; the port has no `Expands` property, as WinUI has none, and `AcceptsReturn` or `TextWrapping` chooses multiline.
+  Affect: a multiline box in a fixed-height pane has a full-height editing area, and its lines grow and scroll inside it; `max_lines` keeps the editor at its line height instead.
+
 - Change: `TextBox` and `PasswordBox` use Flutter’s text editor, selection gestures, controllers and input formatters.
   Reason: framework — WinUI delegates editing to Windows RichEdit, while Waft supplies Flutter's editor.
   Affect: Text selection, keyboard shortcuts, IME composition, length enforcement and undo follow the native Flutter behavior.

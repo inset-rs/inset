@@ -175,3 +175,58 @@ fn a_header_stays_inside_a_parent_cap() {
     assert_eq!(fixture.height(), CAP);
     fixture.assert_scrolled_to_caret();
 }
+
+/// A multiline box in a fixed-height pane fills the pane, and its text scrolls past it.
+#[test]
+fn a_multiline_box_fills_a_fixed_height_pane() {
+    let mut fixture = Fixture::new(|text_box| {
+        SizedBox::new()
+            .height(CAP * 2.0)
+            .child(text_box)
+            .into_widget()
+    });
+    assert_eq!(fixture.height(), CAP * 2.0);
+    fixture.type_text(&lines(20));
+    assert_eq!(fixture.height(), CAP * 2.0);
+    fixture.assert_scrolled_to_caret();
+}
+
+/// A multiline box in an unbounded `Column` grows with its text, as XAML's `Stretch` in a
+/// StackPanel does, instead of trying to fill the infinity.
+#[test]
+fn a_multiline_box_in_a_column_grows_with_its_text() {
+    let mut fixture = Fixture::new(|text_box| {
+        Column::new()
+            .children([text_box.into_widget()])
+            .into_widget()
+    });
+    fixture.type_text("line");
+    let one_line = fixture.height();
+    fixture.type_text(&lines(20));
+    let many_lines = fixture.height();
+    assert!(one_line.is_finite() && many_lines.is_finite());
+    assert!(
+        many_lines > one_line,
+        "the box grows with its lines: {one_line} then {many_lines}"
+    );
+}
+
+/// A multiline box in a `ListView` grows with its text, as XAML's `Stretch` in a ScrollViewer
+/// does.
+#[test]
+fn a_multiline_box_in_a_list_view_grows_with_its_text() {
+    let mut fixture = Fixture::new(|text_box| {
+        ListView::new()
+            .children([text_box.into_widget()])
+            .into_widget()
+    });
+    fixture.type_text("line");
+    let one_line = fixture.height();
+    fixture.type_text(&lines(20));
+    let many_lines = fixture.height();
+    assert!(one_line.is_finite() && many_lines.is_finite());
+    assert!(
+        many_lines > one_line,
+        "the box grows with its lines: {one_line} then {many_lines}"
+    );
+}

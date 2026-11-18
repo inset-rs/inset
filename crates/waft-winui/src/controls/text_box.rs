@@ -97,6 +97,10 @@ pub struct TextBox {
     pub is_read_only: bool,
 
     /// Accepts line breaks and enables native wrapped multiline editing.
+    ///
+    /// A multiline box fills the height its parent gives it, as WinUI's default
+    /// `VerticalAlignment="Stretch"` does, and its editor scrolls once the text passes it; in an
+    /// unbounded parent it grows with its text.
     pub accepts_return: bool,
 
     /// Wraps text independently of accepting Enter; with `NoWrap`, a multiline box keeps each line whole and scrolls sideways.
@@ -106,7 +110,8 @@ pub struct TextBox {
     pub horizontal_scroll_bar_visibility: ScrollBarVisibility,
 
     /// Limits the visible height in lines for a multiline editor, which grows with its text from
-    /// one line up to it; past it, the content scrolls vertically.
+    /// one line up to it; past it, the content scrolls vertically. Setting it leaves the editor
+    /// at that height instead of filling the box; leave it unset for a box that fills its pane.
     pub max_lines: Option<i32>,
 
     /// Alignment of editor and placeholder text.

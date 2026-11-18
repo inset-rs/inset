@@ -297,6 +297,88 @@ fn disabling_a_focused_editor_and_hiding_a_revealed_page_clear_focus() {
     assert!(editor(&f, c).2);
 }
 
+/// A multiline box in a 240-pixel pane fills the pane, and its text scrolls past it.
+#[test]
+fn a_multiline_box_fills_the_height_its_pane_gives_it() {
+    let mut f = Fixture::for_feature([1080, 1500], winui_gallery::Feature::TextBox);
+    let c = controller(&f, "Full-height editor");
+    let elements = f.elements();
+    let app = f.cell.borrow();
+    let mut box_height = None;
+    for element in elements {
+        let widget = element.widget(&app);
+        if let Some(text) = downcast_widget::<TextBox>(widget.as_ref())
+            && text.placeholder_text == "Full-height editor"
+        {
+            box_height = element
+                .find_render_object(&app)
+                .and_then(|object| object.as_box())
+                .map(|object| object.size(&app).height());
+        }
+    }
+    assert_eq!(box_height, Some(240.0));
+    drop(app);
+
+    let lines: String = (1..=40)
+        .map(|line| format!("Line {line}\n"))
+        .collect::<String>();
+    {
+        let mut app = f.cell.borrow_mut();
+        c.set_text(&mut app, lines.trim_end().to_string());
+        c.set_selection(
+            &mut app,
+            TextSelection::collapsed(0, TextAffinity::Downstream),
+        );
+    }
+    f.cell.checkpoint();
+    f.pump();
+
+    let elements = f.elements();
+    let app = f.cell.borrow();
+    let mut content_height = None;
+    let mut scroll_height = None;
+    let mut scroll_extents = Vec::new();
+    for element in &elements {
+        let widget = element.widget(&app);
+        if let Some(editable) = downcast_widget::<EditableText>(widget.as_ref())
+            && editable.controller == c
+        {
+            content_height = element
+                .find_render_object(&app)
+                .and_then(|object| object.as_box())
+                .map(|object| object.size(&app).height());
+            if let Some(scrollable) = element.find_ancestor_state_of_type::<ScrollableState>(&app) {
+                let context = waft_widgets::State::context(scrollable, &app);
+                scroll_height = context
+                    .find_render_object(&app)
+                    .and_then(|object| object.as_box())
+                    .map(|object| object.size(&app).height());
+            }
+        }
+        if let Some(scrollable) = element.state_handle::<ScrollableState>(&app) {
+            let position = scrollable.position(&app);
+            if position.axis(&app) == waft_painting::Axis::Vertical {
+                let viewport = position.viewport_dimension(&app);
+                if (200.0..240.0).contains(&viewport) {
+                    scroll_extents.push(position.max_scroll_extent(&app));
+                }
+            }
+        }
+    }
+    assert!(
+        content_height.is_some_and(|height| height > 200.0),
+        "the text area fills the pane, got {content_height:?} scroll {scroll_height:?}"
+    );
+    assert!(
+        scroll_height.is_some_and(|height| height > 200.0),
+        "the scrolling editor fills the pane, got {scroll_height:?}"
+    );
+    assert!(
+        scroll_extents.iter().any(|extent| *extent > 0.0),
+        "the text past the pane scrolls, got {scroll_extents:?}"
+    );
+}
+
 #[test]
 fn native_keyboard_selection_deletion_and_password_copy_policy() {
     let mut f = Fixture::for_feature([1080, 1100], winui_gallery::Feature::TextBox);

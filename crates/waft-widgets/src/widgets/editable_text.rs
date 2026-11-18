@@ -1116,6 +1116,10 @@ impl Simulation for DiscreteKeyFrameSimulation {
 }
 
 /// A basic text input field.
+///
+/// This is the raw editing widget: it draws and edits text but takes no pointer gestures
+/// itself, so taps, drags and the selection menu come from a field's gesture detector around
+/// it. Use a text field such as Material's `TextField` or WinUI's `TextBox` for the gestures.
 #[allow(clippy::type_complexity)]
 pub struct EditableText {
     pub key: Option<KeyRef>,
