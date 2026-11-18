@@ -4,7 +4,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::task::Context;
 
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
 use waft_embedder::{
@@ -223,12 +222,6 @@ impl BodyStream for MockBodyStream {
     }
 }
 
-/// A waker that does nothing, for polling a ready future in these tests.
-#[allow(dead_code)]
-fn noop_context() -> Context<'static> {
-    Context::from_waker(std::task::Waker::noop())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,7 +230,7 @@ mod tests {
 
     fn now<T>(future: impl Future<Output = T>) -> T {
         let mut future = std::pin::pin!(future);
-        let mut context = noop_context();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         loop {
             if let Poll::Ready(value) = future.as_mut().poll(&mut context) {
                 return value;
