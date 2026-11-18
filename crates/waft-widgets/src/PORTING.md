@@ -432,8 +432,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 ## platform_selectable_region_context_menu.rs → platform_selectable_region_context_menu.dart
 
 - Change: `PlatformSelectableRegionContextMenu` is the non-web stub alone: every member and its `build` throw where Dart throws `UnimplementedError`.
-  Reason: platform — the context menu is a web platform view, and Waft's `SelectableRegion` only names this widget on the web.
-  Affect: an app on a non-web host never builds one; a host that did would panic.
+  Reason: platform — the context menu is a web platform view, and there is no web host that implements it.
+  Affect: an app on a non-web host never builds one; a web host has nothing to build yet.
 
 ## widgets/selectable_region.rs → selectable_region.dart (`MultiSelectableSelectionContainerDelegate`, `StaticSelectionContainerDelegate`)
 
@@ -458,6 +458,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: the deprecated `TextSelectionDelegate` implementation, `_updateSelectionStatus`'s `textEditingValue`, `SelectionListener`, `SelectionDetails` and `SelectionListenerNotifier` are not ported.
   Reason: language — the delegate's members exist only for the deprecated toolbar and the platform's text input channel, which the port does not use; the listener classes wait for their tests' needs.
   Affect: `SelectableRegionState` is not a `TextSelectionDelegate` and no `SelectionListener` reports a region's selection details; `onSelectionChanged` and `contextMenuButtonItems` give what those would.
+
+- Change: the browser's own context menu is not wired: the region does not attach `PlatformSelectableRegionContextMenu` on focus, detach it on blur, or wrap its child in one, and `BrowserContextMenu` is not ported.
+  Reason: platform — both serve the browser's own context menu, a DOM view the web host would own, and there is no web host.
+  Affect: a region builds the same tree and takes the same focus path on every platform, with no browser-menu integration where Flutter's web region has one.
 
 ## widgets/text.rs → text.dart (selection)
 

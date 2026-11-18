@@ -12,7 +12,6 @@
 
 mod autofill;
 mod binding;
-mod browser_context_menu;
 mod clipboard;
 mod haptic_feedback;
 mod hardware_keyboard;
@@ -36,7 +35,6 @@ mod undo_manager;
 
 pub use autofill::*;
 pub use binding::*;
-pub use browser_context_menu::*;
 pub use clipboard::*;
 pub use haptic_feedback::*;
 pub use hardware_keyboard::*;

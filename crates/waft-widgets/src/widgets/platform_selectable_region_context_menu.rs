@@ -2,8 +2,8 @@
 //! `_platform_selectable_region_context_menu_io.dart` stub.
 //!
 //! A widget that provides the web's native selection context menu for its child subtree. The
-//! non-web implementation is a stub: every member throws, and no app on a non-web host builds
-//! one, since `SelectableRegion` only names it under `kIsWeb`.
+//! non-web implementation is a stub: every member throws, and nothing names it yet, since the
+//! web implementation is deferred (`## Deferred` in `PORTING.md`).
 
 use crate::framework::{BuildContext, KeyRef, StatelessWidget, WidgetRef};
 use crate::widgets::selection_container::AnySelectionContainerDelegate;

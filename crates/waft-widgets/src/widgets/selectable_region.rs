@@ -25,7 +25,7 @@ use waft_embedder::{
     AppLifecycleState, Offset, PointerDeviceKind, Rect, TargetPlatform, TextDirection, clamp_double,
 };
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, ListenableObject, Listener,
+    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener,
     PRECISION_ERROR_TOLERANCE, Ref, ValueChanged, ValueListenable, ValueListenableHandle,
 };
 use waft_gestures::{
@@ -44,8 +44,8 @@ use waft_rendering::{
 };
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase};
 use waft_services::{
-    BrowserContextMenu, Clipboard, ClipboardData, HapticFeedback, HardwareKeyboard,
-    LogicalKeyboardKey, SelectionChangedCause,
+    Clipboard, ClipboardData, HapticFeedback, HardwareKeyboard, LogicalKeyboardKey,
+    SelectionChangedCause,
 };
 
 use crate::framework::{
@@ -65,10 +65,8 @@ use crate::widgets::gesture_detector::{
 };
 use crate::widgets::magnifier::{MagnifierInfo, TextMagnifierConfiguration};
 use crate::widgets::media_query::{MediaQuery, Orientation};
-use crate::widgets::platform_selectable_region_context_menu::PlatformSelectableRegionContextMenu;
 use crate::widgets::selection_container::{
     SelectionContainer, SelectionContainerDelegate, SelectionContainerDelegateData,
-    SelectionContainerDelegateRef,
 };
 use crate::widgets::tap_region::TapRegion;
 use crate::widgets::text_editing_intents::{
@@ -4280,46 +4278,15 @@ impl SelectableRegionState {
     }
 
     fn handle_focus_changed(self: Handle<Self>, app: &mut App) {
-        if !self.focus_node(app).has_focus(app) {
-            if K_IS_WEB {
-                // Detach regardless of the current (dynamic) web context menu flag: the browser
-                // context menu may have been disabled after this delegate attached, and detach
-                // is a no-op for a client that was never the active one.
-                PlatformSelectableRegionContextMenu::detach(
-                    self.erased_selection_delegate(app).handle(),
-                );
-            }
-            if SchedulerBinding::lifecycle_state(app) == Some(AppLifecycleState::Resumed) {
-                // Only clear the selection when the region loses focus while the application
-                // runs: switching windows should keep it.
-                self.clear_selection(app);
-                self.set_selection_status(app, SelectableRegionSelectionStatus::Changing);
-                self.finalize_selectable_region_status(app);
-            }
-        } else if self.web_context_menu_enabled(app) {
-            PlatformSelectableRegionContextMenu::attach(
-                self.erased_selection_delegate(app).handle(),
-            );
+        let has_focus = self.focus_node(app).has_focus(app);
+        if !has_focus && SchedulerBinding::lifecycle_state(app) == Some(AppLifecycleState::Resumed)
+        {
+            // Only clear the selection when the region loses focus while the application
+            // runs: switching windows should keep it.
+            self.clear_selection(app);
+            self.set_selection_status(app, SelectableRegionSelectionStatus::Changing);
+            self.finalize_selectable_region_status(app);
         }
-    }
-
-    /// Whether the native browser context menu is enabled.
-    fn web_context_menu_enabled(self: Handle<Self>, app: &mut App) -> bool {
-        // TODO(Renzo-Olivares): Re-enable web context menu for Android and iOS when
-        // https://github.com/flutter/flutter/issues/177123 is resolved.
-        K_IS_WEB
-            && BrowserContextMenu::enabled(app)
-            && !matches!(
-                app.platform().target_platform(),
-                TargetPlatform::Android | TargetPlatform::IOS
-            )
-    }
-
-    fn erased_selection_delegate(
-        self: Handle<Self>,
-        app: &mut App,
-    ) -> SelectionContainerDelegateRef {
-        self.selection_delegate(app).keep(app).into_erased()
     }
 
     /// Dart's `_actions`: the actions a key press or a menu item runs, each but the dismiss one
@@ -4663,11 +4630,6 @@ impl State for SelectableRegionState {
             );
             selectable.push_handle_layers(app, None, None);
         }
-        if K_IS_WEB {
-            PlatformSelectableRegionContextMenu::detach(
-                self.erased_selection_delegate(app).handle(),
-            );
-        }
         let delegate = self.selection_delegate(app);
         MultiSelectableSelectionContainerDelegate::dispose(delegate, app);
         let notifier = self.selection_status_notifier(app);
@@ -4691,16 +4653,13 @@ impl State for SelectableRegionState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let widget = self.widget(app);
         let notifier = self.selection_status_notifier(app);
-        let delegate = self.erased_selection_delegate(app);
+        let delegate = self.selection_delegate(app).keep(app).into_erased();
         let registrar = SelectionRegistrar::as_selection_registrar(self).keep(app);
-        let child = self.widget(app).child.clone();
-        let container = SelectionContainer::new(delegate, child).registrar(registrar);
-        let mut result =
-            SelectableRegionSelectionStatusScope::new(notifier, container).into_widget();
-        if self.web_context_menu_enabled(app) {
-            result = PlatformSelectableRegionContextMenu::new(result).into_widget();
-        }
+        let container =
+            SelectionContainer::new(delegate, widget.child.clone()).registrar(registrar);
+        let result = SelectableRegionSelectionStatusScope::new(notifier, container).into_widget();
         let gestures = app
             .get(self)
             .gesture_recognizers
