@@ -8,7 +8,10 @@ use waft_foundation::App;
 use waft_painting::PaintingBinding;
 use waft_widgets::testing::WidgetTester;
 use waft_widgets::*;
-use waft_winui::{AccentPalette, FluentApp, FluentTheme, FluentThemeMode, Theme, ThemeResources};
+use waft_winui::{
+    AccentPalette, FONT_FAMILY, FluentApp, FluentScrollBehavior, FluentTheme, FluentThemeMode,
+    Theme, ThemeResources,
+};
 
 /// A fixed accent, so the test can tell the theme's palette from WinUI's default blue.
 const ACCENT: AccentPalette = AccentPalette {
@@ -21,10 +24,13 @@ const ACCENT: AccentPalette = AccentPalette {
     dark3: Color::from_argb(255, 19, 20, 21),
 };
 
+/// What the probe saw: the theme dictionary and accent around it.
+type Seen = Rc<Cell<Option<(Theme, AccentPalette)>>>;
+
 /// A page that records the theme resources around it and is built.
 #[derive(Debug)]
 struct Probe {
-    seen: Rc<Cell<Option<(Theme, AccentPalette)>>>,
+    seen: Seen,
     built: Rc<Cell<bool>>,
 }
 
@@ -37,11 +43,7 @@ impl StatelessWidget for Probe {
     }
 }
 
-fn probe() -> (
-    Probe,
-    Rc<Cell<Option<(Theme, AccentPalette)>>>,
-    Rc<Cell<bool>>,
-) {
+fn probe() -> (Probe, Seen, Rc<Cell<bool>>) {
     let seen = Rc::new(Cell::new(None));
     let built = Rc::new(Cell::new(false));
     (
@@ -52,6 +54,65 @@ fn probe() -> (
         seen,
         built,
     )
+}
+
+/// What the app's inherited widgets give a page: its default text, scroll behaviour and
+/// selection colours.
+#[derive(Debug, Default)]
+struct Defaults {
+    family: Option<String>,
+    size: Option<f64>,
+    color: Option<Color>,
+    fluent_scrolling: bool,
+    selection: Option<Color>,
+    cursor: Option<Color>,
+}
+
+/// A page that records the defaults around it.
+#[derive(Debug)]
+struct DefaultsProbe(Rc<std::cell::RefCell<Option<Defaults>>>);
+
+impl StatelessWidget for DefaultsProbe {
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        let text = DefaultTextStyle::of(app, context).style;
+        let scrolling = ScrollConfiguration::of(app, context);
+        let selection = DefaultSelectionStyle::of(app, context);
+        *self.0.borrow_mut() = Some(Defaults {
+            family: text.font_family.clone(),
+            size: text.font_size,
+            color: text.color.map(|color| color.color()),
+            fluent_scrolling: scrolling.as_any().is::<FluentScrollBehavior>(),
+            selection: selection
+                .selection_color
+                .as_ref()
+                .map(|color| color.color()),
+            cursor: selection.cursor_color.as_ref().map(|color| color.color()),
+        });
+        SizedBox::shrink().into_widget()
+    }
+}
+
+#[test]
+fn a_fluent_app_gives_winuis_text_scrolling_and_selection_defaults() {
+    let mut tester = WidgetTester::new();
+    let seen = Rc::new(std::cell::RefCell::new(None));
+    tester.pump_widget(
+        FluentApp::new()
+            .theme(FluentTheme::new(Theme::Dark, ACCENT))
+            .home(DefaultsProbe(Rc::clone(&seen)))
+            .into_widget(),
+    );
+    tester.pump_and_settle();
+    let defaults = seen.borrow_mut().take().expect("the page was built");
+    let resources = ThemeResources::new(Theme::Dark, ACCENT);
+    assert_eq!(defaults.family.as_deref(), Some(FONT_FAMILY));
+    assert_eq!(defaults.size, Some(resources.body_text_block_font_size));
+    assert_eq!(defaults.color, Some(resources.text_fill_color_primary));
+    assert!(defaults.fluent_scrolling, "WinUI's scroll behaviour");
+    #[allow(deprecated)]
+    let expected_selection = ACCENT.base.with_opacity(0.4);
+    assert_eq!(defaults.selection, Some(expected_selection));
+    assert_eq!(defaults.cursor, Some(ACCENT.base));
 }
 
 #[test]

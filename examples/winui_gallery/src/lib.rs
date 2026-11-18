@@ -1,5 +1,8 @@
 //! A working consumer of the WinUI kit: every control in its styles and states, in the light and dark themes.
 #![feature(arbitrary_self_types)]
+
+use std::rc::Rc;
+
 mod catalog;
 mod sections;
 pub use catalog::Feature;
@@ -55,32 +58,85 @@ pub fn run_feature(app: &mut App, feature: Feature) {
     install_fonts(app);
     run_app_with(
         app,
-        FluentApp::new()
-            // The gallery's own toggle picks its palette, starting light whatever the platform's.
-            .theme_mode(FluentThemeMode::Light)
-            .title("WinUI Gallery")
-            .debug_show_checked_mode_banner(false)
-            .home(Gallery {
-                initial_feature: feature,
-            })
-            .into_widget(),
+        GalleryRoot {
+            initial_feature: feature,
+        }
+        .into_widget(),
         gallery_window(),
     );
 }
 
-/// The navigation shell for the feature catalog.
+/// The app around the gallery: the one [`FluentApp`] the gallery's theme toggle drives.
 #[derive(Debug)]
+pub struct GalleryRoot {
+    /// The first feature to display when this gallery mounts.
+    pub initial_feature: Feature,
+}
+
+/// Whether the gallery is in its dark theme; [`FluentApp`] shows it through `theme_mode`.
+pub struct GalleryRootState {
+    state: StateData<GalleryRoot>,
+    dark: bool,
+}
+
+impl StatefulWidget for GalleryRoot {
+    type State = GalleryRootState;
+
+    fn create_state(&self) -> GalleryRootState {
+        GalleryRootState {
+            state: StateData::new(),
+            dark: false,
+        }
+    }
+}
+
+impl State for GalleryRootState {
+    type Widget = GalleryRoot;
+    waft_widgets::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let initial_feature = self.widget(app).initial_feature;
+        let dark = app.get(self).dark;
+        let toggle = Rc::new(move |app: &mut App| {
+            self.set_state(app, |state| state.dark = !state.dark);
+        });
+        FluentApp::new()
+            .theme_mode(if dark {
+                FluentThemeMode::Dark
+            } else {
+                FluentThemeMode::Light
+            })
+            .title("WinUI Gallery")
+            .debug_show_checked_mode_banner(false)
+            .home(Gallery {
+                initial_feature,
+                on_toggle_theme: toggle,
+            })
+            .into_widget()
+    }
+}
+
+/// The navigation shell for the feature catalog.
 pub struct Gallery {
     /// The first feature to display when this gallery mounts.
     pub initial_feature: Feature,
+    /// How the gallery switches its [`FluentApp`] between the light and dark themes.
+    on_toggle_theme: Rc<dyn Fn(&mut App)>,
+}
+
+impl std::fmt::Debug for Gallery {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Gallery")
+            .field("initial_feature", &self.initial_feature)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Owns the theme and shared examples while keeping visited pages mounted.
 pub struct GalleryState {
     /// Native state linkage.
     state: StateData<Gallery>,
-    /// Whether the gallery uses its dark palette.
-    pub dark: bool,
     /// Activations in the Button examples.
     pub clicks: u32,
     /// The Wi-Fi example's value.
@@ -99,7 +155,6 @@ impl StatefulWidget for Gallery {
     fn create_state(&self) -> GalleryState {
         GalleryState {
             state: StateData::new(),
-            dark: false,
             clicks: 0,
             wifi: true,
             airplane: false,
@@ -327,9 +382,9 @@ impl State for GalleryState {
             r.navigation_view_header_margin[0]
         };
         let state = app.get(self);
-        let (dark, selected, visited) = (state.dark, state.selected, state.visited.clone());
-        let theme = if dark { Theme::Dark } else { Theme::Light };
-        let resources = ThemeResources::new(theme, AccentPalette::default());
+        let (selected, visited) = (state.selected, state.visited.clone());
+        let dark = r.theme == Theme::Dark;
+        let resources = ThemeResources::of(app, context);
         let pages: Vec<_> = visited
             .into_iter()
             .map(|feature| {
@@ -398,10 +453,11 @@ impl State for GalleryState {
             ])
             .item_invoked(move |app, args| {
                 if args.item.id == "gallery-theme" {
-                    self.set_state(app, |state| state.dark = !state.dark);
+                    let toggle = Rc::clone(&self.widget(app).on_toggle_theme);
+                    toggle(app);
                 }
             });
-        ThemeScope::new(theme, gallery_page(&resources, navigation)).into_widget()
+        gallery_page(&resources, navigation)
     }
 }
 

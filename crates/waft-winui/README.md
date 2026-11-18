@@ -22,7 +22,7 @@ Run the gallery from the [Waft repository](https://github.com/waos-dev/waft), wh
 waft-winui = "0.5.0"
 ```
 
-Build the app with `FluentApp`, the kit's `MaterialApp`: it shows the light or dark theme and the accent, installs the Fluent icon font, and gives each page WinUI's `Frame` entrance. Controls that show popups need an `Overlay` ancestor. An app's content goes in a `Page`, whose background reaches under a phone's system bars while its content stays clear of them and of the keyboard.
+Build the app with `FluentApp`, the kit's `MaterialApp`: it shows the light or dark theme and the accent, gives text WinUI's body style, selection the accent and scrollables WinUI's thin bar and clamped edge, installs the Fluent icon font, and gives each page WinUI's `Frame` entrance. Controls that show popups need an `Overlay` ancestor. An app's content goes in a `Page`, whose background reaches under a phone's system bars while its content stays clear of them and of the keyboard.
 
 ```rust
 FluentApp::new()
@@ -32,7 +32,7 @@ FluentApp::new()
     .into_widget()
 ```
 
-A `WidgetsApp` still works without a `FluentApp`; call `install_icon_font` yourself then, and give its `page_route_builder` `FluentPageRoute::new` for the same entrance. `FluentPageRoute` can be pushed on its own.
+A `WidgetsApp` still works without a `FluentApp`; call `install_icon_font` yourself then, and give its `page_route_builder` `FluentPageRoute::new` for the same entrance. `FluentPageRoute` is a page route like `MaterialPageRoute`, so it can be pushed on its own.
 
 A `ThemeScope` can also change WinUI's theme resources for its subtree, as XAML's resource dictionaries do: `any` in both themes, then `light` or `dark`. Each resource is a field named after its XAML key.
 
