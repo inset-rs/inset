@@ -82,7 +82,7 @@ fn path_icon_fills_by_the_source_default_even_odd_rule() {
     );
     assert_eq!(size, Size::new(40.0, 40.0));
     {
-        let pixels = fixture.view.pixels.borrow();
+        let pixels = fixture.view.pixels();
         let pixel = |x: usize, y: usize| &pixels[(y * 60 + x) * 4..][..4];
         assert_eq!(pixel(5, 20), &[0, 160, 0, 255], "outer square is filled");
         assert_eq!(
@@ -103,7 +103,7 @@ fn path_icon_fills_the_centre_under_the_winding_rule() {
             .foreground(GREEN)
             .into_widget(),
     );
-    let pixels = fixture.view.pixels.borrow();
+    let pixels = fixture.view.pixels();
     let pixel = |x: usize, y: usize| &pixels[(y * 60 + x) * 4..][..4];
     assert_eq!(pixel(5, 20), &[0, 160, 0, 255], "outer square is filled");
     assert_eq!(pixel(20, 20), &[0, 160, 0, 255], "so is the centre");
@@ -118,7 +118,7 @@ fn path_icon_takes_the_enclosing_foreground_when_it_has_none() {
         DefaultTextStyle::new(TextStyle::new().color(GREEN), PathIcon::new(triangle()))
             .into_widget(),
     );
-    let pixels = fixture.view.pixels.borrow();
+    let pixels = fixture.view.pixels();
     let pixel = |x: usize, y: usize| &pixels[(y * 60 + x) * 4..][..4];
     assert_eq!(pixel(3, 16), &[0, 160, 0, 255], "inside the triangle");
     assert_eq!(pixel(26, 3), &[255, 255, 255, 255], "outside it");
@@ -152,7 +152,7 @@ fn font_icon_scales_with_its_font_size() {
 /// Which pixels of a 60x60 view the icon's glyph covers.
 fn rendered(icon: FontIcon) -> Vec<bool> {
     let (fixture, _) = icon_at_top_left([60, 60], icon.foreground(GREEN).into_widget());
-    let pixels = fixture.view.pixels.borrow();
+    let pixels = fixture.view.pixels();
     pixels
         .as_chunks::<4>()
         .0

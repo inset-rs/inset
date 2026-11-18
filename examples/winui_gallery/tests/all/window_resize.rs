@@ -1,58 +1,17 @@
 //! Actual platform metrics changes exercise OverlayPortal layout during adaptive resizing.
-use waft_winui_test_support::gpu;
-
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    sync::Arc,
-    time::Duration,
-};
-use waft_embedder::valo::{Color, Context};
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Duration;
 use waft_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use waft_embedder::{
-    Scene, SystemFontSource, TargetPlatform, View, ViewConstraints, ViewId, ViewMetrics,
-};
+use waft_embedder::{SystemFontSource, TargetPlatform, View};
 use waft_foundation::{AppCell, Listener};
 use waft_gestures::GestureBinding;
 use waft_rendering::RendererBinding;
 use waft_scheduler::SchedulerBinding;
-use waft_test::{TestPlatform, TestViewHost};
+use waft_test::TestPlatform;
 use waft_widgets::*;
 use waft_winui::*;
-
-pub struct CaptureView {
-    pub size: Cell<[u32; 2]>,
-    pub renderer: RefCell<Context>,
-    pub pixels: RefCell<Vec<u8>>,
-    pub host: TestViewHost,
-}
-impl View for CaptureView {
-    fn id(&self) -> ViewId {
-        ViewId(0)
-    }
-    fn metrics(&self) -> ViewMetrics {
-        ViewMetrics {
-            physical_size: self.size.get().map(|v| v as f64),
-            physical_constraints: ViewConstraints::tight(
-                self.size.get()[0] as f64,
-                self.size.get()[1] as f64,
-            ),
-            device_pixel_ratio: 1.0,
-            ..Default::default()
-        }
-    }
-    fn present(&self, scene: Arc<Scene>) {
-        *self.pixels.borrow_mut() = gpu::render_to_rgba(
-            &mut self.renderer.borrow_mut(),
-            waft_embedder::slices(&scene, |_| None).picture_with_room(),
-            self.size.get(),
-            Some(Color::WHITE),
-        );
-    }
-    fn host(&self) -> &dyn waft_embedder::ViewHost {
-        &self.host
-    }
-}
+use waft_winui_test_support::CaptureView;
 
 /// One refresh of `view` at `time`, processing microtasks between its phases.
 fn refresh(cell: &AppCell, view: &CaptureView, time: Duration) {
@@ -74,13 +33,7 @@ fn host(view: &Rc<CaptureView>) -> TestPlatform {
 
 #[test]
 fn real_window_resize_relayouts_navigation_overlay() {
-    let (device, queue) = gpu::headless_device().expect("GPU required");
-    let view = Rc::new(CaptureView {
-        size: Cell::new([1200, 800]),
-        renderer: RefCell::new(Context::new(device, queue)),
-        pixels: RefCell::new(Vec::new()),
-        host: TestViewHost::default(),
-    });
+    let view = Rc::new(CaptureView::new([1200, 800]));
     let cell = AppCell::with_platform(Rc::new(host(&view)));
     let tooltip_opened = Rc::new(Cell::new(false));
     {
@@ -158,7 +111,7 @@ fn real_window_resize_relayouts_navigation_overlay() {
             [400, 400],
         ]
     }) {
-        view.size.set(size);
+        view.set_size(size);
         {
             let mut app = cell.borrow_mut();
             RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
@@ -166,20 +119,14 @@ fn real_window_resize_relayouts_navigation_overlay() {
         {
             time += Duration::from_millis(16);
             refresh(&cell, &view, time);
-            assert_eq!(view.pixels.borrow().len(), (size[0] * size[1] * 4) as usize);
+            assert_eq!(view.pixels().len(), (size[0] * size[1] * 4) as usize);
         }
     }
 }
 
 #[test]
 fn real_gallery_window_resize_keeps_overlay_parent_data() {
-    let (device, queue) = gpu::headless_device().expect("GPU required");
-    let view = Rc::new(CaptureView {
-        size: Cell::new([1200, 800]),
-        renderer: RefCell::new(Context::new(device, queue)),
-        pixels: RefCell::new(Vec::new()),
-        host: TestViewHost::default(),
-    });
+    let view = Rc::new(CaptureView::new([1200, 800]));
     let cell = AppCell::with_platform(Rc::new(host(&view)));
     {
         let mut app = cell.borrow_mut();
@@ -199,7 +146,7 @@ fn real_gallery_window_resize_keeps_overlay_parent_data() {
             [400, 400],
         ]
     }) {
-        view.size.set(size);
+        view.set_size(size);
         {
             let mut app = cell.borrow_mut();
             RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
@@ -207,7 +154,7 @@ fn real_gallery_window_resize_keeps_overlay_parent_data() {
         {
             time += Duration::from_millis(16);
             refresh(&cell, &view, time);
-            assert_eq!(view.pixels.borrow().len(), (size[0] * size[1] * 4) as usize);
+            assert_eq!(view.pixels().len(), (size[0] * size[1] * 4) as usize);
         }
     }
 }

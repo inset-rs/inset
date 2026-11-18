@@ -536,8 +536,8 @@ fn custom_keyed_header_drag_keeps_live_subtree_and_accepts_independent_feedback(
     f.send_mouse(PointerChange::Down, start, 1);
     move_tab_pointer(&mut f, start, end);
     f.find("Independent preview");
-    let pixels = f.view.pixels.borrow();
-    let sample = ((36 * f.view.size[0] + 48) * 4) as usize;
+    let pixels = f.view.pixels();
+    let sample = ((36 * f.view.size()[0] + 48) * 4) as usize;
     assert_eq!(
         &pixels[sample..sample + 4],
         &[255, 0, 255, 255],
@@ -761,8 +761,8 @@ fn named_bounds(f: &Fixture, name: &'static str) -> Vec<Rect> {
 
 /// The colour of the frame's pixel containing `x`, `y`.
 fn pixel(f: &Fixture, x: f64, y: f64) -> [u8; 4] {
-    let pixels = f.view.pixels.borrow();
-    let index = (y as usize * f.view.size[0] as usize + x as usize) * 4;
+    let pixels = f.view.pixels();
+    let index = (y as usize * f.view.size()[0] as usize + x as usize) * 4;
     pixels[index..index + 4].try_into().unwrap()
 }
 
@@ -807,7 +807,7 @@ fn a_dragged_tab_leaves_one_bottom_border_line_across_the_strip() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(
         (lines[0].left, lines[0].right),
-        (0.0, f64::from(f.view.size[0]))
+        (0.0, f64::from(f.view.size()[0]))
     );
     assert!(paints_bottom_row(&f, lines[0]));
     f.send_mouse(PointerChange::Up, start, 0);

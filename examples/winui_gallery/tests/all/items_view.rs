@@ -228,8 +228,8 @@ fn row_focused(f: &Fixture, index: usize) -> bool {
 
 /// The pixel at `point`.
 fn pixel(f: &Fixture, point: Offset) -> [u8; 3] {
-    let pixels = f.view.pixels.borrow();
-    let width = f.view.size[0] as usize;
+    let pixels = f.view.pixels();
+    let width = f.view.size()[0] as usize;
     let index = (point.dy() as usize * width + point.dx() as usize) * 4;
     [pixels[index], pixels[index + 1], pixels[index + 2]]
 }

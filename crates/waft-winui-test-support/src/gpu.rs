@@ -1,5 +1,27 @@
 //! Headless GPU and PNG helpers copied from valo-harness (MIT); see ../VALO_LICENSE.
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+use waft_embedder::valo::Context;
+
+/// The one device the binary's tests render with, made at the first test that needs it.
+static DEVICE: OnceLock<Option<(wgpu::Device, wgpu::Queue)>> = OnceLock::new();
+
+/// The one renderer the binary's tests draw with.
+///
+/// Valo keeps pipelines, glyph rasters and uploaded images in a context, so tests that share it
+/// pay for them once. The lock is also what keeps a software Vulkan driver to one drawing test
+/// at a time; more than one device in flight crashed it.
+static CONTEXT: OnceLock<Mutex<Context>> = OnceLock::new();
+
+/// Runs `f` with the renderer the binary's tests share. `None` when the adapter offers no device.
+pub(crate) fn with_context<T>(f: impl FnOnce(&mut Context) -> T) -> Option<T> {
+    let (device, queue) = DEVICE.get_or_init(headless_device).as_ref()?;
+    let context = CONTEXT.get_or_init(|| Mutex::new(Context::new(device.clone(), queue.clone())));
+    let mut context = context
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Some(f(&mut context))
+}
 
 /// Creates the same headless device used by Valo's GPU tests.
 pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {

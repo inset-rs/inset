@@ -67,8 +67,9 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets
       - name: Tests
-        # The gallery's bundled suite makes several software-Vulkan devices; run one test at a
-        # time so the driver has one device in flight (parallel contexts segfaulted).
+        # The gallery's suite shares one software-Vulkan device and draws one test at a time, but
+        # parallel runs of it segfaulted before that and have not been retried on this host. Run
+        # one test at a time until a Linux run says parallel is safe.
         run: |
           cargo test --workspace --no-fail-fast --exclude winui_gallery
           RUST_TEST_THREADS=1 cargo test -p winui_gallery --no-fail-fast --test all

@@ -100,8 +100,8 @@ fn fixture_with_fallback_alpha(theme: Theme, acrylic: bool, transparent_fallback
 }
 
 fn pixel(f: &Fixture, x: usize, y: usize) -> [u8; 4] {
-    let pixels = f.view.pixels.borrow();
-    let index = (y * f.view.size[0] as usize + x) * 4;
+    let pixels = f.view.pixels();
+    let index = (y * f.view.size()[0] as usize + x) * 4;
     pixels[index..index + 4].try_into().unwrap()
 }
 
@@ -143,8 +143,5 @@ fn transparent_fallback_does_not_hide_the_material() {
     let opaque = fixture(Theme::Light, true);
     let transparent = fixture_with_fallback_alpha(Theme::Light, true, true);
     // The source seed forces fallback alpha opaque; its alpha must not suppress shape painting.
-    assert_eq!(
-        *opaque.view.pixels.borrow(),
-        *transparent.view.pixels.borrow()
-    );
+    assert_eq!(*opaque.view.pixels(), *transparent.view.pixels());
 }

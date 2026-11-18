@@ -88,7 +88,7 @@ fn rounded_corners_clip_child_paint_and_hit_testing() {
     let (mut f, clicks) = fixture(None, true);
     tap(&mut f, Offset::new(1.0, 1.0));
     assert_eq!(clicks.get(), 1);
-    let pixels = f.view.pixels.borrow();
+    let pixels = f.view.pixels();
     assert_eq!(&pixels[(120 + 1) * 4..(120 + 1) * 4 + 4], &[0, 0, 255, 255]);
     assert_eq!(
         &pixels[(50 * 120 + 50) * 4..(50 * 120 + 50) * 4 + 4],

@@ -344,9 +344,9 @@ fn popup_shadow_leaves_transparent_content_clear_and_follows_theme() {
         );
         f.tap("Open flyout");
         let center = f.find("Shadow probe");
-        let pixels = f.view.pixels.borrow();
+        let pixels = f.view.pixels();
         let pixel = |x: f64, y: f64| {
-            let index = (y as usize * f.view.size[0] as usize + x as usize) * 4;
+            let index = (y as usize * f.view.size()[0] as usize + x as usize) * 4;
             pixels[index]
         };
         // The transparent popup must not receive its own shadow beneath the text.

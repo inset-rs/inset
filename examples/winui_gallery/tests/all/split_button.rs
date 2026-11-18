@@ -286,7 +286,7 @@ fn checked_hover_and_press_change_only_the_targeted_half() {
     state.set_state(&mut f.cell.borrow_mut(), |s| s.checked = true);
     f.pump();
     let samples = |f: &Fixture| {
-        let pixels = f.view.pixels.borrow();
+        let pixels = f.view.pixels();
         [5usize, 151].map(|x| {
             let index = (14 * 400 + x) * 4;
             pixels[index..index + 4].to_vec()

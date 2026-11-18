@@ -232,8 +232,8 @@ fn shows(f: &Fixture, text: &str) -> bool {
 
 /// The colour at `point` of the last frame.
 fn pixel(f: &Fixture, point: Offset) -> [u8; 3] {
-    let pixels = f.view.pixels.borrow();
-    let index = (point.dy() as usize * f.view.size[0] as usize + point.dx() as usize) * 4;
+    let pixels = f.view.pixels();
+    let index = (point.dy() as usize * f.view.size()[0] as usize + point.dx() as usize) * 4;
     [pixels[index], pixels[index + 1], pixels[index + 2]]
 }
 

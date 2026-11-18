@@ -87,7 +87,7 @@ fn page(content: WidgetRef) -> WidgetRef {
 }
 
 fn pixel(fixture: &Fixture, x: usize, y: usize) -> [u8; 4] {
-    let pixels = fixture.view.pixels.borrow();
+    let pixels = fixture.view.pixels();
     pixels[(y * VIEW[0] as usize + x) * 4..][..4]
         .try_into()
         .unwrap()
@@ -215,7 +215,7 @@ fn a_navigation_reaches_the_edges_and_keeps_its_controls_clear_of_the_bars() {
         title.dy() > 40.0,
         "the header is below the status bar: {title:?}"
     );
-    let pixels = f.view.pixels.borrow();
+    let pixels = f.view.pixels();
     let pixel =
         |x: usize, y: usize| -> [u8; 4] { pixels[(y * 400 + x) * 4..][..4].try_into().unwrap() };
     assert_ne!(
@@ -241,7 +241,7 @@ fn a_navigation_reaches_the_edges_and_keeps_its_controls_clear_of_the_bars() {
         home.dy() > 40.0,
         "the pane's items are below the status bar: {home:?}"
     );
-    let pixels = f.view.pixels.borrow();
+    let pixels = f.view.pixels();
     let at =
         |x: usize, y: usize| -> [u8; 4] { pixels[(y * 1100 + x) * 4..][..4].try_into().unwrap() };
     assert_eq!(

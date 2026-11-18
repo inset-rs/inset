@@ -152,8 +152,8 @@ fn tap(f: &mut Fixture, text: &str) {
 fn pill_under(f: &Fixture, text: &str) -> bool {
     let Offset { .. } = f.find(text);
     let center = f.find(text);
-    let pixels = f.view.pixels.borrow();
-    let width = f.view.size[0] as usize;
+    let pixels = f.view.pixels();
+    let width = f.view.size()[0] as usize;
     (6..24).any(|dy| {
         let (x, y) = (
             center.dx().round() as usize,

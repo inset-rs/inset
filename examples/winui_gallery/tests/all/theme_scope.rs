@@ -51,8 +51,8 @@ fn an_override_reaches_a_text_box() {
     );
     // Inside the box, left of where its text starts.
     let [x, y] = [4, 16];
-    let index = ((y * fixture.view.size[0] + x) * 4) as usize;
-    let pixels = fixture.view.pixels.borrow();
+    let index = ((y * fixture.view.size()[0] + x) * 4) as usize;
+    let pixels = fixture.view.pixels();
     assert_eq!(pixels[index..index + 3], [255, 0, 0]);
 }
 
