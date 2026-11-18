@@ -8,6 +8,9 @@
 //! before the request is made: `NSURLSession` takes a body as data or as an `NSInputStream`, and
 //! this does not wrap a Waft future in one. Redirects are counted here so that a policy's limit
 //! is the one that applies, and TLS challenges are left to the session's default handling.
+//!
+//! `NSHTTPURLResponse` joins a repeated response header into one value, and says nothing of the
+//! protocol version, so a response answers each header once and as HTTP/1.1 whatever was spoken.
 #![allow(unsafe_code)]
 
 use std::collections::{BTreeMap, VecDeque};
@@ -23,9 +26,12 @@ use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_foundation::{
     NSData, NSError, NSHTTPURLResponse, NSMutableURLRequest, NSOperationQueue, NSString, NSURL,
-    NSURLErrorCancelled, NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost,
-    NSURLErrorNetworkConnectionLost, NSURLErrorNotConnectedToInternet,
-    NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateUntrusted, NSURLErrorTimedOut,
+    NSURLErrorBadServerResponse, NSURLErrorBadURL, NSURLErrorCannotConnectToHost,
+    NSURLErrorCannotParseResponse, NSURLErrorClientCertificateRejected,
+    NSURLErrorClientCertificateRequired, NSURLErrorHTTPTooManyRedirects,
+    NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateHasBadDate,
+    NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid,
+    NSURLErrorServerCertificateUntrusted, NSURLErrorTimedOut, NSURLErrorUnsupportedURL,
     NSURLRequest, NSURLResponse, NSURLSession, NSURLSessionDataDelegate, NSURLSessionDataTask,
     NSURLSessionDelegate, NSURLSessionResponseDisposition, NSURLSessionTask,
     NSURLSessionTaskDelegate,
@@ -42,9 +48,16 @@ use crate::abort_on_panic;
 pub struct AppleHttpClient {
     session: Retained<NSURLSession>,
     exchanges: Arc<Exchanges>,
-    /// Kept because the session's reference to its delegate is the one that matters, and this
-    /// keeps it alive for the session's life.
+    /// The session holds its delegate until it is invalidated, which dropping the client does.
     _delegate: Retained<HttpDelegate>,
+}
+
+impl Drop for AppleHttpClient {
+    fn drop(&mut self) {
+        // Without this the session and its delegate outlive the client: a session keeps its
+        // delegate until it is invalidated.
+        self.session.invalidateAndCancel();
+    }
 }
 
 impl AppleHttpClient {
@@ -136,16 +149,13 @@ async fn load(
     if let Some(timeout) = options.timeout {
         request.setTimeoutInterval(timeout.as_secs_f64());
     }
+    // `addValue` joins a repeated header's values with commas, as HTTP allows for every header
+    // but `Set-Cookie`, which a request does not send.
     for (name, value) in &headers {
-        if let (Ok(name), Ok(value)) = (
-            HeaderName::from_bytes(name.as_str().as_bytes()),
-            HeaderValue::from_bytes(value.as_bytes()),
-        ) {
-            request.setValue_forHTTPHeaderField(
-                Some(&NSString::from_str(value.to_str().unwrap_or_default())),
-                &NSString::from_str(name.as_str()),
-            );
-        }
+        request.addValue_forHTTPHeaderField(
+            &NSString::from_str(&String::from_utf8_lossy(value.as_bytes())),
+            &NSString::from_str(name.as_str()),
+        );
     }
     if !bytes.is_empty() {
         request.setHTTPBody(Some(&NSData::from_vec(bytes)));
@@ -291,23 +301,34 @@ impl Exchange {
         wake(body_waiter);
     }
 
-    /// Counts a redirect against the policy: whether it may be followed.
-    fn follow_redirect(&self) -> bool {
+    /// Counts a redirect against the policy: what to do with it. One past the policy's limit
+    /// fails the exchange at once, so the answer is the error rather than the redirect.
+    fn redirect(&self) -> Redirect {
         let mut state = self.lock();
         match state.redirect_policy {
-            RedirectPolicy::Never => false,
+            RedirectPolicy::Never => Redirect::Answer,
             RedirectPolicy::Follow { .. } if state.redirects_left == 0 => {
-                if state.error.is_none() {
-                    state.error = Some(HttpError::TooManyRedirects);
-                }
-                false
+                drop(state);
+                self.responded(Err(HttpError::TooManyRedirects));
+                self.lock().error.get_or_insert(HttpError::TooManyRedirects);
+                Redirect::Fail
             }
             RedirectPolicy::Follow { .. } => {
                 state.redirects_left -= 1;
-                true
+                Redirect::Follow
             }
         }
     }
+}
+
+/// What a redirect does to its exchange.
+enum Redirect {
+    /// The session goes on to the new location.
+    Follow,
+    /// The redirect response is the answer.
+    Answer,
+    /// The exchange has failed; its task is cancelled.
+    Fail,
 }
 
 fn wake(waiter: Option<Waker>) {
@@ -414,25 +435,20 @@ define_class!(
             completion: &DynBlock<dyn Fn(*mut NSURLRequest)>,
         ) {
             abort_on_panic(|| {
-                let follow = self
-                    .ivars()
-                    .get(task)
-                    .is_some_and(|exchange| exchange.follow_redirect());
-                if follow {
-                    let request = request as *const NSURLRequest as *mut NSURLRequest;
-                    completion.call((request,));
-                } else {
-                    let failed = self
-                        .ivars()
-                        .get(task)
-                        .is_some_and(|exchange| {
-                            exchange.lock().error == Some(HttpError::TooManyRedirects)
-                        });
-                    if failed {
-                        task.cancel();
+                let redirect = match self.ivars().get(task) {
+                    Some(exchange) => exchange.redirect(),
+                    None => Redirect::Fail,
+                };
+                match redirect {
+                    Redirect::Follow => {
+                        let request = request as *const NSURLRequest as *mut NSURLRequest;
+                        completion.call((request,));
                     }
-                    // Nothing follows: the redirect response is answered as it is.
-                    completion.call((std::ptr::null_mut(),));
+                    Redirect::Answer => completion.call((std::ptr::null_mut(),)),
+                    Redirect::Fail => {
+                        task.cancel();
+                        completion.call((std::ptr::null_mut(),));
+                    }
                 }
             });
         }
@@ -448,8 +464,7 @@ define_class!(
                 let Some(exchange) = self.ivars().get(task) else {
                     return;
                 };
-                let error = error.and_then(error_of);
-                exchange.finished(error);
+                exchange.finished(error.map(error_of));
             });
         }
     }
@@ -541,27 +556,25 @@ fn head_of(response: &NSURLResponse) -> Result<Head, HttpError> {
     })
 }
 
-/// Why `NSURLSession` failed, in Waft's terms.
-fn error_of(error: &NSError) -> Option<HttpError> {
+/// Why `NSURLSession` failed, in Waft's terms. A task this client cancels has no one waiting
+/// any more, or has failed already; one cancelled by anyone else ends short, which is an error.
+#[allow(non_upper_case_globals, reason = "the codes keep Foundation's names")]
+fn error_of(error: &NSError) -> HttpError {
     let code = error.code();
-    if code == NSURLErrorCancelled {
-        return None;
-    }
     let reason = error.localizedDescription().to_string();
-    if code == NSURLErrorTimedOut {
-        return Some(HttpError::Timeout);
+    match code {
+        NSURLErrorTimedOut => HttpError::Timeout,
+        NSURLErrorBadURL | NSURLErrorUnsupportedURL => HttpError::InvalidUrl,
+        NSURLErrorHTTPTooManyRedirects => HttpError::TooManyRedirects,
+        NSURLErrorCannotConnectToHost => HttpError::Refused(reason),
+        NSURLErrorSecureConnectionFailed
+        | NSURLErrorServerCertificateHasBadDate
+        | NSURLErrorServerCertificateUntrusted
+        | NSURLErrorServerCertificateHasUnknownRoot
+        | NSURLErrorServerCertificateNotYetValid
+        | NSURLErrorClientCertificateRejected
+        | NSURLErrorClientCertificateRequired => HttpError::Tls(reason),
+        NSURLErrorBadServerResponse | NSURLErrorCannotParseResponse => HttpError::Protocol(reason),
+        _ => HttpError::Connection(reason),
     }
-    if code == NSURLErrorCannotConnectToHost
-        || code == NSURLErrorCannotFindHost
-        || code == NSURLErrorNotConnectedToInternet
-    {
-        return Some(HttpError::Refused(reason));
-    }
-    if code == NSURLErrorSecureConnectionFailed || code == NSURLErrorServerCertificateUntrusted {
-        return Some(HttpError::Tls(reason));
-    }
-    if code == NSURLErrorNetworkConnectionLost {
-        return Some(HttpError::Connection(reason));
-    }
-    Some(HttpError::Connection(reason))
 }

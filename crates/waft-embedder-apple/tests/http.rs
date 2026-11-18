@@ -1,6 +1,6 @@
 //! The Apple HTTP client against a server on this machine: a body arriving in pieces, a redirect
-//! followed and one refused, too many redirects, a request with a body and headers, a timeout,
-//! and a URL nothing listens on.
+//! followed and one refused, too many redirects, a request with a body and repeated headers, a
+//! timeout, and a URL nothing listens on.
 
 // The local server runs on a thread, as a test's may.
 #![allow(clippy::disallowed_methods)]
@@ -185,6 +185,8 @@ fn a_request_carries_its_method_headers_and_body() {
         .method("POST")
         .uri(format!("http://{address}/echo"))
         .header("x-test", "yes")
+        .header("x-repeated", "one")
+        .header("x-repeated", "two")
         .body(Body::from(b"a body".to_vec()))
         .unwrap();
     let mut response = pollster::block_on(client.send(request, SendOptions::default())).unwrap();
@@ -195,6 +197,10 @@ fn a_request_carries_its_method_headers_and_body() {
     let received = received.lock().unwrap().clone();
     assert!(received.starts_with("POST /echo HTTP/1.1"), "{received}");
     assert!(received.contains("x-test: yes"), "{received}");
+    assert!(
+        received.contains("x-repeated: one,two") || received.contains("x-repeated: one, two"),
+        "a repeated header sends every value: {received}"
+    );
     assert!(received.ends_with("a body"), "{received}");
 }
 
