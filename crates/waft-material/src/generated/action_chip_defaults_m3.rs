@@ -71,7 +71,7 @@ impl ChipThemeDataGetters for ActionChipDefaultsM3 {
     }
 
     fn label_style(&self, app: &mut App) -> Option<TextStyle> {
-        let color = self.context.colors(app).on_surface;
+        let color = self.context.colors(app).on_surface();
         self.context
             .text_theme(app)
             .label_large
@@ -82,7 +82,7 @@ impl ChipThemeDataGetters for ActionChipDefaultsM3 {
     fn color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
         let (on_surface, surface_container_low) =
-            (colors.on_surface, colors.surface_container_low());
+            (colors.on_surface(), colors.surface_container_low());
         let chip_variant = self.chip_variant;
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
@@ -133,7 +133,7 @@ impl ChipThemeDataGetters for ActionChipDefaultsM3 {
                     }
                 } else {
                     BorderSide {
-                        color: colors.on_surface.with_opacity(0.12),
+                        color: colors.on_surface().with_opacity(0.12),
                         ..BorderSide::default()
                     }
                 }
@@ -151,9 +151,9 @@ impl ChipThemeDataGetters for ActionChipDefaultsM3 {
         Some(
             IconThemeData::new()
                 .color(if self.is_enabled {
-                    colors.primary
+                    colors.primary()
                 } else {
-                    colors.on_surface
+                    colors.on_surface()
                 })
                 .size(18.0),
         )

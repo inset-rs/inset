@@ -59,7 +59,7 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3 {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.12));
+                    return Some(colors.on_surface().with_opacity(0.12));
                 }
                 if states.contains(&WidgetState::Selected) {
                     return Some(colors.secondary_container());
@@ -81,7 +81,7 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3 {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.38));
+                    return Some(colors.on_surface().with_opacity(0.38));
                 }
                 if states.contains(&WidgetState::Selected) {
                     return Some(colors.on_secondary_container());

@@ -1333,8 +1333,8 @@ impl StatelessWidget for NavigationIndicator {
                                 border_radius.into(),
                             ))
                         });
-                        let color =
-                            color.unwrap_or_else(|| Theme::of(app, context).color_scheme.secondary);
+                        let color = color
+                            .unwrap_or_else(|| Theme::of(app, context).color_scheme.secondary());
                         FadeTransition::new(fade_animation)
                             .child(
                                 Ink::new()
@@ -2123,8 +2123,8 @@ impl NavigationBarThemeDataGetters for NavigationBarDefaultsM2 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         Some(ElevationOverlay::color_with_overlay(
-            colors.surface,
-            colors.on_surface,
+            colors.surface(),
+            colors.on_surface(),
             3.0,
         ))
     }
@@ -2133,14 +2133,14 @@ impl NavigationBarThemeDataGetters for NavigationBarDefaultsM2 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         Some(Rc::new(MaterialStatePropertyAll::new(Some(
-            IconThemeData::new().size(24.0).color(colors.on_surface),
+            IconThemeData::new().size(24.0).color(colors.on_surface()),
         ))))
     }
 
     fn indicator_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.secondary.with_opacity(0.24))
+        Some(colors.secondary().with_opacity(0.24))
     }
 
     fn label_text_style(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<TextStyle>>> {
@@ -2153,7 +2153,7 @@ impl NavigationBarThemeDataGetters for NavigationBarDefaultsM2 {
                 .clone()
                 .expect("the text theme gives labelSmall")
                 .copy_with()
-                .color(colors.on_surface),
+                .color(colors.on_surface()),
         ))))
     }
 
@@ -3183,7 +3183,7 @@ pub(crate) mod tests {
             // Test default indicator color and shape.
             let (default_color, default_shape) = indicator_decoration(tester);
             #[allow(deprecated)]
-            let expected_color = theme.color_scheme.secondary.with_opacity(0.24);
+            let expected_color = theme.color_scheme.secondary().with_opacity(0.24);
             assert_eq!(default_color, Some(expected_color));
             assert_eq!(
                 &*default_shape,
@@ -3303,7 +3303,7 @@ pub(crate) mod tests {
             assert_eq!(label_style(tester, selected_text).font_size, Some(12.0));
             assert_eq!(
                 label_style(tester, selected_text).color.as_deref().copied(),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
 
             // Test unselected label text style.

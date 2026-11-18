@@ -45,7 +45,7 @@ impl ProgressIndicatorThemeDataGetters for CircularProgressIndicatorDefaultsM3 {
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn circular_track_color(&self, app: &mut App) -> Option<Color> {
@@ -99,7 +99,7 @@ impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM3 {
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn linear_track_color(&self, app: &mut App) -> Option<Color> {
@@ -115,7 +115,7 @@ impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM3 {
     }
 
     fn stop_indicator_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn stop_indicator_radius(&self, _app: &mut App) -> Option<f64> {

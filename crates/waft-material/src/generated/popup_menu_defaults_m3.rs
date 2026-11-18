@@ -50,11 +50,11 @@ impl PopupMenuThemeDataGetters for PopupMenuDefaultsM3 {
                     return Some(
                         style
                             .apply()
-                            .color(colors.on_surface.with_opacity(0.38))
+                            .color(colors.on_surface().with_opacity(0.38))
                             .into_style(),
                     );
                 }
-                Some(style.apply().color(colors.on_surface).into_style())
+                Some(style.apply().color(colors.on_surface()).into_style())
             },
         ))
     }

@@ -1213,13 +1213,13 @@ impl FloatingActionButtonThemeDataGetters for FabDefaultsM2 {
     fn foreground_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_secondary)
+        Some(colors.on_secondary())
     }
 
     fn background_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.secondary)
+        Some(colors.secondary())
     }
 
     fn focus_color(&self, app: &mut App) -> Option<Color> {
@@ -2445,9 +2445,9 @@ mod tests {
             ));
 
             raw_button(tester, |button| {
-                assert_eq!(button.fill_color, Some(color_scheme.secondary));
+                assert_eq!(button.fill_color, Some(color_scheme.secondary()));
             });
-            assert_eq!(icon_color(tester), Some(color_scheme.on_secondary));
+            assert_eq!(icon_color(tester), Some(color_scheme.on_secondary()));
 
             // These defaults come directly from the [FloatingActionButton].
             raw_button(tester, |button| {

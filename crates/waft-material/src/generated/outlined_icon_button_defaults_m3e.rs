@@ -93,7 +93,7 @@ impl ButtonStyleGetters for OutlinedIconButtonDefaultsM3E {
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
                     if toggleable && states.contains(&WidgetState::Selected) {
-                        return Some(colors.on_surface.with_values(
+                        return Some(colors.on_surface().with_values(
                             Some(0.1),
                             None,
                             None,
@@ -119,11 +119,13 @@ impl ButtonStyleGetters for OutlinedIconButtonDefaultsM3E {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(
-                        colors
-                            .on_surface
-                            .with_values(Some(0.38), None, None, None, None),
-                    );
+                    return Some(colors.on_surface().with_values(
+                        Some(0.38),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if toggleable && states.contains(&WidgetState::Selected) {
                     return Some(colors.on_inverse_surface());

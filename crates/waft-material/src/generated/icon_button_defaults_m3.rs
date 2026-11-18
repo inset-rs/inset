@@ -68,10 +68,10 @@ impl ButtonStyleGetters for IconButtonDefaultsM3 {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.38));
+                    return Some(colors.on_surface().with_opacity(0.38));
                 }
                 if states.contains(&WidgetState::Selected) {
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
                 Some(colors.on_surface_variant())
             })
@@ -85,13 +85,13 @@ impl ButtonStyleGetters for IconButtonDefaultsM3 {
             move |states| {
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary.with_opacity(0.08));
+                        return Some(colors.primary().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                 }
                 if states.contains(&WidgetState::Pressed) {

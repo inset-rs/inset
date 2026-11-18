@@ -1113,7 +1113,7 @@ impl DatePickerDefaultsM2 {
 impl DatePickerDefaultsM2 {
     /// Dart's `_isDark`.
     fn is_dark(&self, app: &mut App) -> bool {
-        self.context.colors(app).brightness == Brightness::Dark
+        self.context.colors(app).brightness() == Brightness::Dark
     }
 }
 
@@ -1125,15 +1125,17 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
 
     fn header_background_color(&self, app: &mut App) -> Option<Color> {
         let colors = self.context.colors(app);
-        Some(if self.context.colors(app).brightness == Brightness::Dark {
-            colors.surface
-        } else {
-            colors.primary
-        })
+        Some(
+            if self.context.colors(app).brightness() == Brightness::Dark {
+                colors.surface()
+            } else {
+                colors.primary()
+            },
+        )
     }
 
     fn sub_header_foreground_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).on_surface.with_opacity(0.60))
+        Some(self.context.colors(app).on_surface().with_opacity(0.60))
     }
 
     fn toggle_button_text_style(&self, app: &mut App) -> Option<TextStyle> {
@@ -1157,9 +1159,9 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
         let is_dark = self.is_dark(app);
         let colors = self.context.colors(app);
         Some(if is_dark {
-            colors.on_surface
+            colors.on_surface()
         } else {
-            colors.on_primary
+            colors.on_primary()
         })
     }
 
@@ -1172,7 +1174,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
     }
 
     fn weekday_style(&self, app: &mut App) -> Option<TextStyle> {
-        let color = self.context.colors(app).on_surface.with_opacity(0.60);
+        let color = self.context.colors(app).on_surface().with_opacity(0.60);
         self.context
             .text_theme(app)
             .body_small
@@ -1186,7 +1188,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
 
     fn day_foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, base) = (colors.on_primary, colors.on_surface);
+        let (on_primary, base) = (colors.on_primary(), colors.on_surface());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -1201,7 +1203,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
     }
 
     fn day_background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
-        let primary = self.context.colors(app).primary;
+        let primary = self.context.colors(app).primary();
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -1215,7 +1217,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
 
     fn day_overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, on_surface_variant) = (colors.on_primary, colors.on_surface_variant());
+        let (on_primary, on_surface_variant) = (colors.on_primary(), colors.on_surface_variant());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -1249,7 +1251,8 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
         app: &mut App,
     ) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, on_surface, base) = (colors.on_primary, colors.on_surface, colors.primary);
+        let (on_primary, on_surface, base) =
+            (colors.on_primary(), colors.on_surface(), colors.primary());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -1272,7 +1275,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
 
     fn today_border(&self, app: &mut App) -> Option<BorderSide> {
         Some(BorderSide {
-            color: self.context.colors(app).primary,
+            color: self.context.colors(app).primary(),
             ..BorderSide::default()
         })
     }
@@ -1282,7 +1285,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
     }
 
     fn range_picker_background_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).surface)
+        Some(self.context.colors(app).surface())
     }
 
     fn range_picker_shadow_color(&self, _app: &mut App) -> Option<Color> {
@@ -1297,9 +1300,9 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
         let is_dark = self.is_dark(app);
         let colors = self.context.colors(app);
         Some(if is_dark {
-            colors.surface
+            colors.surface()
         } else {
-            colors.primary
+            colors.primary()
         })
     }
 
@@ -1307,9 +1310,9 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
         let is_dark = self.is_dark(app);
         let colors = self.context.colors(app);
         Some(if is_dark {
-            colors.on_surface
+            colors.on_surface()
         } else {
-            colors.on_primary
+            colors.on_primary()
         })
     }
 
@@ -1322,7 +1325,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
     }
 
     fn range_selection_background_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary.with_opacity(0.12))
+        Some(self.context.colors(app).primary().with_opacity(0.12))
     }
 
     fn range_selection_overlay_color(
@@ -1330,7 +1333,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
         app: &mut App,
     ) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_primary, on_surface_variant) = (colors.on_primary, colors.on_surface_variant());
+        let (on_primary, on_surface_variant) = (colors.on_primary(), colors.on_surface_variant());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
@@ -1522,35 +1525,35 @@ mod tests {
                 text_theme
                     .body_large
                     .as_ref()
-                    .map(|style| style.apply().color(color_scheme.on_surface).into_style())
+                    .map(|style| style.apply().color(color_scheme.on_surface()).into_style())
             );
             assert_eq!(m3.day_style, text_theme.body_large);
             assert_eq!(
                 resolve_color(&m3.day_foreground_color, &none),
-                Some(Some(color_scheme.on_surface))
+                Some(Some(color_scheme.on_surface()))
             );
             assert_eq!(
                 resolve_color(&m3.day_foreground_color, &selected),
-                Some(Some(color_scheme.on_primary))
+                Some(Some(color_scheme.on_primary()))
             );
             assert_eq!(
                 resolve_color(&m3.day_foreground_color, &states([WidgetState::Disabled])),
-                Some(Some(color_scheme.on_surface.with_opacity(0.38)))
+                Some(Some(color_scheme.on_surface().with_opacity(0.38)))
             );
             assert_eq!(resolve_color(&m3.day_background_color, &none), Some(None));
             assert_eq!(
                 resolve_color(&m3.day_background_color, &selected),
-                Some(Some(color_scheme.primary))
+                Some(Some(color_scheme.primary()))
             );
             assert_eq!(resolve_color(&m3.day_overlay_color, &none), Some(None));
             let overlay = |states: WidgetStates| resolve_color(&m3.day_overlay_color, &states);
             assert_eq!(
                 overlay(states([WidgetState::Selected, WidgetState::Hovered])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.08)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.08)))
             );
             assert_eq!(
                 overlay(states([WidgetState::Selected, WidgetState::Focused])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.1)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.1)))
             );
             assert_eq!(
                 overlay(states([WidgetState::Hovered])),
@@ -1570,7 +1573,7 @@ mod tests {
                     WidgetState::Hovered,
                     WidgetState::Focused
                 ])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.08)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.08)))
             );
             assert_eq!(
                 overlay(states([
@@ -1578,7 +1581,7 @@ mod tests {
                     WidgetState::Hovered,
                     WidgetState::Pressed
                 ])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.1)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.1)))
             );
             assert_eq!(
                 overlay(states([WidgetState::Hovered, WidgetState::Focused])),
@@ -1594,16 +1597,16 @@ mod tests {
             );
             assert_eq!(
                 resolve_color(&m3.today_foreground_color, &none),
-                Some(Some(color_scheme.primary))
+                Some(Some(color_scheme.primary()))
             );
             assert_eq!(
                 resolve_color(&m3.today_foreground_color, &states([WidgetState::Disabled])),
-                Some(Some(color_scheme.primary.with_opacity(0.38)))
+                Some(Some(color_scheme.primary().with_opacity(0.38)))
             );
             assert_eq!(
                 m3.today_border,
                 Some(BorderSide {
-                    color: color_scheme.primary,
+                    color: color_scheme.primary(),
                     ..BorderSide::default()
                 })
             );
@@ -1614,7 +1617,7 @@ mod tests {
             );
             assert_eq!(
                 resolve_color(&m3.year_foreground_color, &selected),
-                Some(Some(color_scheme.on_primary))
+                Some(Some(color_scheme.on_primary()))
             );
             assert_eq!(
                 resolve_color(&m3.year_foreground_color, &states([WidgetState::Disabled])),
@@ -1623,18 +1626,18 @@ mod tests {
             assert_eq!(resolve_color(&m3.year_background_color, &none), Some(None));
             assert_eq!(
                 resolve_color(&m3.year_background_color, &selected),
-                Some(Some(color_scheme.primary))
+                Some(Some(color_scheme.primary()))
             );
             assert_eq!(resolve_color(&m3.year_overlay_color, &none), Some(None));
             let year_overlay =
                 |states: WidgetStates| resolve_color(&m3.year_overlay_color, &states);
             assert_eq!(
                 year_overlay(states([WidgetState::Selected, WidgetState::Hovered])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.08)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.08)))
             );
             assert_eq!(
                 year_overlay(states([WidgetState::Selected, WidgetState::Focused])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.1)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.1)))
             );
             assert_eq!(
                 year_overlay(states([WidgetState::Hovered])),
@@ -1689,13 +1692,13 @@ mod tests {
             assert_eq!(m3.locale, None);
             assert_eq!(
                 m3.sub_header_foreground_color,
-                Some(color_scheme.on_surface.with_opacity(0.60))
+                Some(color_scheme.on_surface().with_opacity(0.60))
             );
             assert_eq!(
                 m3.toggle_button_text_style,
                 text_theme.title_small.as_ref().map(|style| style
                     .apply()
-                    .color(color_scheme.on_surface.with_opacity(0.60))
+                    .color(color_scheme.on_surface().with_opacity(0.60))
                     .into_style())
             );
         });
@@ -1721,48 +1724,48 @@ mod tests {
                     BorderRadiusGeometry::circular(4.0),
                 )))
             );
-            assert_eq!(m2.header_background_color, Some(color_scheme.primary));
-            assert_eq!(m2.header_foreground_color, Some(color_scheme.on_primary));
+            assert_eq!(m2.header_background_color, Some(color_scheme.primary()));
+            assert_eq!(m2.header_foreground_color, Some(color_scheme.on_primary()));
             assert_eq!(m2.header_headline_style, text_theme.headline_small);
             assert_eq!(m2.header_help_style, text_theme.label_small);
             assert_eq!(
                 m2.weekday_style,
                 text_theme.body_small.as_ref().map(|style| style
                     .apply()
-                    .color(color_scheme.on_surface.with_opacity(0.60))
+                    .color(color_scheme.on_surface().with_opacity(0.60))
                     .into_style())
             );
             assert_eq!(m2.day_style, text_theme.body_small);
             assert_eq!(
                 resolve_color(&m2.day_foreground_color, &none),
-                Some(Some(color_scheme.on_surface))
+                Some(Some(color_scheme.on_surface()))
             );
             assert_eq!(
                 resolve_color(&m2.day_foreground_color, &selected),
-                Some(Some(color_scheme.on_primary))
+                Some(Some(color_scheme.on_primary()))
             );
             assert_eq!(
                 resolve_color(&m2.day_foreground_color, &states([WidgetState::Disabled])),
-                Some(Some(color_scheme.on_surface.with_opacity(0.38)))
+                Some(Some(color_scheme.on_surface().with_opacity(0.38)))
             );
             assert_eq!(resolve_color(&m2.day_background_color, &none), Some(None));
             assert_eq!(
                 resolve_color(&m2.day_background_color, &selected),
-                Some(Some(color_scheme.primary))
+                Some(Some(color_scheme.primary()))
             );
             assert_eq!(resolve_color(&m2.day_overlay_color, &none), Some(None));
             let overlay = |states: WidgetStates| resolve_color(&m2.day_overlay_color, &states);
             assert_eq!(
                 overlay(states([WidgetState::Selected, WidgetState::Hovered])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.08)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.08)))
             );
             assert_eq!(
                 overlay(states([WidgetState::Selected, WidgetState::Focused])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.12)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.12)))
             );
             assert_eq!(
                 overlay(states([WidgetState::Selected, WidgetState::Pressed])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.38)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.38)))
             );
             assert_eq!(
                 overlay(states([
@@ -1770,7 +1773,7 @@ mod tests {
                     WidgetState::Hovered,
                     WidgetState::Focused
                 ])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.08)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.08)))
             );
             assert_eq!(
                 overlay(states([
@@ -1778,7 +1781,7 @@ mod tests {
                     WidgetState::Hovered,
                     WidgetState::Pressed
                 ])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.38)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.38)))
             );
             assert_eq!(
                 overlay(states([WidgetState::Hovered])),
@@ -1798,21 +1801,24 @@ mod tests {
             );
             assert_eq!(
                 resolve_color(&m2.today_foreground_color, &none),
-                Some(Some(color_scheme.primary))
+                Some(Some(color_scheme.primary()))
             );
             assert_eq!(
                 resolve_color(&m2.today_foreground_color, &states([WidgetState::Disabled])),
-                Some(Some(color_scheme.on_surface.with_opacity(0.38)))
+                Some(Some(color_scheme.on_surface().with_opacity(0.38)))
             );
             assert_eq!(
                 m2.today_border,
                 Some(BorderSide {
-                    color: color_scheme.primary,
+                    color: color_scheme.primary(),
                     ..BorderSide::default()
                 })
             );
             assert_eq!(m2.year_style, text_theme.body_large);
-            assert_eq!(m2.range_picker_background_color, Some(color_scheme.surface));
+            assert_eq!(
+                m2.range_picker_background_color,
+                Some(color_scheme.surface())
+            );
             assert_eq!(m2.range_picker_elevation, Some(0.0));
             assert_eq!(
                 m2.range_picker_shape,
@@ -1831,15 +1837,15 @@ mod tests {
                 |states: WidgetStates| resolve_color(&m2.range_selection_overlay_color, &states);
             assert_eq!(
                 range_overlay(states([WidgetState::Selected, WidgetState::Hovered])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.08)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.08)))
             );
             assert_eq!(
                 range_overlay(states([WidgetState::Selected, WidgetState::Focused])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.12)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.12)))
             );
             assert_eq!(
                 range_overlay(states([WidgetState::Selected, WidgetState::Pressed])),
-                Some(Some(color_scheme.on_primary.with_opacity(0.38)))
+                Some(Some(color_scheme.on_primary().with_opacity(0.38)))
             );
             assert_eq!(
                 range_overlay(states([WidgetState::Hovered])),
@@ -1855,11 +1861,11 @@ mod tests {
             );
             assert_eq!(
                 m2.range_picker_header_background_color,
-                Some(color_scheme.primary)
+                Some(color_scheme.primary())
             );
             assert_eq!(
                 m2.range_picker_header_foreground_color,
-                Some(color_scheme.on_primary)
+                Some(color_scheme.on_primary())
             );
             assert_eq!(
                 m2.range_picker_header_headline_style,
@@ -1884,13 +1890,13 @@ mod tests {
             );
             assert_eq!(
                 m2.sub_header_foreground_color,
-                Some(color_scheme.on_surface.with_opacity(0.60))
+                Some(color_scheme.on_surface().with_opacity(0.60))
             );
             assert_eq!(
                 m2.toggle_button_text_style,
                 text_theme.title_small.as_ref().map(|style| style
                     .apply()
-                    .color(color_scheme.on_surface.with_opacity(0.60))
+                    .color(color_scheme.on_surface().with_opacity(0.60))
                     .into_style())
             );
         });

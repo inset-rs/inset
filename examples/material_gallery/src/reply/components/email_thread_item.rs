@@ -26,7 +26,7 @@ pub fn email_thread_item(app: &mut App, context: BuildContext, email: &Email) ->
                     .main_axis_alignment(MainAxisAlignment::Center)
                     .children([
                         Text::new(email.sender.first_name)
-                            .style(label.clone().color(color_scheme.on_surface))
+                            .style(label.clone().color(color_scheme.on_surface()))
                             .into_widget(),
                         Text::new("20 mins ago")
                             .style(label.color(color_scheme.outline()))
@@ -89,7 +89,7 @@ fn answer_button(app: &mut App, context: BuildContext, label: &str) -> WidgetRef
     .style(
         FilledButton::style_from()
             .background_color(color_scheme.surface_bright())
-            .foreground_color(color_scheme.on_surface)
+            .foreground_color(color_scheme.on_surface())
             .build(),
     )
     .into_widget()

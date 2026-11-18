@@ -473,7 +473,7 @@ impl CarouselViewState {
         let effective_background_color = widget
             .background_color
             .or(carousel_theme.background_color)
-            .unwrap_or(color_scheme.surface);
+            .unwrap_or(color_scheme.surface());
         let effective_elevation = widget.elevation.or(carousel_theme.elevation).unwrap_or(0.0);
         let effective_shape: ShapeBorderRef = widget
             .shape
@@ -494,7 +494,7 @@ impl CarouselViewState {
             .clone()
             .or_else(|| carousel_theme.overlay_color.clone())
             .unwrap_or_else(|| {
-                let on_surface = color_scheme.on_surface;
+                let on_surface = color_scheme.on_surface();
                 <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                     if states.contains(&WidgetState::Pressed) {
                         return Some(on_surface.with_opacity(0.1));
@@ -2684,7 +2684,7 @@ mod tests {
             .first();
             tester.widget(material, |material: &crate::material::Material| {
                 assert_eq!(material.clip_behavior, Clip::AntiAlias);
-                assert_eq!(material.color, Some(theme.color_scheme.surface));
+                assert_eq!(material.color, Some(theme.color_scheme.surface()));
                 assert_eq!(material.elevation, 0.0);
                 assert_eq!(
                     material.shape,

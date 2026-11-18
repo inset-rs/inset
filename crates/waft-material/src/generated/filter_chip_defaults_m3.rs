@@ -82,7 +82,7 @@ impl ChipThemeDataGetters for FilterChipDefaultsM3 {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         };
         self.context
             .text_theme(app)
@@ -94,7 +94,7 @@ impl ChipThemeDataGetters for FilterChipDefaultsM3 {
     fn color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
         let (on_surface, secondary_container, surface_container_low) = (
-            colors.on_surface,
+            colors.on_surface(),
             colors.secondary_container(),
             colors.surface_container_low(),
         );
@@ -143,10 +143,10 @@ impl ChipThemeDataGetters for FilterChipDefaultsM3 {
             if self.is_selected {
                 colors.on_secondary_container()
             } else {
-                colors.primary
+                colors.primary()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         })
     }
 
@@ -159,7 +159,7 @@ impl ChipThemeDataGetters for FilterChipDefaultsM3 {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         }))
     }
 
@@ -174,7 +174,7 @@ impl ChipThemeDataGetters for FilterChipDefaultsM3 {
                     }
                 } else {
                     BorderSide {
-                        color: colors.on_surface.with_opacity(0.12),
+                        color: colors.on_surface().with_opacity(0.12),
                         ..BorderSide::default()
                     }
                 }
@@ -195,10 +195,10 @@ impl ChipThemeDataGetters for FilterChipDefaultsM3 {
                     if self.is_selected {
                         colors.on_secondary_container()
                     } else {
-                        colors.primary
+                        colors.primary()
                     }
                 } else {
-                    colors.on_surface
+                    colors.on_surface()
                 })
                 .size(18.0),
         )

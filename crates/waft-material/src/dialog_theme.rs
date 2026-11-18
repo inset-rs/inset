@@ -1271,7 +1271,7 @@ mod tests {
     #[test]
     fn material3_custom_icon_color_theme_lowest_preference() {
         test_widgets(|tester| {
-            let secondary = m3(&tester.cell.borrow()).color_scheme.secondary;
+            let secondary = m3(&tester.cell.borrow()).color_scheme.secondary();
             app_with_dialog(tester, icon_dialog(), m3, None);
             open(tester);
 

@@ -4178,7 +4178,7 @@ pub(crate) mod tests {
             let icon_data = icon_data(tester);
             assert_eq!(
                 icon_data.color.map(|color| color.color()),
-                Some(light_theme.color_scheme.primary)
+                Some(light_theme.color_scheme.primary())
             );
             assert_eq!(icon_data.size, Some(18.0));
             let label_style = label_style(tester, "Chip A");
@@ -4202,7 +4202,7 @@ pub(crate) mod tests {
             assert_eq!(elevation, 0.0);
             assert_eq!(
                 icon_data_color(tester),
-                Some(dark_theme.color_scheme.primary)
+                Some(dark_theme.color_scheme.primary())
             );
             assert_eq!(
                 label_style_color(tester, "Chip A"),

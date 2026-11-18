@@ -68,8 +68,8 @@ impl ButtonStyleGetters for OutlinedButtonDefaultsM3 {
     fn foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
@@ -81,7 +81,7 @@ impl ButtonStyleGetters for OutlinedButtonDefaultsM3 {
     fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
+        let primary = colors.primary();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Pressed) {
                 return Some(primary.with_opacity(0.1));
@@ -124,8 +124,8 @@ impl ButtonStyleGetters for OutlinedButtonDefaultsM3 {
     fn icon_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
@@ -150,8 +150,8 @@ impl ButtonStyleGetters for OutlinedButtonDefaultsM3 {
     fn side(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<BorderSide>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_surface = colors.on_surface();
         let outline = colors.outline();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {

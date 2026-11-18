@@ -2639,7 +2639,7 @@ pub(crate) mod tests {
                 SegmentedButton::new(numbered(&[1, 2]), vec![1])
                     .on_selection_changed(|_app, _selected| {}),
             );
-            let on_surface = theme.color_scheme.on_surface;
+            let on_surface = theme.color_scheme.on_surface();
             let material = find::descendant(
                 find::by_type::<TextButton>().last(),
                 find::by_type::<Material>(),

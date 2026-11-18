@@ -293,7 +293,7 @@ pub(crate) mod tests {
             // Test default label style.
             assert_eq!(
                 label_style_color(tester, LABEL),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
 
             let chip = only::<RawChip>(tester);
@@ -324,7 +324,7 @@ pub(crate) mod tests {
             assert_eq!(
                 shape,
                 rounded_rectangle(BorderSide {
-                    color: theme.color_scheme.on_surface.with_alpha(0x1f),
+                    color: theme.color_scheme.on_surface().with_alpha(0x1f),
                     ..BorderSide::default()
                 })
             );
@@ -350,7 +350,7 @@ pub(crate) mod tests {
             assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             assert_eq!(
                 label_style_color(tester, LABEL),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
 
             let chip = only::<RawChip>(tester);
@@ -383,7 +383,7 @@ pub(crate) mod tests {
             assert_eq!(shape, rounded_rectangle(transparent_side));
             assert_eq!(
                 ink_decoration_color(tester),
-                Some(theme.color_scheme.on_surface.with_alpha(0x1f))
+                Some(theme.color_scheme.on_surface().with_alpha(0x1f))
             );
         });
     }
@@ -635,7 +635,7 @@ pub(crate) mod tests {
             build_chip(tester, None);
             assert_eq!(
                 icon_data(tester).color.map(|color| color.color()),
-                Some(theme.color_scheme.primary)
+                Some(theme.color_scheme.primary())
             );
 
             // Test provided icon theme.

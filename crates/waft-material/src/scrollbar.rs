@@ -455,8 +455,8 @@ impl MaterialScrollbarState {
     #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     fn thumb_color(self: Handle<Self>, app: &mut App) -> WidgetStatePropertyRef<Color> {
         let color_scheme = self.color_scheme(app);
-        let on_surface = color_scheme.on_surface;
-        let brightness = color_scheme.brightness;
+        let on_surface = color_scheme.on_surface();
+        let brightness = color_scheme.brightness();
         let use_android_scrollbar = self.use_android_scrollbar(app);
         let (drag_color, hover_color, idle_color) = match brightness {
             Brightness::Light => (
@@ -515,8 +515,8 @@ impl MaterialScrollbarState {
     #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     fn track_color(self: Handle<Self>, app: &mut App) -> WidgetStatePropertyRef<Color> {
         let color_scheme = self.color_scheme(app);
-        let on_surface = color_scheme.on_surface;
-        let brightness = color_scheme.brightness;
+        let on_surface = color_scheme.on_surface();
+        let brightness = color_scheme.brightness();
         let show_scrollbar = self.show_scrollbar(app);
         let track_visibility = self.track_visibility(app);
         let theme_track_color = self.scrollbar_theme(app).track_color.clone();
@@ -537,8 +537,8 @@ impl MaterialScrollbarState {
     #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
     fn track_border_color(self: Handle<Self>, app: &mut App) -> WidgetStatePropertyRef<Color> {
         let color_scheme = self.color_scheme(app);
-        let on_surface = color_scheme.on_surface;
-        let brightness = color_scheme.brightness;
+        let on_surface = color_scheme.on_surface();
+        let brightness = color_scheme.brightness();
         let show_scrollbar = self.show_scrollbar(app);
         let track_visibility = self.track_visibility(app);
         let theme_track_border_color = self.scrollbar_theme(app).track_border_color.clone();
@@ -1950,7 +1950,7 @@ pub(crate) mod tests {
             TargetPlatformVariant::only(TargetPlatform::Linux),
             |tester| {
                 let theme = hover_track_theme(tester, true, None);
-                let on_surface = theme.color_scheme.on_surface;
+                let on_surface = theme.color_scheme.on_surface();
                 let app = desktop_app(tester, theme);
                 tester.pump_widget(app);
                 tester.pump_and_settle();

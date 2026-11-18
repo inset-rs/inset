@@ -3275,7 +3275,9 @@ pub(crate) mod tests {
     fn material3_dialog_fullscreen_defaults() {
         test_widgets(|tester| {
             let dialog_text_m3 = "Fullscreen Dialog - M3";
-            let expected = material3_theme(&tester.cell.borrow()).color_scheme.surface;
+            let expected = material3_theme(&tester.cell.borrow())
+                .color_scheme
+                .surface();
             pump_with_dialog(
                 tester,
                 material3_theme,

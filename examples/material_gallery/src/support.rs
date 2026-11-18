@@ -31,7 +31,7 @@ pub fn section_header(app: &mut App, context: BuildContext, text: &str) -> Widge
         .title_small
         .clone()
         .unwrap_or_default()
-        .color(theme.color_scheme.primary);
+        .color(theme.color_scheme.primary());
     Padding::new(EdgeInsetsGeometry::from_ltrb(16.0, 24.0, 16.0, 8.0))
         .child(Text::new(text).style(style))
         .into_widget()

@@ -593,7 +593,7 @@ impl StatelessWidget for CheckboxListTile {
                     .as_ref()
                     .and_then(|fill_color| fill_color.resolve(&states))
             })
-            .unwrap_or(theme.color_scheme.secondary);
+            .unwrap_or(theme.color_scheme.secondary());
         let mut list_tile = ListTile::new()
             .selected_color(effective_active_color)
             .enabled(self.enabled.unwrap_or(self.on_changed.is_some()))
@@ -1638,7 +1638,7 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
             };
             let unhovered = [PaintCall::rrect(Some(
-                m3(&tester.cell.borrow()).color_scheme.primary,
+                m3(&tester.cell.borrow()).color_scheme.primary(),
             ))];
             frame(tester, true);
             assert_paints(
@@ -1934,8 +1934,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    PaintCall::rrect(Some(colors.error)),
-                    PaintCall::path(Some(colors.on_error)),
+                    PaintCall::rrect(Some(colors.error())),
+                    PaintCall::path(Some(colors.on_error())),
                 ],
             );
 
@@ -1945,8 +1945,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    PaintCall::circle(Some(colors.error.with_opacity(0.08))),
-                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::circle(Some(colors.error().with_opacity(0.08))),
+                    PaintCall::rrect(Some(colors.error())),
                 ],
             );
             tester.send(&gesture, PointerChange::Remove);

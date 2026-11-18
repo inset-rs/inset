@@ -2937,7 +2937,7 @@ impl State for TimePickerInputState {
                             .body_medium
                             .clone()
                             .expect("the text theme has bodyMedium");
-                        error_style = error_style.copy_with().color(theme.color_scheme.error);
+                        error_style = error_style.copy_with().color(theme.color_scheme.error());
                         Text::new(
                             widget
                                 .error_invalid_text
@@ -5031,7 +5031,7 @@ impl TimePickerDefaultsM2 {
     }
 
     fn hour_minute_input_color(&self, app: &mut App) -> AnyColor {
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
                 Colors::TRANSPARENT
@@ -5045,7 +5045,7 @@ impl TimePickerDefaultsM2 {
 #[allow(deprecated)]
 impl TimePickerDefaults for TimePickerDefaultsM2 {
     fn background_color(&self, app: &mut App) -> AnyColor {
-        self.context.colors(app).surface.into()
+        self.context.colors(app).surface().into()
     }
 
     fn cancel_button_style(&self, _app: &mut App) -> ButtonStyle {
@@ -5059,14 +5059,14 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
     fn day_period_border_side(&self, app: &mut App) -> BorderSide {
         let colors = self.context.colors(app);
         BorderSide {
-            color: Color::alpha_blend(colors.on_surface.with_opacity(0.38), colors.surface),
+            color: Color::alpha_blend(colors.on_surface().with_opacity(0.38), colors.surface()),
             ..BorderSide::default()
         }
     }
 
     fn day_period_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
-        let (primary, is_dark) = (colors.primary, colors.brightness == Brightness::Dark);
+        let (primary, is_dark) = (colors.primary(), colors.brightness() == Brightness::Dark);
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
                 return primary.with_opacity(if is_dark { 0.24 } else { 0.12 });
@@ -5096,7 +5096,7 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
 
     fn day_period_text_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
-        let (primary, on_surface) = (colors.primary, colors.on_surface);
+        let (primary, on_surface) = (colors.primary(), colors.on_surface());
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
                 primary
@@ -5121,8 +5121,8 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
     fn dial_background_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
         colors
-            .on_surface
-            .with_opacity(if colors.brightness == Brightness::Dark {
+            .on_surface()
+            .with_opacity(if colors.brightness() == Brightness::Dark {
                 0.12
             } else {
                 0.08
@@ -5131,7 +5131,7 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
     }
 
     fn dial_hand_color(&self, app: &mut App) -> AnyColor {
-        self.context.colors(app).primary.into()
+        self.context.colors(app).primary().into()
     }
 
     fn dial_size(&self, _app: &mut App) -> Size {
@@ -5152,7 +5152,7 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
 
     fn dial_text_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
-        let (surface, on_surface) = (colors.surface, colors.on_surface);
+        let (surface, on_surface) = (colors.surface(), colors.on_surface());
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
                 surface
@@ -5178,8 +5178,8 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
     fn entry_mode_icon_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
         colors
-            .on_surface
-            .with_opacity(if colors.brightness == Brightness::Dark {
+            .on_surface()
+            .with_opacity(if colors.brightness() == Brightness::Dark {
                 1.0
             } else {
                 0.6
@@ -5199,9 +5199,9 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
     fn hour_minute_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
         let (primary, on_surface, is_dark) = (
-            colors.primary,
-            colors.on_surface,
-            colors.brightness == Brightness::Dark,
+            colors.primary(),
+            colors.on_surface(),
+            colors.brightness() == Brightness::Dark,
         );
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
@@ -5234,7 +5234,7 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
 
     fn hour_minute_text_color(&self, app: &mut App) -> AnyColor {
         let colors = self.context.colors(app);
-        let (primary, on_surface) = (colors.primary, colors.on_surface);
+        let (primary, on_surface) = (colors.primary(), colors.on_surface());
         state_color(move |states| {
             if states.contains(&WidgetState::Selected) {
                 primary
@@ -5259,9 +5259,9 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
             .hour_minute_text_style(app)
             .value()
             .copy_with()
-            .color(self.context.colors(app).on_surface.with_opacity(0.36));
+            .color(self.context.colors(app).on_surface().with_opacity(0.36));
         let colors = self.context.colors(app);
-        let (error, primary) = (colors.error, colors.primary);
+        let (error, primary) = (colors.error(), colors.primary());
         InputDecorationThemeData::new()
             .content_padding(EdgeInsetsGeometry::from(EdgeInsets::ZERO))
             .filled(true)
@@ -7123,7 +7123,7 @@ pub(crate) mod tests {
             let style = separator_style(tester);
             assert_eq!(
                 style.color.map(|color| color.color()),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
             assert_eq!(style.font_size, Some(57.0));
         });
@@ -7139,7 +7139,7 @@ pub(crate) mod tests {
             let style = separator_style(tester);
             assert_eq!(
                 style.color.map(|color| color.color()),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
             assert_eq!(style.font_size, Some(56.0));
         });
@@ -7241,7 +7241,7 @@ pub(crate) mod tests {
                 &dial_ops(tester),
                 &[
                     PaintCall::circle(Some(theme.color_scheme.surface_container_highest())),
-                    PaintCall::circle(Some(theme.color_scheme.primary)),
+                    PaintCall::circle(Some(theme.color_scheme.primary())),
                 ],
             );
 
@@ -7263,7 +7263,7 @@ pub(crate) mod tests {
                 &dial_ops(tester),
                 &[
                     PaintCall::circle(Some(theme.color_scheme.surface_container_highest())),
-                    PaintCall::circle(Some(theme.color_scheme.primary)),
+                    PaintCall::circle(Some(theme.color_scheme.primary())),
                 ],
             );
         });

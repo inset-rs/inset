@@ -102,6 +102,12 @@ pub struct Retained<H> {
 
 /// A [`Retained`] typed handle: what [`App::create`] returns and what a field Dart types as `T`
 /// holds.
+///
+/// A `Ref` models Flutter's objects and the relations between them: an animation, a scroll
+/// position, a focus node, a text controller, a route, a state. It is Dart's ordinary object
+/// reference, kept the way Dart keeps one. The app's own data and the logic that changes it are
+/// an [`Entity`](crate::Entity) instead, which [`App::new_entity`](crate::App::new_entity) makes
+/// and which a widget reads in `build` and is rebuilt by when it notifies.
 pub type Ref<T> = Retained<Handle<T>>;
 
 /// A [`Retained`] untyped id, for a list that keeps objects of more than one type.

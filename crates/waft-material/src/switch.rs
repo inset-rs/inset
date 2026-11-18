@@ -1010,7 +1010,7 @@ impl State for MaterialSwitchState {
             .as_ref()
             .and_then(|override_theme| override_theme.primary_color.as_ref())
             .map(AnyColor::color)
-            .unwrap_or(theme.color_scheme.primary);
+            .unwrap_or(theme.color_scheme.primary());
         let widget = self.widget(app).clone();
 
         let switch_config: Box<dyn SwitchConfig>;
@@ -1270,7 +1270,7 @@ impl State for MaterialSwitchState {
         painter.set_is_interactive(app, self.is_interactive(app));
         painter.set_track_inner_length(app, track_inner_length);
         painter.set_text_direction(app, text_direction);
-        painter.set_surface_color(app, theme.color_scheme.surface);
+        painter.set_surface_color(app, theme.color_scheme.surface());
         painter.set_inactive_thumb_radius(app, effective_inactive_thumb_radius);
         painter.set_active_thumb_radius(app, effective_active_thumb_radius);
         painter.set_pressed_thumb_radius(app, switch_config.pressed_thumb_radius());
@@ -2377,7 +2377,7 @@ impl SwitchConfig for SwitchConfigCupertino {
         let colors = self.colors.clone();
         <dyn WidgetStateProperty<Color>>::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
-                return with_opacity(colors.on_surface, 0.38);
+                return with_opacity(colors.on_surface(), 0.38);
             }
             colors.on_primary_container()
         })
@@ -2556,7 +2556,7 @@ impl SwitchThemeDataGetters for SwitchDefaultsM2 {
         let colors = theme.color_scheme.clone();
         let is_dark = theme.brightness() == Brightness::Dark;
         let thumb_color = {
-            let secondary = colors.secondary;
+            let secondary = colors.secondary();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
                     return Some(if is_dark {
@@ -2583,7 +2583,7 @@ impl SwitchThemeDataGetters for SwitchDefaultsM2 {
         let colors = theme.color_scheme.clone();
         let is_dark = theme.brightness() == Brightness::Dark;
         let track_color = {
-            let secondary = colors.secondary;
+            let secondary = colors.secondary();
             const BLACK32: Color = Color::new(0x52000000); // Black with 32% opacity
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
@@ -2628,7 +2628,7 @@ impl SwitchThemeDataGetters for SwitchDefaultsM2 {
         let colors = theme.color_scheme.clone();
         let is_dark = theme.brightness() == Brightness::Dark;
         let thumb_color = {
-            let secondary = colors.secondary;
+            let secondary = colors.secondary();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
                     return Some(if is_dark {
@@ -3370,9 +3370,9 @@ pub(crate) mod tests {
                     &material_ops(tester),
                     &[
                         PaintCall::Save,
-                        m3_track(colors_.primary, Some(PaintedStyle::Fill)),
+                        m3_track(colors_.primary(), Some(PaintedStyle::Fill)),
                         // The transparent track outline (module doc).
-                        PaintCall::rrect(Some(colors_.on_primary)), // thumb color
+                        PaintCall::rrect(Some(colors_.on_primary())), // thumb color
                     ],
                 );
             });
@@ -3413,11 +3413,11 @@ pub(crate) mod tests {
                         with_opacity(colors_.surface_container_highest(), 0.12),
                         Some(PaintedStyle::Fill),
                     ),
-                    m3_outline(with_opacity(colors_.on_surface, 0.12)),
+                    m3_outline(with_opacity(colors_.on_surface(), 0.12)),
                     // thumb color
                     PaintCall::rrect(Some(Color::alpha_blend(
-                        with_opacity(colors_.on_surface, 0.38),
-                        colors_.surface,
+                        with_opacity(colors_.on_surface(), 0.38),
+                        colors_.surface(),
                     ))),
                 ],
             );
@@ -3432,11 +3432,11 @@ pub(crate) mod tests {
                 &[
                     PaintCall::Save,
                     m3_track(
-                        with_opacity(colors_.on_surface, 0.12),
+                        with_opacity(colors_.on_surface(), 0.12),
                         Some(PaintedStyle::Fill),
                     ),
                     // The transparent track outline (module doc).
-                    PaintCall::rrect(Some(colors_.surface)), // thumb color
+                    PaintCall::rrect(Some(colors_.surface())), // thumb color
                 ],
             );
         });
@@ -3473,8 +3473,8 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 let (focused, hovered) = if use_material3 {
                     (
-                        with_opacity(data.color_scheme.primary, 0.1),
-                        with_opacity(data.color_scheme.primary, 0.08),
+                        with_opacity(data.color_scheme.primary(), 0.1),
+                        with_opacity(data.color_scheme.primary(), 0.08),
                     )
                 } else {
                     (data.focus_color, data.hover_color)
@@ -4084,10 +4084,10 @@ pub(crate) mod tests {
                                 with_opacity(colors_.surface_container_highest(), 0.12),
                                 Some(PaintedStyle::Fill),
                             ),
-                            m3_outline(with_opacity(colors_.on_surface, 0.12)),
+                            m3_outline(with_opacity(colors_.on_surface(), 0.12)),
                             PaintCall::rrect(Some(Color::alpha_blend(
-                                with_opacity(colors_.on_surface, 0.38),
-                                colors_.surface,
+                                with_opacity(colors_.on_surface(), 0.38),
+                                colors_.surface(),
                             ))),
                         ],
                     );
@@ -4099,7 +4099,7 @@ pub(crate) mod tests {
                     assert_paints(
                         &painted,
                         &[
-                            m3_track(colors_.primary, Some(PaintedStyle::Fill)),
+                            m3_track(colors_.primary(), Some(PaintedStyle::Fill)),
                             PaintCall::circle(Some(orange)),
                         ],
                     );
@@ -4197,9 +4197,9 @@ pub(crate) mod tests {
             assert_paints(
                 &material_ops(tester),
                 &[
-                    m3_track(colors_.primary, None),
+                    m3_track(colors_.primary(), None),
                     // The transparent track outline (module doc).
-                    PaintCall::rrect(Some(colors_.on_primary)),
+                    PaintCall::rrect(Some(colors_.on_primary())),
                 ],
             );
 
@@ -4210,7 +4210,7 @@ pub(crate) mod tests {
             assert_paints(
                 &material_ops(tester),
                 &[
-                    m3_track(colors_.primary, None),
+                    m3_track(colors_.primary(), None),
                     PaintCall::circle(Some(orange)),
                 ],
             );
@@ -4221,9 +4221,9 @@ pub(crate) mod tests {
             assert_paints(
                 &material_ops(tester),
                 &[
-                    m3_track(with_opacity(colors_.on_surface, 0.12), None),
+                    m3_track(with_opacity(colors_.on_surface(), 0.12), None),
                     // The transparent track outline (module doc).
-                    PaintCall::rrect(Some(with_opacity(colors_.surface, 1.0))),
+                    PaintCall::rrect(Some(with_opacity(colors_.surface(), 1.0))),
                 ],
             );
         });
@@ -4343,7 +4343,7 @@ pub(crate) mod tests {
                 (
                     false,
                     true,
-                    with_opacity(colors_.on_surface, 0.12),
+                    with_opacity(colors_.on_surface(), 0.12),
                     ACTIVE_DISABLED,
                 ),
                 (
@@ -4352,7 +4352,7 @@ pub(crate) mod tests {
                     colors_.surface_container_highest(),
                     INACTIVE_ENABLED,
                 ),
-                (true, true, colors_.primary, ACTIVE_ENABLED),
+                (true, true, colors_.primary(), ACTIVE_ENABLED),
             ] {
                 let home = in_material(
                     TextDirection::Rtl,
@@ -4365,7 +4365,7 @@ pub(crate) mod tests {
                 let mut pattern = vec![m3_track(track, Some(PaintedStyle::Fill))];
                 match (enabled, active) {
                     (false, false) => {
-                        pattern.push(m3_outline(with_opacity(colors_.on_surface, 0.12)))
+                        pattern.push(m3_outline(with_opacity(colors_.on_surface(), 0.12)))
                     }
                     // The inactive enabled switch's outline.
                     (true, false) => pattern.push(PaintCall::rrect(None)),
@@ -4410,8 +4410,8 @@ pub(crate) mod tests {
             assert_paints(
                 &material_ops(tester),
                 &[
-                    m3_track(colors_.primary, Some(PaintedStyle::Fill)),
-                    PaintCall::circle(Some(with_opacity(colors_.primary, 0.1))),
+                    m3_track(colors_.primary(), Some(PaintedStyle::Fill)),
+                    PaintCall::circle(Some(with_opacity(colors_.primary(), 0.1))),
                     PaintCall::rrect(Some(FOCUSED)),
                 ],
             );
@@ -4422,8 +4422,8 @@ pub(crate) mod tests {
             assert_paints(
                 &material_ops(tester),
                 &[
-                    m3_track(colors_.primary, Some(PaintedStyle::Fill)),
-                    PaintCall::circle(Some(with_opacity(colors_.primary, 0.08))),
+                    m3_track(colors_.primary(), Some(PaintedStyle::Fill)),
+                    PaintCall::circle(Some(with_opacity(colors_.primary(), 0.08))),
                     PaintCall::rrect(Some(HOVERED)),
                 ],
             );
@@ -4574,7 +4574,7 @@ pub(crate) mod tests {
                     (
                         true,
                         true,
-                        colors_.primary,
+                        colors_.primary(),
                         None,
                         PaintCall::rrect_at(
                             ltrbr(26.0, 10.0, 54.0, 38.0, 14.0),
@@ -4591,18 +4591,18 @@ pub(crate) mod tests {
                     (
                         false,
                         true,
-                        with_opacity(colors_.on_surface, 0.12),
+                        with_opacity(colors_.on_surface(), 0.12),
                         None,
-                        PaintCall::rrect(Some(with_opacity(colors_.surface, 1.0))),
+                        PaintCall::rrect(Some(with_opacity(colors_.surface(), 1.0))),
                     ),
                     (
                         false,
                         false,
                         with_opacity(colors_.surface_container_highest(), 0.12),
-                        Some(with_opacity(colors_.on_surface, 0.12)),
+                        Some(with_opacity(colors_.on_surface(), 0.12)),
                         PaintCall::rrect(Some(Color::alpha_blend(
-                            with_opacity(colors_.on_surface, 0.38),
-                            colors_.surface,
+                            with_opacity(colors_.on_surface(), 0.38),
+                            colors_.surface(),
                         ))),
                     ),
                 ] {
@@ -5569,13 +5569,13 @@ pub(crate) mod tests {
                 );
                 pump_app(tester, theme, move |_app| home);
                 let expected_thumb_color =
-                    Color::alpha_blend(active_disabled_thumb_color, colors_.surface);
+                    Color::alpha_blend(active_disabled_thumb_color, colors_.surface());
                 // Active disabled thumb color should be blended on top of surface color.
                 if use_material3 {
                     assert_paints(
                         &material_ops(tester),
                         &[
-                            m3_track(with_opacity(colors_.on_surface, 0.12), None),
+                            m3_track(with_opacity(colors_.on_surface(), 0.12), None),
                             // The transparent track outline (module doc).
                             PaintCall::rrect(Some(expected_thumb_color)),
                         ],

@@ -6612,7 +6612,10 @@ mod tests {
                         &waft_painting::RoundedRectangleBorder::default()
                     ));
                     let text_style = material.text_style.as_ref().expect("a text style");
-                    assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+                    assert_eq!(
+                        text_style.color,
+                        Some(theme.color_scheme.on_surface().into())
+                    );
                     assert_eq!(text_style.font_size, Some(14.0));
                     assert_eq!(text_style.height, Some(1.43));
                 });
@@ -6636,7 +6639,10 @@ mod tests {
                         &waft_painting::RoundedRectangleBorder::default()
                     ));
                     let text_style = material.text_style.as_ref().expect("a text style");
-                    assert_eq!(text_style.color, Some(theme.color_scheme.on_surface.into()));
+                    assert_eq!(
+                        text_style.color,
+                        Some(theme.color_scheme.on_surface().into())
+                    );
                     assert_eq!(text_style.font_size, Some(14.0));
                     assert_eq!(text_style.height, Some(1.43));
                 });
@@ -6670,7 +6676,7 @@ mod tests {
                             .into_widget()
                     },
                 );
-                let disabled = theme.color_scheme.on_surface.with_opacity(0.38);
+                let disabled = theme.color_scheme.on_surface().with_opacity(0.38);
 
                 // Menu bar (horizontal menu).
                 let button = widget_with_text::<TextButton>(tester, &TestMenu::MainMenu5.label());

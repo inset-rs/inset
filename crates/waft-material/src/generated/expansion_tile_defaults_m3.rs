@@ -34,15 +34,15 @@ impl ExpansionTileThemeDataGetters for ExpansionTileDefaultsM3 {
     }
 
     fn text_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).on_surface)
+        Some(self.context.colors(app).on_surface())
     }
 
     fn icon_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).primary)
+        Some(self.context.colors(app).primary())
     }
 
     fn collapsed_text_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).on_surface)
+        Some(self.context.colors(app).on_surface())
     }
 
     fn collapsed_icon_color(&self, app: &mut App) -> Option<Color> {

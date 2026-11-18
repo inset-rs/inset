@@ -73,13 +73,13 @@ impl TabBarThemeDataGetters for TabsPrimaryDefaultsM3 {
     fn indicator_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = theme.color_scheme.clone();
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn label_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = theme.color_scheme.clone();
-        Some(colors.primary.into())
+        Some(colors.primary().into())
     }
 
     fn unselected_label_color(&self, app: &mut App) -> Option<Color> {
@@ -97,24 +97,24 @@ impl TabBarThemeDataGetters for TabsPrimaryDefaultsM3 {
                 let colors = &overlay_colors;
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary.with_opacity(0.08));
+                        return Some(colors.primary().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     return None;
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.primary.with_opacity(0.1));
+                    return Some(colors.primary().with_opacity(0.1));
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(colors.on_surface.with_opacity(0.08));
+                    return Some(colors.on_surface().with_opacity(0.08));
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 None
             },
@@ -185,13 +185,13 @@ impl TabBarThemeDataGetters for TabsSecondaryDefaultsM3 {
     fn indicator_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = theme.color_scheme.clone();
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn label_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = theme.color_scheme.clone();
-        Some(colors.on_surface.into())
+        Some(colors.on_surface().into())
     }
 
     fn unselected_label_color(&self, app: &mut App) -> Option<Color> {
@@ -209,24 +209,24 @@ impl TabBarThemeDataGetters for TabsSecondaryDefaultsM3 {
                 let colors = &overlay_colors;
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.on_surface.with_opacity(0.1));
+                        return Some(colors.on_surface().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.on_surface.with_opacity(0.08));
+                        return Some(colors.on_surface().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.on_surface.with_opacity(0.1));
+                        return Some(colors.on_surface().with_opacity(0.1));
                     }
                     return None;
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(colors.on_surface.with_opacity(0.08));
+                    return Some(colors.on_surface().with_opacity(0.08));
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 None
             },

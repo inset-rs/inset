@@ -1302,7 +1302,7 @@ impl StatelessWidget for DataTable {
             .clone()
             .or_else(|| data_table_theme.data_row_color.clone())
             .or_else(|| theme.data_table_theme.data_row_color.clone());
-        let primary = theme.color_scheme.primary;
+        let primary = theme.color_scheme.primary();
         let default_row_color =
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Selected) {
@@ -3316,7 +3316,7 @@ pub(crate) mod tests {
             tester.pump_widget(build_table(true));
             assert_eq!(
                 last_row_decoration(tester).color.map(|color| color.color()),
-                Some(theme_data.color_scheme.primary.with_opacity(0.08))
+                Some(theme_data.color_scheme.primary().with_opacity(0.08))
             );
         });
     }

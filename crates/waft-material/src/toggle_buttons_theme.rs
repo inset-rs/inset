@@ -519,7 +519,7 @@ mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             // Custom theme enabled color
-            assert_ne!(theme.color_scheme.on_surface, enabled_color);
+            assert_ne!(theme.color_scheme.on_surface(), enabled_color);
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
                 Some(enabled_color)
@@ -534,7 +534,7 @@ mod tests {
             ));
             tester.pump_and_settle();
             // Custom theme selected color
-            assert_ne!(theme.color_scheme.primary, selected_color);
+            assert_ne!(theme.color_scheme.primary(), selected_color);
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
                 Some(selected_color)

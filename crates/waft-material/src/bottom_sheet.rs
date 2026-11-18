@@ -4785,7 +4785,7 @@ mod tests {
         let sheet = sheet.clone();
         Rc::new(move |app, context| {
             sheet.0.set(Some(context));
-            let primary = Theme::of(app, context).color_scheme.primary;
+            let primary = Theme::of(app, context).color_scheme.primary();
             SizedBox::expand()
                 .child(
                     waft_widgets::ColoredBox::new(primary)

@@ -49,7 +49,7 @@ impl ChipThemeDataGetters for ChipDefaultsM3 {
 
     fn label_style(&self, app: &mut App) -> Option<TextStyle> {
         let on_surface_variant = self.context.colors(app).on_surface_variant();
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         let color = if self.is_enabled {
             on_surface_variant
         } else {
@@ -84,7 +84,7 @@ impl ChipThemeDataGetters for ChipDefaultsM3 {
         Some(AnyColor::from(if self.is_enabled {
             colors.on_surface_variant()
         } else {
-            colors.on_surface
+            colors.on_surface()
         }))
     }
 
@@ -97,7 +97,7 @@ impl ChipThemeDataGetters for ChipDefaultsM3 {
             }
         } else {
             BorderSide {
-                color: colors.on_surface.with_opacity(0.12),
+                color: colors.on_surface().with_opacity(0.12),
                 ..BorderSide::default()
             }
         }))
@@ -108,9 +108,9 @@ impl ChipThemeDataGetters for ChipDefaultsM3 {
         Some(
             IconThemeData::new()
                 .color(if self.is_enabled {
-                    colors.primary
+                    colors.primary()
                 } else {
-                    colors.on_surface
+                    colors.on_surface()
                 })
                 .size(18.0),
         )

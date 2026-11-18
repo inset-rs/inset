@@ -92,14 +92,16 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3E {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(
-                        colors
-                            .on_surface
-                            .with_values(Some(0.1), None, None, None, None),
-                    );
+                    return Some(colors.on_surface().with_values(
+                        Some(0.1),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if toggleable && states.contains(&WidgetState::Selected) {
-                    return Some(colors.secondary);
+                    return Some(colors.secondary());
                 }
                 if toggleable {
                     return Some(colors.secondary_container());
@@ -117,14 +119,16 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3E {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(
-                        colors
-                            .on_surface
-                            .with_values(Some(0.38), None, None, None, None),
-                    );
+                    return Some(colors.on_surface().with_values(
+                        Some(0.38),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if toggleable && states.contains(&WidgetState::Selected) {
-                    return Some(colors.on_secondary);
+                    return Some(colors.on_secondary());
                 }
                 if toggleable {
                     return Some(colors.on_secondary_container());
@@ -142,7 +146,7 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3E {
             move |states| {
                 if toggleable && states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.on_secondary.with_values(
+                        return Some(colors.on_secondary().with_values(
                             Some(0.1),
                             None,
                             None,
@@ -151,7 +155,7 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3E {
                         ));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.on_secondary.with_values(
+                        return Some(colors.on_secondary().with_values(
                             Some(0.08),
                             None,
                             None,
@@ -160,7 +164,7 @@ impl ButtonStyleGetters for FilledTonalIconButtonDefaultsM3E {
                         ));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.on_secondary.with_values(
+                        return Some(colors.on_secondary().with_values(
                             Some(0.1),
                             None,
                             None,

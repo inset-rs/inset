@@ -104,7 +104,7 @@ impl NavigationBarThemeDataGetters for NavigationBarDefaultsM3 {
                         .color(if states.contains(&WidgetState::Disabled) {
                             label_colors.on_surface_variant().with_opacity(0.38)
                         } else if states.contains(&WidgetState::Selected) {
-                            label_colors.on_surface
+                            label_colors.on_surface()
                         } else {
                             label_colors.on_surface_variant()
                         })

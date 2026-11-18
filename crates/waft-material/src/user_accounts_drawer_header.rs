@@ -664,7 +664,7 @@ impl State for UserAccountsDrawerHeaderState {
         let widget = self.widget(app);
         let decoration = widget.decoration.clone().unwrap_or_else(|| {
             BoxDecoration::new()
-                .color(theme.color_scheme.primary)
+                .color(theme.color_scheme.primary())
                 .into()
         });
         let is_open = app.get(self).is_open;
@@ -794,7 +794,7 @@ mod tests {
         }
         let mut color_scheme = ColorScheme::light();
         if let Some(color_scheme_primary) = options.color_scheme_primary {
-            color_scheme.primary = color_scheme_primary;
+            color_scheme = color_scheme.with_primary(color_scheme_primary);
         }
         let theme = builder
             .color_scheme(color_scheme)

@@ -504,7 +504,7 @@ pub(crate) mod tests {
             assert_eq!(material.clip_behavior, Clip::None);
             assert_eq!(material.elevation, 0.0);
             assert_eq!(padding, EdgeInsetsGeometry::all(4.0));
-            assert_eq!(material.color, Some(colors.surface));
+            assert_eq!(material.color, Some(colors.surface()));
             assert_eq!(material.shadow_color, Some(colors.shadow()));
             assert_eq!(material.surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(

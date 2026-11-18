@@ -43,7 +43,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
     fn hint_style(&self, app: &mut App) -> Option<AnyTextStyle> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
         let hint_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
@@ -57,7 +57,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
     fn fill_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let surface_container_highest = colors.surface_container_highest();
         let fill_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
@@ -71,11 +71,11 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
     fn active_indicator_border(&self, app: &mut App) -> Option<AnyBorderSide> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
-        let error = colors.error;
+        let error = colors.error();
         let on_error_container = colors.on_error_container();
-        let primary = colors.primary;
+        let primary = colors.primary();
         let active_indicator_border =
             WidgetStateBorderSide::resolve_with(move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Disabled) {
@@ -127,10 +127,10 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
     fn outline_border(&self, app: &mut App) -> Option<AnyBorderSide> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
-        let error = colors.error;
+        let on_surface = colors.on_surface();
+        let error = colors.error();
         let on_error_container = colors.on_error_container();
-        let primary = colors.primary;
+        let primary = colors.primary();
         let outline = colors.outline();
         let outline_border = WidgetStateBorderSide::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
@@ -190,7 +190,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
     fn prefix_icon_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
         let prefix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
@@ -204,9 +204,9 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
     fn suffix_icon_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
-        let error = colors.error;
+        let error = colors.error();
         let on_error_container = colors.on_error_container();
         let suffix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
@@ -227,11 +227,11 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let text_theme = &theme.text_theme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
-        let error = colors.error;
+        let error = colors.error();
         let on_error_container = colors.on_error_container();
-        let primary = colors.primary;
+        let primary = colors.primary();
         let body_large = text_theme.body_large.clone().unwrap_or_default();
         let label_body_large = body_large.clone();
         let label_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
@@ -263,11 +263,11 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let text_theme = &theme.text_theme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
-        let error = colors.error;
+        let error = colors.error();
         let on_error_container = colors.on_error_container();
-        let primary = colors.primary;
+        let primary = colors.primary();
         let body_large = text_theme.body_large.clone().unwrap_or_default();
         let floating_label_style =
             WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
@@ -299,7 +299,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let text_theme = &theme.text_theme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
         let body_small = text_theme.body_small.clone().unwrap_or_default();
         let helper_body_small = body_small.clone();
@@ -317,7 +317,7 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let text_theme = &theme.text_theme;
-        let error = colors.error;
+        let error = colors.error();
         let body_small = text_theme.body_small.clone().unwrap_or_default();
         let error_style = WidgetStateTextStyle::resolve_with(move |_states: &WidgetStates| {
             let text_style = &body_small;

@@ -34,5 +34,5 @@ pub use executor::Task;
 pub use handle_map::DebugObject;
 pub use key::*;
 pub use observer_list::*;
-pub use timers::Timer;
+pub use timers::{Timer, delayed};
 pub use waft_embedder::{SignedDuration, TargetPlatform};

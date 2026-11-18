@@ -330,6 +330,12 @@ impl<W: StatelessWidget> Debug for Stateless<W> {
 ///
 /// Dart's `createState` returns any `State<Foo>`; here the state class is the associated
 /// type [`State`](Self::State), which is what `State<T>`'s type argument already fixed.
+///
+/// Make one when the widget owns a Flutter object between builds — a
+/// [`TextEditingController`](crate::TextEditingController), a [`FocusNode`](crate::FocusNode),
+/// an [`AnimationController`](crate::AnimationController). The app's data lives in an
+/// [`Entity`](waft_foundation::Entity), which a [`StatelessWidget`] reads in `build` and is
+/// rebuilt by when it notifies; see [`State`].
 pub trait StatefulWidget: Debug + 'static {
     /// The state this widget creates.
     type State: State<Widget = Self>;

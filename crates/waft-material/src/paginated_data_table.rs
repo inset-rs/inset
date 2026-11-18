@@ -850,7 +850,7 @@ impl State for PaginatedDataTableState {
                 .clone()
                 .expect("the theme's text theme has titleMedium")
                 .copy_with()
-                .color(theme_data.color_scheme.secondary)
+                .color(theme_data.color_scheme.secondary())
         } else {
             theme_data
                 .text_theme

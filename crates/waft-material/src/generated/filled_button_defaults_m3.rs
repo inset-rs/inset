@@ -64,8 +64,8 @@ impl ButtonStyleGetters for FilledButtonDefaultsM3 {
     fn background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.12));
@@ -77,8 +77,8 @@ impl ButtonStyleGetters for FilledButtonDefaultsM3 {
     fn foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_primary = colors.on_primary;
-        let on_surface = colors.on_surface;
+        let on_primary = colors.on_primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
@@ -90,7 +90,7 @@ impl ButtonStyleGetters for FilledButtonDefaultsM3 {
     fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_primary = colors.on_primary;
+        let on_primary = colors.on_primary();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Pressed) {
                 return Some(on_primary.with_opacity(0.1));
@@ -149,8 +149,8 @@ impl ButtonStyleGetters for FilledButtonDefaultsM3 {
     fn icon_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_primary = colors.on_primary;
-        let on_surface = colors.on_surface;
+        let on_primary = colors.on_primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));

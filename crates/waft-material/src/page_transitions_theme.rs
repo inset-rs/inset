@@ -101,7 +101,7 @@ impl StatelessWidget for ZoomPageTransition {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let enter_transition_background_color = self
             .background_color
-            .unwrap_or_else(|| Theme::of(app, context).color_scheme.surface);
+            .unwrap_or_else(|| Theme::of(app, context).color_scheme.surface());
         let allow_snapshotting = self.allow_snapshotting;
         let allow_enter_route_snapshotting = self.allow_enter_route_snapshotting;
         let mut transition = DualTransitionBuilder::new(
@@ -888,7 +888,7 @@ impl FadeForwardsPageTransitionsBuilder {
         }
 
         let color = if secondary_animation.is_animating(app) {
-            background_color.unwrap_or_else(|| ColorScheme::of(app, context).surface)
+            background_color.unwrap_or_else(|| ColorScheme::of(app, context).surface())
         } else {
             Colors::TRANSPARENT
         };
@@ -1059,7 +1059,7 @@ impl ZoomPageTransitionsBuilder {
     ) -> WidgetRef {
         let _ = animation;
         let enter_transition_background_color =
-            background_color.unwrap_or_else(|| Theme::of(app, context).color_scheme.surface);
+            background_color.unwrap_or_else(|| Theme::of(app, context).color_scheme.surface());
         let reversed = ReverseAnimation::new(app, secondary_animation.clone()).into_erased();
         let mut builder = DualTransitionBuilder::new(
             reversed,

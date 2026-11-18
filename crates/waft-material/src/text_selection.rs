@@ -118,7 +118,7 @@ impl TextSelectionControls for MaterialTextSelectionControls {
         let theme = Theme::of(app, context);
         let handle_color = TextSelectionTheme::of(app, context)
             .selection_handle_color
-            .unwrap_or(theme.color_scheme.primary);
+            .unwrap_or(theme.color_scheme.primary());
         let mut gesture_detector = GestureDetector::new().behavior(HitTestBehavior::Translucent);
         if let Some(on_tap) = on_tap {
             gesture_detector = gesture_detector.on_tap(on_tap);

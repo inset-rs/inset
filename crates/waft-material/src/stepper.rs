@@ -505,7 +505,7 @@ impl StepperState {
             .map(|connector_color| connector_color.resolve(&states));
         resolved_connector_color.unwrap_or_else(|| {
             if is_active {
-                color_scheme.primary
+                color_scheme.primary()
             } else {
                 Colors::GREY.shade400()
             }
@@ -610,12 +610,12 @@ impl StepperState {
         }
         if !self.is_dark(app, context) {
             if is_active {
-                color_scheme.primary
+                color_scheme.primary()
             } else {
-                color_scheme.on_surface.with_opacity(0.38)
+                color_scheme.on_surface().with_opacity(0.38)
             }
         } else if is_active {
-            color_scheme.secondary
+            color_scheme.secondary()
         } else {
             color_scheme.background()
         }
@@ -970,9 +970,9 @@ impl StepperState {
                 if states.contains(&WidgetState::Disabled) {
                     None
                 } else if is_dark {
-                    Some(foreground_color_scheme.on_surface)
+                    Some(foreground_color_scheme.on_surface())
                 } else {
-                    Some(foreground_color_scheme.on_primary)
+                    Some(foreground_color_scheme.on_primary())
                 }
             });
         let continue_background_color: WidgetStatePropertyRef<Option<Color>> =
@@ -980,7 +980,7 @@ impl StepperState {
                 if is_dark || states.contains(&WidgetState::Disabled) {
                     None
                 } else {
-                    Some(color_scheme.primary)
+                    Some(color_scheme.primary())
                 }
             });
         let continue_style = ButtonStyle::new()
@@ -2261,7 +2261,7 @@ mod tests {
     fn material3_stepper_enabled_button_styles() {
         test_widgets(|tester| {
             let theme_light = light_theme(tester);
-            let light_primary = theme_light.color_scheme.primary;
+            let light_primary = theme_light.color_scheme.primary();
             pump_button_frame(tester, theme_light, true);
 
             const CONTINUE_STR: &str = "Continue";
@@ -2287,7 +2287,7 @@ mod tests {
             );
 
             let theme_dark = ThemeData::dark(&tester.cell.borrow(), None);
-            let dark_on_surface = theme_dark.color_scheme.on_surface;
+            let dark_on_surface = theme_dark.color_scheme.on_surface();
             pump_button_frame(tester, theme_dark, true);
             // Complete the theme animation.
             tester.pump_and_settle();
@@ -2368,7 +2368,7 @@ mod tests {
                 theme_light,
                 "Continue",
                 "Cancel",
-                colors_light.on_surface.with_opacity(0.38),
+                colors_light.on_surface().with_opacity(0.38),
             );
 
             let theme_dark = ThemeData::dark(&tester.cell.borrow(), None);
@@ -2378,7 +2378,7 @@ mod tests {
                 theme_dark,
                 "Continue",
                 "Cancel",
-                colors_dark.on_surface.with_opacity(0.38),
+                colors_dark.on_surface().with_opacity(0.38),
             );
         });
     }
@@ -2458,12 +2458,12 @@ mod tests {
             // Light theme
             let light = light_theme(tester).color_scheme.clone();
             build_frame(tester, true, Brightness::Light);
-            assert_eq!(circle_color(tester, "1"), Some(light.primary));
+            assert_eq!(circle_color(tester, "1"), Some(light.primary()));
             build_frame(tester, false, Brightness::Light);
             tester.pump_and_settle();
             assert_eq!(
                 circle_color(tester, "1"),
-                Some(light.on_surface.with_opacity(0.38))
+                Some(light.on_surface().with_opacity(0.38))
             );
 
             // Dark theme
@@ -2472,7 +2472,7 @@ mod tests {
                 .clone();
             build_frame(tester, true, Brightness::Dark);
             tester.pump_and_settle();
-            assert_eq!(circle_color(tester, "1"), Some(dark.secondary));
+            assert_eq!(circle_color(tester, "1"), Some(dark.secondary()));
             build_frame(tester, false, Brightness::Dark);
             tester.pump_and_settle();
             assert_eq!(circle_color(tester, "1"), Some(dark.background()));

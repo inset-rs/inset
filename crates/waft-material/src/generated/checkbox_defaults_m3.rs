@@ -46,9 +46,9 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM3 {
     fn side(&self, app: &mut App) -> Option<AnyBorderSide> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let on_surface_variant = colors.on_surface_variant();
-        let error = colors.error;
+        let error = colors.error();
         let side = WidgetStateBorderSide::resolve_with(move |states: &WidgetStates| {
             if states.contains(&WidgetState::Disabled) {
                 if states.contains(&WidgetState::Selected) {
@@ -111,9 +111,9 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM3 {
     fn fill_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
-        let error = colors.error;
-        let primary = colors.primary;
+        let on_surface = colors.on_surface();
+        let error = colors.error();
+        let primary = colors.primary();
         let fill_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 if states.contains(&WidgetState::Selected) {
@@ -135,9 +135,9 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM3 {
     fn check_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let surface = colors.surface;
-        let on_error = colors.on_error;
-        let on_primary = colors.on_primary;
+        let surface = colors.surface();
+        let on_error = colors.on_error();
+        let on_primary = colors.on_primary();
         let check_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 if states.contains(&WidgetState::Selected) {
@@ -159,9 +159,9 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM3 {
     fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let on_surface = colors.on_surface;
-        let error = colors.error;
-        let primary = colors.primary;
+        let on_surface = colors.on_surface();
+        let error = colors.error();
+        let primary = colors.primary();
         let overlay_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Error) {
                 if states.contains(&WidgetState::Pressed) {

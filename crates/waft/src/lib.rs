@@ -20,14 +20,21 @@
 /// picture the `Image` widget shows, as `dart:ui`'s `Image` is to Flutter's.
 pub use waft_embedder as ui;
 pub use waft_embedder::{
+    BlendMode, Brightness, Canvas, Color, DragChange, DragReport, FontFeature, FontWeight, Offset,
+    Paint, PaintingStyle, Path, PathFillType, Picture, Radius, Rect, Shader, Size, Stroke,
+    StrokeCap, TextAlign, TextDirection,
+};
+pub use waft_embedder::{
     BlurStyle, HostWindow, LinuxWindowConfig, MacosTitleBar, MacosWindowConfig, MenuEntry,
     MenuItem, Platform, RequestId, TitleBarAction, ViewError, WindowBackground, WindowConfig,
     WindowLevel, WindowRef, WindowSizeLimits, WindowsIconResource, WindowsRelaunch,
     WindowsWindowConfig,
 };
+/// The host's HTTP client, which a request and its body go through.
 pub use waft_embedder::{
-    Brightness, Color, DragChange, DragReport, FontFeature, FontWeight, Offset, Radius, Rect, Size,
-    TextAlign, TextDirection,
+    Body, BodyReadAllFuture, BodyReadFuture, BodyStream, BodyTrailersFuture, DnsErrorPayload,
+    FieldSizePayload, HttpClient, HttpError, HttpFuture, RedirectPolicy, SendOptions,
+    TlsAlertReceivedPayload,
 };
 /// The system's file dialogs and what their picks answer, as an app names them: the types
 /// `FileDialogs` hands back, whether a pick is a path or the system's own handle.
@@ -36,6 +43,12 @@ pub use waft_embedder::{
     FileOpenFuture, FileReadFuture, FileSizeFuture, FileStream, FileType, FileWriteFuture,
     FileWriter, FolderEntriesFuture, FolderEntry, FolderHandle, FolderOptions, OpenOptions,
     PickedFile, PickedFolder, SaveOptions,
+};
+/// The host's file system, which a path read whole, written whole or opened at an offset goes
+/// through: dart:io's `File` and `RandomAccessFile` with Rust names.
+pub use waft_embedder::{
+    File, FileKind, FileMetadataFuture, FileOperationFuture, Files, ListFilesFuture, ListedEntry,
+    Metadata, OpenFileFuture, OpenMode, ReadFileFuture, WriteFileFuture,
 };
 #[cfg(target_os = "android")]
 pub use waft_embedder_default::AndroidApp;
@@ -62,4 +75,6 @@ pub use waft_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
 };
 pub use waft_shell::Shell;
+/// The field-and-accessor body a [`State`] asks for, for a struct whose bag is `state`.
+pub use waft_widgets::state_accessors;
 pub use waft_widgets::*;

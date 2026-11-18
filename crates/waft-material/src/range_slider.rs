@@ -1200,8 +1200,8 @@ impl State for RangeSliderState {
         {
             #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
             let fallback = Color::alpha_blend(
-                theme.color_scheme.on_surface.with_opacity(0.60),
-                theme.color_scheme.surface.with_opacity(0.90),
+                theme.color_scheme.on_surface().with_opacity(0.60),
+                theme.color_scheme.surface().with_opacity(0.90),
             );
             slider_theme.value_indicator_color.unwrap_or(fallback)
         } else {
@@ -3439,76 +3439,76 @@ impl SliderThemeDataGetters for RangeSliderDefaultsM2 {
     fn active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.24))
+        Some(colors.primary().with_opacity(0.24))
     }
 
     fn disabled_active_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.32))
+        Some(colors.on_surface().with_opacity(0.32))
     }
 
     fn disabled_inactive_track_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(0.54))
+        Some(colors.on_primary().with_opacity(0.54))
     }
 
     fn inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.54))
+        Some(colors.primary().with_opacity(0.54))
     }
 
     fn disabled_active_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_primary.with_opacity(0.12))
+        Some(colors.on_primary().with_opacity(0.12))
     }
 
     fn disabled_inactive_tick_mark_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.on_surface.with_opacity(0.12))
+        Some(colors.on_surface().with_opacity(0.12))
     }
 
     fn thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn overlapping_shape_stroke_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.surface)
+        Some(colors.surface())
     }
 
     fn disabled_thumb_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         Some(Color::alpha_blend(
-            colors.on_surface.with_opacity(0.38),
-            colors.surface,
+            colors.on_surface().with_opacity(0.38),
+            colors.surface(),
         ))
     }
 
     fn overlay_color(&self, app: &mut App) -> Option<AnyColor> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary.with_opacity(0.12).into())
+        Some(colors.primary().with_opacity(0.12).into())
     }
 
     fn value_indicator_text_style(&self, app: &mut App) -> Option<TextStyle> {
@@ -3521,14 +3521,14 @@ impl SliderThemeDataGetters for RangeSliderDefaultsM2 {
                 .as_ref()
                 .expect("the text theme has a body large style")
                 .copy_with()
-                .color(colors.on_primary),
+                .color(colors.on_primary()),
         )
     }
 
     fn value_indicator_color(&self, app: &mut App) -> Option<Color> {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        Some(colors.primary)
+        Some(colors.primary())
     }
 
     fn range_track_shape(&self, _app: &mut App) -> Option<RangeSliderTrackShapeRef> {
@@ -5184,7 +5184,7 @@ mod tests {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(50.0, 70.0)));
             let theme = default_theme(tester);
-            let hover_color = theme.color_scheme.primary.with_opacity(0.12);
+            let hover_color = theme.color_scheme.primary().with_opacity(0.12);
             let build_app = |enabled: bool| {
                 enabled_range_slider_app(theme.clone(), &values, enabled, |slider| {
                     slider.max(100.0)
@@ -5221,7 +5221,7 @@ mod tests {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(50.0, 70.0)));
             let theme = default_theme(tester);
-            let dragged_color = theme.color_scheme.primary.with_opacity(0.12);
+            let dragged_color = theme.color_scheme.primary().with_opacity(0.12);
             tester.pump_widget(enabled_range_slider_app(theme, &values, true, |slider| {
                 slider.max(100.0)
             }));
@@ -6693,7 +6693,7 @@ mod tests {
                         .range_track_shape(Rc::new(RectangularRangeSliderTrackShape::new())),
                 )
                 .build(&tester.cell.borrow());
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             tester.pump_widget(material_app(
                 theme,
                 Material::new()
@@ -7691,16 +7691,16 @@ mod tests {
             use waft_embedder::{RRect, Radius};
             let theme = default_theme(tester);
             let color_scheme = theme.color_scheme.clone();
-            let active_track_color = color_scheme.primary;
+            let active_track_color = color_scheme.primary();
             let inactive_track_color = color_scheme.secondary_container();
-            let disabled_active_track_color = color_scheme.on_surface.with_opacity(0.38);
-            let disabled_inactive_track_color = color_scheme.on_surface.with_opacity(0.12);
-            let active_tick_mark_color = color_scheme.on_primary;
+            let disabled_active_track_color = color_scheme.on_surface().with_opacity(0.38);
+            let disabled_inactive_track_color = color_scheme.on_surface().with_opacity(0.12);
+            let active_tick_mark_color = color_scheme.on_primary();
             let inactive_tick_mark_color = color_scheme.on_secondary_container();
             let disabled_active_tick_mark_color = color_scheme.on_inverse_surface();
-            let disabled_inactive_tick_mark_color = color_scheme.on_surface;
-            let thumb_color = color_scheme.primary;
-            let disabled_thumb_color = color_scheme.on_surface.with_opacity(0.38);
+            let disabled_inactive_tick_mark_color = color_scheme.on_surface();
+            let thumb_color = color_scheme.primary();
+            let disabled_thumb_color = color_scheme.on_surface().with_opacity(0.38);
             let value_indicator_color = color_scheme.inverse_surface();
             let values = RangeValues::new(25.0, 75.0);
             let build_app = |divisions: Option<i32>, enabled: bool| {

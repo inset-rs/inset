@@ -108,6 +108,16 @@ macro_rules! state_accessors {
 ///
 /// Methods take `self: Handle<Self>`: the state lives in the arena, and [`widget`](Self::widget)
 /// / [`context`](Self::context) read the element it is attached to.
+///
+/// # When a widget needs one
+///
+/// A [`State`] is for what a widget *owns* as a Flutter object across its builds: a
+/// [`TextEditingController`](crate::TextEditingController), a [`FocusNode`](crate::FocusNode), an
+/// [`AnimationController`](crate::AnimationController) it drives. The app's own data is not
+/// state: it lives in an [`Entity`](waft_foundation::Entity), which a
+/// [`StatelessWidget`](crate::StatelessWidget) reads in `build` and is rebuilt by when it
+/// notifies. A stateful widget
+/// whose only job is to hold a counter or a fetched list is app data in the wrong place.
 pub trait State: Sized + 'static {
     /// The widget this state belongs to; Dart's `State<T>` type argument.
     type Widget: StatefulWidget<State = Self>;

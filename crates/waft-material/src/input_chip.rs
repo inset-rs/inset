@@ -517,7 +517,7 @@ mod tests {
     fn material3_input_chip_disabled_check_mark_color_is_determined_by_platform_brightness_when_light()
      {
         test_widgets(|tester| {
-            disabled_checkmark_color_case(tester, m3, |theme| theme.color_scheme.on_surface);
+            disabled_checkmark_color_case(tester, m3, |theme| theme.color_scheme.on_surface());
         });
     }
 
@@ -540,7 +540,7 @@ mod tests {
             disabled_checkmark_color_case(
                 tester,
                 |app| ThemeData::dark(app, None),
-                |theme| theme.color_scheme.on_surface,
+                |theme| theme.color_scheme.on_surface(),
             );
         });
     }
@@ -618,7 +618,7 @@ mod tests {
     fn material3_input_chip_has_correct_selected_color_when_disabled() {
         test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
-            let expected = theme.color_scheme.on_surface;
+            let expected = theme.color_scheme.on_surface();
             pump_checkmark_chip(tester, selected_input_chip(None, false), None, Some(theme));
 
             assert!(paints_path_color(

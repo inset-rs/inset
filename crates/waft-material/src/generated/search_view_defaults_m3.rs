@@ -67,7 +67,7 @@ impl SearchViewThemeDataGetters for SearchViewDefaultsM3 {
     }
 
     fn header_text_style(&self, app: &mut App) -> Option<TextStyle> {
-        let on_surface = self.context.colors(app).on_surface;
+        let on_surface = self.context.colors(app).on_surface();
         self.context
             .text_theme(app)
             .body_large

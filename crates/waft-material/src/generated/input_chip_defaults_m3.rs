@@ -65,7 +65,7 @@ impl ChipThemeDataGetters for InputChipDefaultsM3 {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         };
         self.context
             .text_theme(app)
@@ -76,7 +76,7 @@ impl ChipThemeDataGetters for InputChipDefaultsM3 {
 
     fn color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let colors = self.context.colors(app);
-        let (on_surface, secondary_container) = (colors.on_surface, colors.secondary_container());
+        let (on_surface, secondary_container) = (colors.on_surface(), colors.secondary_container());
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected)
@@ -107,12 +107,12 @@ impl ChipThemeDataGetters for InputChipDefaultsM3 {
         let colors = self.context.colors(app);
         Some(if self.is_enabled {
             if self.is_selected {
-                colors.primary
+                colors.primary()
             } else {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         })
     }
 
@@ -125,7 +125,7 @@ impl ChipThemeDataGetters for InputChipDefaultsM3 {
                 colors.on_surface_variant()
             }
         } else {
-            colors.on_surface
+            colors.on_surface()
         }))
     }
 
@@ -139,7 +139,7 @@ impl ChipThemeDataGetters for InputChipDefaultsM3 {
                 }
             } else {
                 BorderSide {
-                    color: colors.on_surface.with_opacity(0.12),
+                    color: colors.on_surface().with_opacity(0.12),
                     ..BorderSide::default()
                 }
             }
@@ -157,12 +157,12 @@ impl ChipThemeDataGetters for InputChipDefaultsM3 {
             IconThemeData::new()
                 .color(if self.is_enabled {
                     if self.is_selected {
-                        colors.primary
+                        colors.primary()
                     } else {
                         colors.on_surface_variant()
                     }
                 } else {
-                    colors.on_surface
+                    colors.on_surface()
                 })
                 .size(18.0),
         )

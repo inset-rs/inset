@@ -6009,7 +6009,7 @@ mod tests {
             tester.pump_and_settle();
 
             // Test default text style.
-            let on_surface = m3(&tester.cell.borrow()).color_scheme.on_surface;
+            let on_surface = m3(&tester.cell.borrow()).color_scheme.on_surface();
             assert_eq!(label_style(tester, "Item 1").font_size, Some(14.0));
             assert_eq!(
                 label_style(tester, "Item 1").color.as_deref().copied(),
@@ -6234,7 +6234,7 @@ mod tests {
                 tester,
                 m3,
                 14.0,
-                |theme| Some(theme.color_scheme.on_surface),
+                |theme| Some(theme.color_scheme.on_surface()),
                 crate::text_theme::TextTheme::label_large,
             );
         });

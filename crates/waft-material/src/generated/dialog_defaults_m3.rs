@@ -46,7 +46,7 @@ impl DialogThemeDataGetters for DialogDefaultsM3 {
     }
 
     fn icon_color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).secondary)
+        Some(self.context.colors(app).secondary())
     }
 
     fn background_color(&self, app: &mut App) -> Option<Color> {

@@ -179,7 +179,7 @@ fn drawer_header(app: &mut App, context: BuildContext, close: Option<WidgetRef>)
             .title_medium
             .clone()
             .unwrap_or_default()
-            .color(theme.color_scheme.primary),
+            .color(theme.color_scheme.primary()),
     );
     let mut title_row = vec![Expanded::new(title).into_widget()];
     title_row.extend(close);

@@ -993,9 +993,9 @@ impl State for SnackBarState {
         let snack_bar_theme = SnackBarTheme::of(app, context);
         let is_theme_dark = theme.brightness() == Brightness::Dark;
         let button_color = if is_theme_dark {
-            color_scheme.primary
+            color_scheme.primary()
         } else {
-            color_scheme.secondary
+            color_scheme.secondary()
         };
         let defaults: Box<dyn SnackBarThemeDataGetters> = if theme.use_material3 {
             Box::new(SnackbarDefaultsM3::new(context))
@@ -1412,14 +1412,14 @@ fn inverted_color_scheme(
 ) -> ColorScheme {
     let mut inverted = ColorScheme::new(
         brightness,
-        color_scheme.on_primary,
-        color_scheme.primary,
+        color_scheme.on_primary(),
+        color_scheme.primary(),
         button_color,
-        color_scheme.secondary,
-        color_scheme.on_error,
-        color_scheme.error,
-        color_scheme.on_surface,
-        color_scheme.surface,
+        color_scheme.secondary(),
+        color_scheme.on_error(),
+        color_scheme.error(),
+        color_scheme.on_surface(),
+        color_scheme.surface(),
     )
     .with_on_background(color_scheme.background());
     if let Some(background) = background {
@@ -1465,9 +1465,9 @@ impl SnackBarThemeDataGetters for SnackbarDefaultsM2 {
     fn background_color(&self, _app: &mut App) -> Option<Color> {
         let colors = self.colors();
         Some(if self.is_light() {
-            Color::alpha_blend(colors.on_surface.with_opacity(0.80), colors.surface)
+            Color::alpha_blend(colors.on_surface().with_opacity(0.80), colors.surface())
         } else {
-            colors.on_surface
+            colors.on_surface()
         })
     }
 
@@ -1489,13 +1489,13 @@ impl SnackBarThemeDataGetters for SnackbarDefaultsM2 {
     }
 
     fn action_text_color(&self, _app: &mut App) -> Option<AnyColor> {
-        Some(self.colors().secondary.into())
+        Some(self.colors().secondary().into())
     }
 
     fn disabled_action_text_color(&self, _app: &mut App) -> Option<Color> {
         Some(
             self.colors()
-                .on_surface
+                .on_surface()
                 .with_opacity(if self.is_light() { 0.38 } else { 0.3 }),
         )
     }
@@ -1516,7 +1516,7 @@ impl SnackBarThemeDataGetters for SnackbarDefaultsM2 {
     }
 
     fn close_icon_color(&self, _app: &mut App) -> Option<AnyColor> {
-        Some(self.colors().on_surface.into())
+        Some(self.colors().on_surface().into())
     }
 
     fn action_overflow_threshold(&self, _app: &mut App) -> Option<f64> {
@@ -2067,7 +2067,7 @@ mod tests {
             with_action_under(tester, |app| ThemeData::dark(app, None));
             let on_surface = ThemeData::dark(&tester.cell.borrow(), None)
                 .color_scheme
-                .on_surface;
+                .on_surface();
             assert_eq!(snack_bar_color(tester), on_surface);
         });
     }
@@ -2079,7 +2079,7 @@ mod tests {
             with_action_under(tester, |app| ThemeData::dark(app, Some(false)));
             let primary = ThemeData::dark(&tester.cell.borrow(), Some(false))
                 .color_scheme
-                .primary;
+                .primary();
             assert_eq!(tester.text_color("ACTION"), primary);
         });
     }
@@ -4377,7 +4377,7 @@ mod tests {
                     style
                         .copy_with()
                         .color(theme.color_scheme.on_inverse_surface())
-                        .decoration_color(theme.color_scheme.on_surface)
+                        .decoration_color(theme.color_scheme.on_surface())
                 });
             assert_eq!(paragraph_style(tester, TEXT), expected);
             with_snack_bar_material(tester, |material| {

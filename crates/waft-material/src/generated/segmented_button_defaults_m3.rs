@@ -84,7 +84,7 @@ impl SegmentedButtonThemeDataGetters for SegmentedButtonDefaultsM3 {
         let colors = &theme.color_scheme;
         let secondary_container = colors.secondary_container();
         let on_secondary_container = colors.on_secondary_container();
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         let outline = colors.outline();
         Some(
             ButtonStyle::new()

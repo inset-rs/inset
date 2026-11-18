@@ -292,8 +292,8 @@ impl ButtonStyleButton for TextButton {
                     text_style: theme.text_theme.label_large.clone(),
                     ..TextButton::style_from()
                 }
-                .foreground_color(color_scheme.primary)
-                .disabled_foreground_color(color_scheme.on_surface.with_opacity(0.38))
+                .foreground_color(color_scheme.primary())
+                .disabled_foreground_color(color_scheme.on_surface().with_opacity(0.38))
                 .background_color(Colors::TRANSPARENT)
                 .disabled_background_color(Colors::TRANSPARENT)
                 .shadow_color(theme.shadow_color)
@@ -862,9 +862,9 @@ mod tests {
             assert_eq!(
                 text_style.color.as_deref().copied(),
                 Some(if disabled {
-                    color_scheme.on_surface.with_opacity(0.38)
+                    color_scheme.on_surface().with_opacity(0.38)
                 } else {
-                    color_scheme.primary
+                    color_scheme.primary()
                 })
             );
             assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));
@@ -1036,7 +1036,7 @@ mod tests {
         test_widgets(|tester| {
             let focus_node = focus_node(tester);
             let theme = default_theme(tester);
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             tester.pump_widget(app_centered(
                 theme,
                 TextButton::new(pressed(), Some(Text::new("TextButton")))
@@ -2400,7 +2400,7 @@ mod tests {
                         .text_style
                         .as_ref()
                         .and_then(|style| style.color.as_deref().copied()),
-                    Some(color_scheme.primary)
+                    Some(color_scheme.primary())
                 );
             });
             assert_eq!(tester.icon_style().color.as_deref().copied(), Some(red));
@@ -2424,7 +2424,7 @@ mod tests {
                         .text_style
                         .as_ref()
                         .and_then(|style| style.color.as_deref().copied()),
-                    Some(color_scheme.on_surface.with_opacity(0.38))
+                    Some(color_scheme.on_surface().with_opacity(0.38))
                 );
             });
             assert_eq!(tester.icon_style().color.as_deref().copied(), Some(blue));
@@ -2436,7 +2436,7 @@ mod tests {
         test_widgets(|tester| {
             let focus_node = focus_node(tester);
             let theme = default_theme(tester);
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             let has_been_hovered = Rc::new(Cell::new(false));
             let on_hover: waft_foundation::ValueChanged<bool> = {
                 let has_been_hovered = Rc::clone(&has_been_hovered);

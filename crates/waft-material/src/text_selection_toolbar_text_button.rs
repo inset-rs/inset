@@ -198,18 +198,18 @@ impl TextSelectionToolbarTextButton {
     }
 
     fn get_foreground_color(app: &App, color_scheme: &ColorScheme) -> Color {
-        let is_default_on_surface = match color_scheme.brightness {
+        let is_default_on_surface = match color_scheme.brightness() {
             Brightness::Light => {
-                ThemeData::new(app).color_scheme.on_surface == color_scheme.on_surface
+                ThemeData::new(app).color_scheme.on_surface() == color_scheme.on_surface()
             }
             Brightness::Dark => {
-                ThemeData::dark(app, None).color_scheme.on_surface == color_scheme.on_surface
+                ThemeData::dark(app, None).color_scheme.on_surface() == color_scheme.on_surface()
             }
         };
         if !is_default_on_surface {
-            return color_scheme.on_surface;
+            return color_scheme.on_surface();
         }
-        match color_scheme.brightness {
+        match color_scheme.brightness() {
             Brightness::Light => Self::DEFAULT_FOREGROUND_COLOR_LIGHT,
             Brightness::Dark => Self::DEFAULT_FOREGROUND_COLOR_DARK,
         }
@@ -372,7 +372,7 @@ mod tests {
         for index in 0..2 {
             test_widgets(|tester| {
                 let color_scheme = color_schemes(tester)[index].clone();
-                let brightness = color_scheme.brightness;
+                let brightness = color_scheme.brightness();
                 let theme = themed(tester, color_scheme);
                 pump_button(tester, theme);
 

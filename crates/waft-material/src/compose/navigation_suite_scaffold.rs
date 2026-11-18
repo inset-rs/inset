@@ -421,7 +421,7 @@ impl StatelessWidget for NavigationSuiteScaffold {
         let content = self.content_without_padding(app, context, suite_type);
         let container_color = self
             .container_color
-            .unwrap_or_else(|| Theme::of(app, context).color_scheme.surface);
+            .unwrap_or_else(|| Theme::of(app, context).color_scheme.surface());
         let suite = match suite_type {
             NavigationSuiteType::None => content,
             NavigationSuiteType::NavigationBar => {
@@ -653,7 +653,7 @@ mod tests {
     fn the_container_defaults_to_the_scheme_s_surface() {
         test_widgets(|tester| {
             pump(tester, 400.0, 700.0, suite());
-            let surface = ThemeData::new(&tester.cell.borrow()).color_scheme.surface;
+            let surface = ThemeData::new(&tester.cell.borrow()).color_scheme.surface();
             let suite_color = tester.widget(
                 find::ancestor(find::text("content"), find::by_type::<Material>()).last(),
                 |material: &Material| material.color,

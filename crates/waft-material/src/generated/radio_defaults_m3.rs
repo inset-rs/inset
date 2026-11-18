@@ -46,30 +46,30 @@ impl RadioThemeDataGetters for RadioDefaultsM3 {
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Disabled) {
-                        return Some(colors.on_surface.with_opacity(0.38));
+                        return Some(colors.on_surface().with_opacity(0.38));
                     }
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.primary);
+                        return Some(colors.primary());
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary);
+                        return Some(colors.primary());
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary);
+                        return Some(colors.primary());
                     }
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(colors.on_surface.with_opacity(0.38));
+                    return Some(colors.on_surface().with_opacity(0.38));
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.on_surface);
+                    return Some(colors.on_surface());
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(colors.on_surface);
+                    return Some(colors.on_surface());
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(colors.on_surface);
+                    return Some(colors.on_surface());
                 }
                 Some(colors.on_surface_variant())
             })
@@ -83,24 +83,24 @@ impl RadioThemeDataGetters for RadioDefaultsM3 {
             move |states| {
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(colors.on_surface.with_opacity(0.1));
+                        return Some(colors.on_surface().with_opacity(0.1));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary.with_opacity(0.08));
+                        return Some(colors.primary().with_opacity(0.08));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(colors.primary.with_opacity(0.1));
+                        return Some(colors.primary().with_opacity(0.1));
                     }
                     return Some(Colors::TRANSPARENT);
                 }
                 if states.contains(&WidgetState::Pressed) {
-                    return Some(colors.primary.with_opacity(0.1));
+                    return Some(colors.primary().with_opacity(0.1));
                 }
                 if states.contains(&WidgetState::Hovered) {
-                    return Some(colors.on_surface.with_opacity(0.08));
+                    return Some(colors.on_surface().with_opacity(0.08));
                 }
                 if states.contains(&WidgetState::Focused) {
-                    return Some(colors.on_surface.with_opacity(0.1));
+                    return Some(colors.on_surface().with_opacity(0.1));
                 }
                 Some(Colors::TRANSPARENT)
             },

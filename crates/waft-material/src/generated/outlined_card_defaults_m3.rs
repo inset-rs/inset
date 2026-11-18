@@ -41,7 +41,7 @@ impl CardThemeDataGetters for OutlinedCardDefaultsM3 {
     }
 
     fn color(&self, app: &mut App) -> Option<Color> {
-        Some(self.context.colors(app).surface)
+        Some(self.context.colors(app).surface())
     }
 
     fn shadow_color(&self, app: &mut App) -> Option<Color> {

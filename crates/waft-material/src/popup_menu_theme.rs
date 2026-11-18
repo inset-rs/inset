@@ -708,12 +708,12 @@ mod tests {
             assert_eq!(label.font_family.as_deref(), Some("Roboto"));
             assert_eq!(
                 label.color.as_deref().copied(),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
 
             // Test disabled text color
             #[allow(deprecated)]
-            let disabled_color = theme.color_scheme.on_surface.with_opacity(0.38);
+            let disabled_color = theme.color_scheme.on_surface().with_opacity(0.38);
             let label = item_text_style(tester, &disabled_popup_item_key);
             assert_eq!(label.color.as_deref().copied(), Some(disabled_color));
 
@@ -737,14 +737,14 @@ mod tests {
             let title = list_tile_title_text_style(tester, false);
             assert_eq!(
                 title.and_then(|style| style.color.as_deref().copied()),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
 
             // Test checked CheckedPopupMenuItem label.
             let title = list_tile_title_text_style(tester, true);
             assert_eq!(
                 title.and_then(|style| style.color.as_deref().copied()),
-                Some(theme.color_scheme.on_surface)
+                Some(theme.color_scheme.on_surface())
             );
 
             // Check popup menu padding.

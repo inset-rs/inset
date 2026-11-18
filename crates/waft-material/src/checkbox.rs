@@ -1358,7 +1358,7 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM2 {
     fn fill_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
         let theme = self.context.theme(app);
         let disabled_color = theme.disabled_color;
-        let secondary = theme.color_scheme.secondary;
+        let secondary = theme.color_scheme.secondary();
         Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states| {
                 if states.contains(&WidgetState::Disabled) {
@@ -1644,9 +1644,9 @@ pub(crate) mod tests {
             let colors = theme(&tester.cell.borrow()).color_scheme.clone();
             let use_material3 = theme(&tester.cell.borrow()).use_material3;
             let (fill, check) = if use_material3 {
-                (colors.primary, colors.on_primary)
+                (colors.primary(), colors.on_primary())
             } else {
-                (colors.secondary, Color::new(0xFFFFFFFF))
+                (colors.secondary(), Color::new(0xFFFFFFFF))
             };
             let frame = |tester: &mut WidgetTester, value: Option<bool>| {
                 pump_checkbox(tester, theme, move |_| {
@@ -1872,8 +1872,8 @@ pub(crate) mod tests {
                 tester,
                 &[
                     PaintCall::circle(Some(orange())),
-                    PaintCall::rrect(Some(colors.primary)),
-                    PaintCall::path(Some(colors.on_primary)),
+                    PaintCall::rrect(Some(colors.primary())),
+                    PaintCall::path(Some(colors.on_primary())),
                 ],
             );
 
@@ -1887,7 +1887,7 @@ pub(crate) mod tests {
                     PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                         rrect(17.0, 17.0, 31.0, 31.0, 0.0),
-                        Some(colors.on_surface),
+                        Some(colors.on_surface()),
                     ),
                 ],
             );
@@ -1900,7 +1900,7 @@ pub(crate) mod tests {
                 &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
-                    Some(colors.on_surface.with_opacity(0.38)),
+                    Some(colors.on_surface().with_opacity(0.38)),
                 )],
             );
         });
@@ -1969,7 +1969,7 @@ pub(crate) mod tests {
             let data = theme(&tester.cell.borrow());
             let colors = data.color_scheme.clone();
             let (fill, check) = if data.use_material3 {
-                (Color::new(0xff6750a4), colors.on_primary)
+                (Color::new(0xff6750a4), colors.on_primary())
             } else {
                 (Color::new(0xff2196f3), Color::new(0xffffffff))
             };
@@ -2020,7 +2020,7 @@ pub(crate) mod tests {
             // Check what happens when disabled.
             frame(tester, false);
             let (disabled_fill, disabled_check) = if data.use_material3 {
-                (colors.on_surface.with_opacity(0.38), colors.surface)
+                (colors.on_surface().with_opacity(0.38), colors.surface())
             } else {
                 (Color::new(0x61000000), Color::new(0xffffffff))
             };
@@ -2469,7 +2469,7 @@ pub(crate) mod tests {
             |theme| {
                 theme
                     .color_scheme
-                    .secondary
+                    .secondary()
                     .with_alpha(K_RADIAL_REACTION_ALPHA)
             },
             |theme| theme.focus_color,
@@ -2481,10 +2481,10 @@ pub(crate) mod tests {
     fn material3_checkbox_default_overlay_color_in_active_pressed_focused_hovered_states() {
         default_overlay_case(
             m3,
-            |theme| theme.color_scheme.primary.with_opacity(0.1),
-            |theme| theme.color_scheme.on_surface.with_opacity(0.1),
-            |theme| theme.color_scheme.on_surface.with_opacity(0.1),
-            |theme| theme.color_scheme.on_surface.with_opacity(0.08),
+            |theme| theme.color_scheme.primary().with_opacity(0.1),
+            |theme| theme.color_scheme.on_surface().with_opacity(0.1),
+            |theme| theme.color_scheme.on_surface().with_opacity(0.1),
+            |theme| theme.color_scheme.on_surface().with_opacity(0.08),
         );
     }
 
@@ -2905,9 +2905,9 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    PaintCall::circle(Some(colors.error.with_opacity(0.1))),
-                    PaintCall::rrect(Some(colors.error)),
-                    PaintCall::path(Some(colors.on_error)),
+                    PaintCall::circle(Some(colors.error().with_opacity(0.1))),
+                    PaintCall::rrect(Some(colors.error())),
+                    PaintCall::path(Some(colors.on_error())),
                 ],
             );
 
@@ -2918,8 +2918,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    PaintCall::rrect(Some(colors.error)),
-                    PaintCall::path(Some(colors.on_error)),
+                    PaintCall::rrect(Some(colors.error())),
+                    PaintCall::path(Some(colors.on_error())),
                 ],
             );
 
@@ -2929,8 +2929,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    PaintCall::circle(Some(colors.error.with_opacity(0.08))),
-                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::circle(Some(colors.error().with_opacity(0.08))),
+                    PaintCall::rrect(Some(colors.error())),
                 ],
             );
 
@@ -2940,8 +2940,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    PaintCall::circle(Some(colors.error.with_opacity(0.1))),
-                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::circle(Some(colors.error().with_opacity(0.1))),
+                    PaintCall::rrect(Some(colors.error())),
                 ],
             );
             tester.up(&gesture_long_press);
@@ -3193,7 +3193,7 @@ pub(crate) mod tests {
         fill_color_when_unchecked_case(
             m3,
             |theme| theme.color_scheme.on_surface_variant(),
-            |theme| theme.color_scheme.on_surface.with_opacity(0.38),
+            |theme| theme.color_scheme.on_surface().with_opacity(0.38),
         );
     }
 

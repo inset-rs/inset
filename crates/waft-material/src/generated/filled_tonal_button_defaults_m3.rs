@@ -65,7 +65,7 @@ impl ButtonStyleGetters for FilledTonalButtonDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let secondary_container = colors.secondary_container();
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.12));
@@ -78,7 +78,7 @@ impl ButtonStyleGetters for FilledTonalButtonDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let on_secondary_container = colors.on_secondary_container();
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
@@ -150,7 +150,7 @@ impl ButtonStyleGetters for FilledTonalButtonDefaultsM3 {
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
         let on_secondary_container = colors.on_secondary_container();
-        let on_surface = colors.on_surface;
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));

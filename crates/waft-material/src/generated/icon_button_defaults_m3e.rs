@@ -98,14 +98,16 @@ impl ButtonStyleGetters for IconButtonDefaultsM3E {
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
-                    return Some(
-                        colors
-                            .on_surface
-                            .with_values(Some(0.38), None, None, None, None),
-                    );
+                    return Some(colors.on_surface().with_values(
+                        Some(0.38),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ));
                 }
                 if toggleable && states.contains(&WidgetState::Selected) {
-                    return Some(colors.primary);
+                    return Some(colors.primary());
                 }
                 Some(colors.on_surface_variant())
             })
@@ -120,14 +122,16 @@ impl ButtonStyleGetters for IconButtonDefaultsM3E {
             move |states| {
                 if toggleable && states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(
-                            colors
-                                .primary
-                                .with_values(Some(0.1), None, None, None, None),
-                        );
+                        return Some(colors.primary().with_values(
+                            Some(0.1),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ));
                     }
                     if states.contains(&WidgetState::Hovered) {
-                        return Some(colors.primary.with_values(
+                        return Some(colors.primary().with_values(
                             Some(0.08),
                             None,
                             None,
@@ -136,11 +140,13 @@ impl ButtonStyleGetters for IconButtonDefaultsM3E {
                         ));
                     }
                     if states.contains(&WidgetState::Focused) {
-                        return Some(
-                            colors
-                                .primary
-                                .with_values(Some(0.1), None, None, None, None),
-                        );
+                        return Some(colors.primary().with_values(
+                            Some(0.1),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ));
                     }
                 }
                 if states.contains(&WidgetState::Pressed) {

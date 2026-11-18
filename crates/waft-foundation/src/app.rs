@@ -502,6 +502,18 @@ impl App {
         timer
     }
 
+    /// Dart's `Timer.periodic(duration, callback)`. Fires whenever the clock
+    /// reaches each multiple of `duration` after `now`, until it is cancelled.
+    pub fn schedule_periodic_timer(
+        &mut self,
+        duration: Duration,
+        callback: impl Fn(&mut App, Timer) + 'static,
+    ) -> Timer {
+        let timer = self.timers.schedule_periodic(duration, Rc::new(callback));
+        self.update_timer_wakeup();
+        timer
+    }
+
     /// Dart's `Timer.cancel()`. Idempotent.
     pub fn cancel_timer(&mut self, timer: Timer) {
         self.timers.cancel(timer);
@@ -512,6 +524,11 @@ impl App {
     /// Dart's `Timer.isActive`.
     pub fn timer_is_active(&self, timer: Timer) -> bool {
         self.timers.is_active(timer)
+    }
+
+    /// Dart's `Timer.tick`: the fires a periodic timer has had.
+    pub fn timer_tick(&self, timer: Timer) -> u64 {
+        self.timers.tick(timer)
     }
 
     /// The App clock: what [`AppCell::elapse`] has advanced it to. Flutter's test binding's
@@ -543,10 +560,10 @@ impl App {
 
     /// Fires the next timer due by `target`, if any.
     pub(crate) fn fire_next_due(&mut self, target: Duration) -> bool {
-        let Some(callback) = self.timers.pop_next_due(target) else {
+        let Some((timer, callback)) = self.timers.pop_next_due(target) else {
             return false;
         };
-        callback.call(self);
+        callback(self, timer);
         true
     }
 
@@ -566,6 +583,12 @@ impl App {
 
     /// Puts `state` in the arena and answers the one [`Ref`] that keeps it: Dart's constructor
     /// call. The object is freed at the checkpoint after the last `Ref` to it is dropped.
+    ///
+    /// A [`Ref`] is for Flutter's objects and the relations between them, as Dart's reference
+    /// is. The app's own data and the logic that changes it are an [`Entity`](crate::Entity),
+    /// which [`new_entity`](Self::new_entity) makes: a widget reads it in `build` and is rebuilt
+    /// by it when it notifies, where a `Ref` is what a controller, an animation or a scroll
+    /// position is held as.
     ///
     /// ```
     /// # use waft_foundation::{App, AppCell};

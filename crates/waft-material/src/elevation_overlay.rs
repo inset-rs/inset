@@ -110,9 +110,9 @@ impl ElevationOverlay {
         if elevation > 0.0
             && theme.apply_elevation_overlay_color
             && theme.brightness() == Brightness::Dark
-            && color.with_opacity(1.0) == theme.color_scheme.surface.with_opacity(1.0)
+            && color.with_opacity(1.0) == theme.color_scheme.surface().with_opacity(1.0)
         {
-            return Self::color_with_overlay(color, theme.color_scheme.on_surface, elevation);
+            return Self::color_with_overlay(color, theme.color_scheme.on_surface(), elevation);
         }
         color
     }
@@ -130,7 +130,7 @@ impl ElevationOverlay {
     ///    specifies the exact overlay values for a given elevation.
     pub fn overlay_color(app: &mut App, context: BuildContext, elevation: f64) -> Color {
         let theme = Theme::of(app, context);
-        Self::overlay_color_of(theme.color_scheme.on_surface, elevation)
+        Self::overlay_color_of(theme.color_scheme.on_surface(), elevation)
     }
 
     /// Returns a color blended by laying a semi-transparent overlay (using the
@@ -296,16 +296,16 @@ mod tests {
             let (applied, overlay, theme) = overlay_results_under(
                 tester,
                 dark_theme_with_overlay,
-                |theme| theme.color_scheme.surface,
+                |theme| theme.color_scheme.surface(),
                 4.0,
             );
 
-            let on_surface = theme.color_scheme.on_surface;
+            let on_surface = theme.color_scheme.on_surface();
             assert_eq!(
                 applied,
-                ElevationOverlay::color_with_overlay(theme.color_scheme.surface, on_surface, 4.0)
+                ElevationOverlay::color_with_overlay(theme.color_scheme.surface(), on_surface, 4.0)
             );
-            assert_ne!(applied, theme.color_scheme.surface);
+            assert_ne!(applied, theme.color_scheme.surface());
             assert_eq!(overlay, ElevationOverlay::overlay_color_of(on_surface, 4.0));
         });
     }
@@ -325,18 +325,18 @@ mod tests {
             let (light, _, light_theme) = overlay_results_under(
                 tester,
                 |app| ThemeData::light(app, Some(false)),
-                |theme| theme.color_scheme.surface,
+                |theme| theme.color_scheme.surface(),
                 4.0,
             );
-            assert_eq!(light, light_theme.color_scheme.surface);
+            assert_eq!(light, light_theme.color_scheme.surface());
 
             let (flat, _, dark_theme) = overlay_results_under(
                 tester,
                 dark_theme_with_overlay,
-                |theme| theme.color_scheme.surface,
+                |theme| theme.color_scheme.surface(),
                 0.0,
             );
-            assert_eq!(flat, dark_theme.color_scheme.surface);
+            assert_eq!(flat, dark_theme.color_scheme.surface());
         });
     }
 

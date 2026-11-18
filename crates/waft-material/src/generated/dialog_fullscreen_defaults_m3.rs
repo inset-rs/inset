@@ -34,6 +34,6 @@ impl DialogThemeDataGetters for DialogFullscreenDefaultsM3 {
     }
 
     fn background_color(&self, app: &mut App) -> Option<Color> {
-        Some(Theme::of(app, self.context).color_scheme.surface)
+        Some(Theme::of(app, self.context).color_scheme.surface())
     }
 }

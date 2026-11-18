@@ -972,14 +972,14 @@ mod tests {
             let typography = Typography::material2014().build();
 
             let (color, shape) = dialog_material(tester);
-            assert_eq!(color, Some(scheme.surface));
+            assert_eq!(color, Some(scheme.surface()));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
 
             assert_paints(
                 &dial_ops(tester),
                 &[
-                    PaintCall::circle(Some(opacity(scheme.on_surface, 0.08))),
-                    PaintCall::circle(Some(scheme.primary)),
+                    PaintCall::circle(Some(opacity(scheme.on_surface(), 0.08))),
+                    PaintCall::circle(Some(scheme.primary())),
                 ],
             );
 
@@ -988,21 +988,21 @@ mod tests {
             let title_medium = base_style(&typography, false, |theme| &theme.title_medium);
             assert_eq!(
                 paragraph_style(tester, "7"),
-                display_medium(false).copy_with().color(scheme.primary)
+                display_medium(false).copy_with().color(scheme.primary())
             );
             assert_eq!(
                 paragraph_style(tester, "15"),
-                display_medium(false).copy_with().color(scheme.on_surface)
+                display_medium(false).copy_with().color(scheme.on_surface())
             );
             assert_eq!(
                 paragraph_style(tester, "AM"),
-                title_medium.copy_with().color(scheme.primary)
+                title_medium.copy_with().color(scheme.primary())
             );
             assert_eq!(
                 paragraph_style(tester, "PM"),
                 title_medium
                     .copy_with()
-                    .color(opacity(scheme.on_surface, 0.6))
+                    .color(opacity(scheme.on_surface(), 0.6))
             );
             assert_eq!(
                 paragraph_style(tester, "SELECT TIME"),
@@ -1014,34 +1014,35 @@ mod tests {
                 primary,
                 base_style(&typography, false, |theme| &theme.body_large)
                     .copy_with()
-                    .color(scheme.on_surface)
+                    .color(scheme.on_surface())
             );
             assert_eq!(
                 selected,
                 base_style(&typography, true, |theme| &theme.body_large)
                     .copy_with()
-                    .color(scheme.on_primary)
+                    .color(scheme.on_primary())
             );
 
             let (color, shape) = text_material(tester, "7");
-            assert_eq!(color, Some(opacity(scheme.primary, 0.12)));
+            assert_eq!(color, Some(opacity(scheme.primary(), 0.12)));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
             let (color, shape) = text_material(tester, "15");
-            assert_eq!(color, Some(opacity(scheme.on_surface, 0.12)));
+            assert_eq!(color, Some(opacity(scheme.on_surface(), 0.12)));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
 
             let (am_color, am_shape) = text_material(tester, "AM");
-            assert_eq!(am_color, Some(opacity(scheme.primary, 0.12)));
+            assert_eq!(am_color, Some(opacity(scheme.primary(), 0.12)));
             let (pm_color, pm_shape) = text_material(tester, "PM");
             assert_eq!(pm_color, Some(Colors::TRANSPARENT));
 
-            let border_color = Color::alpha_blend(opacity(scheme.on_surface, 0.38), scheme.surface);
+            let border_color =
+                Color::alpha_blend(opacity(scheme.on_surface(), 0.38), scheme.surface());
             assert_eq!(am_shape, rounded_with_side(border_color, true, 4.0));
             assert_eq!(pm_shape, rounded_with_side(border_color, false, 4.0));
 
             assert_eq!(
                 entry_mode_icon_color(tester),
-                Some(opacity(scheme.on_surface, 0.6))
+                Some(opacity(scheme.on_surface(), 0.6))
             );
 
             let default_style = TextButton::style_from().build();
@@ -1070,7 +1071,7 @@ mod tests {
             launch(tester, default_theme.clone(), TimePickerEntryMode::Dial);
             let scheme = &default_theme.color_scheme;
             let typography = Typography::material2021().build();
-            let decoration = scheme.on_surface;
+            let decoration = scheme.on_surface();
 
             let (color, shape) = dialog_material(tester);
             assert_eq!(color, Some(scheme.surface_container_high()));
@@ -1080,7 +1081,7 @@ mod tests {
                 &dial_ops(tester),
                 &[
                     PaintCall::circle(Some(scheme.surface_container_highest())),
-                    PaintCall::circle(Some(scheme.primary)),
+                    PaintCall::circle(Some(scheme.primary())),
                 ],
             );
 
@@ -1098,7 +1099,7 @@ mod tests {
                 m3_style(
                     &typography,
                     |theme| &theme.display_large,
-                    scheme.on_surface,
+                    scheme.on_surface(),
                     decoration
                 )
             );
@@ -1125,7 +1126,7 @@ mod tests {
                 m3_style(
                     &typography,
                     |theme| &theme.body_medium,
-                    scheme.on_surface,
+                    scheme.on_surface(),
                     decoration
                 )
             );
@@ -1136,7 +1137,7 @@ mod tests {
                 m3_style(
                     &typography,
                     |theme| &theme.body_large,
-                    scheme.on_surface,
+                    scheme.on_surface(),
                     decoration
                 )
             );
@@ -1145,7 +1146,7 @@ mod tests {
                 m3_style(
                     &typography,
                     |theme| &theme.body_large,
-                    scheme.on_primary,
+                    scheme.on_primary(),
                     decoration
                 )
             );
@@ -1195,15 +1196,15 @@ mod tests {
         );
         assert_eq!(
             decoration.error_border,
-            Some(outline_border(scheme.error, 2.0, radius).into())
+            Some(outline_border(scheme.error(), 2.0, radius).into())
         );
         assert_eq!(
             decoration.focused_border,
-            Some(outline_border(scheme.primary, 2.0, radius).into())
+            Some(outline_border(scheme.primary(), 2.0, radius).into())
         );
         assert_eq!(
             decoration.focused_error_border,
-            Some(outline_border(scheme.error, 2.0, radius).into())
+            Some(outline_border(scheme.error(), 2.0, radius).into())
         );
     }
 
@@ -1227,7 +1228,7 @@ mod tests {
             assert_eq!(decoration.filled, Some(true));
             assert_eq!(
                 resolved(&decoration.fill_color),
-                Some(opacity(scheme.on_surface, 0.12))
+                Some(opacity(scheme.on_surface(), 0.12))
             );
             assert_borders(&decoration, scheme, None);
             let hint_style = typography
@@ -1242,7 +1243,7 @@ mod tests {
                         .as_ref()
                         .expect("a display medium")
                         .copy_with()
-                        .color(opacity(scheme.on_surface, 0.36)),
+                        .color(opacity(scheme.on_surface(), 0.36)),
                 ));
             assert_eq!(
                 decoration
@@ -1269,8 +1270,8 @@ mod tests {
             let expected = m3_style(
                 &typography,
                 |theme| &theme.display_medium,
-                scheme.on_surface,
-                scheme.on_surface,
+                scheme.on_surface(),
+                scheme.on_surface(),
             );
             let field = text_field(tester, "7");
             assert_eq!(
@@ -1297,7 +1298,7 @@ mod tests {
                     .hint_style
                     .as_ref()
                     .map(|style| style.value().clone()),
-                Some(TextStyle::new().color(opacity(scheme.on_surface, 0.36)))
+                Some(TextStyle::new().color(opacity(scheme.on_surface(), 0.36)))
             );
 
             let default_style = TextButton::style_from().build();
@@ -1460,7 +1461,7 @@ mod tests {
             launch(tester, theme_data.clone(), TimePickerEntryMode::Dial);
             let typography = Typography::material2021().build();
             let decoration_color = Color::new(0xff1d1b20);
-            let on_surface = theme_data.color_scheme.on_surface;
+            let on_surface = theme_data.color_scheme.on_surface();
 
             assert_theme_values(tester, &theme, None, "Cancel");
 

@@ -957,7 +957,7 @@ impl ScrollBehavior for MaterialScrollBehavior {
         }
         GlowingOverscrollIndicator::new(
             details.direction,
-            Theme::of(app, context).color_scheme.secondary,
+            Theme::of(app, context).color_scheme.secondary(),
         )
         .child(child)
         .into_widget()
@@ -1041,11 +1041,11 @@ impl MaterialAppState {
         let effective_selection_color = theme
             .text_selection_theme
             .selection_color
-            .unwrap_or_else(|| theme.color_scheme.primary.with_opacity(0.40));
+            .unwrap_or_else(|| theme.color_scheme.primary().with_opacity(0.40));
         let effective_cursor_color = theme
             .text_selection_theme
             .cursor_color
-            .unwrap_or(theme.color_scheme.primary);
+            .unwrap_or(theme.color_scheme.primary());
 
         let mut child_widget = child
             .cloned()
@@ -2530,7 +2530,7 @@ mod tests {
 
             assert!(is_same_color_as(
                 surface_of(tester),
-                light_theme.color_scheme.surface
+                light_theme.color_scheme.surface()
             ));
 
             // Test the Scaffold background color animation from light to dark theme.
@@ -2547,7 +2547,7 @@ mod tests {
             // Scaffold background color is fully updated to dark theme.
             assert!(is_same_color_as(
                 surface_of(tester),
-                dark_theme.color_scheme.surface
+                dark_theme.color_scheme.surface()
             ));
 
             // Reset to light theme to compare the Scaffold background color animation
@@ -2578,7 +2578,7 @@ mod tests {
             // Scaffold background color is fully updated to dark theme.
             assert!(is_same_color_as(
                 surface_of(tester),
-                dark_theme.color_scheme.surface
+                dark_theme.color_scheme.surface()
             ));
 
             // Switch from dark to light theme with overridden animation duration.
@@ -2589,10 +2589,10 @@ mod tests {
             tester.pump();
             tester.pump_by(Duration::from_millis(1));
 
-            assert_ne!(surface_of(tester), dark_theme.color_scheme.surface);
+            assert_ne!(surface_of(tester), dark_theme.color_scheme.surface());
             assert!(is_same_color_as(
                 surface_of(tester),
-                light_theme.color_scheme.surface
+                light_theme.color_scheme.surface()
             ));
         });
     }
@@ -2677,7 +2677,7 @@ mod tests {
             pump(tester, |_| MaterialApp::new().home(probe));
             let context = seen.get().expect("the probe built");
             let mut app = tester.cell.borrow_mut();
-            let primary = Theme::of(&mut app, context).color_scheme.primary;
+            let primary = Theme::of(&mut app, context).color_scheme.primary();
             let style = DefaultSelectionStyle::of(&mut app, context);
             #[allow(deprecated)]
             let selection = primary.with_opacity(0.40);

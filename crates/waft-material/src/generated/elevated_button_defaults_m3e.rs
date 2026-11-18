@@ -92,8 +92,8 @@ impl ButtonStyleGetters for ElevatedButtonDefaultsM3E {
         let toggleable = self.toggleable;
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_surface = colors.on_surface();
         let surface_container_low = colors.surface_container_low();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
@@ -113,9 +113,9 @@ impl ButtonStyleGetters for ElevatedButtonDefaultsM3E {
         let toggleable = self.toggleable;
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_primary = colors.on_primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_primary = colors.on_primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(with_alpha(on_surface, 0.38));
@@ -134,8 +134,8 @@ impl ButtonStyleGetters for ElevatedButtonDefaultsM3E {
         let toggleable = self.toggleable;
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_primary = colors.on_primary;
+        let primary = colors.primary();
+        let on_primary = colors.on_primary();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if toggleable && states.contains(&WidgetState::Selected) {
                 if states.contains(&WidgetState::Pressed) {
@@ -246,9 +246,9 @@ impl ButtonStyleGetters for ElevatedButtonDefaultsM3E {
         let toggleable = self.toggleable;
         let theme = self.context.theme(app);
         let colors = &theme.color_scheme;
-        let primary = colors.primary;
-        let on_primary = colors.on_primary;
-        let on_surface = colors.on_surface;
+        let primary = colors.primary();
+        let on_primary = colors.on_primary();
+        let on_surface = colors.on_surface();
         Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(with_alpha(on_surface, 0.38));

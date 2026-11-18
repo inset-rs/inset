@@ -21,9 +21,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — there is no isolate event loop.
   Affect: the queue drains after platform events and between begin-frame and draw-frame, and a microtask cycle panics where the isolate would hang.
 
-- Change: `dart:async`'s `Timer` runs on a logical clock that `AppCell::elapse` advances (microtasks first, then due order, microtasks after each); `Timer.periodic` is absent.
+- Change: `dart:async`'s `Timer`, its `Timer.periodic`, and `Future.delayed` (here `delayed`) run on a logical clock that `AppCell::elapse` advances (microtasks first, then due order, microtasks after each).
   Reason: language — there is no isolate event loop; tests play FakeAsync through `elapse`.
-  Affect: no timer fires until the host or a test elapses the clock, and a repeating timer has to re-arm itself. The host is told when to wake the app for its earliest waiting timer, and told again whenever that changes, including when no timer is left. That is kept separate from a ready task asking to be woken, which is what Dart's isolate gets for free by owning both queues: holding the two in one field would let a task that became ready overwrite a timer that has not run yet.
+  Affect: no timer fires until the host or a test elapses the clock; a periodic timer fires once per period the clock passes, from its last expected fire so a late clock does not shift the rhythm, and its `tick` reads 0 once it is cancelled where Dart keeps its last count. The host is told when to wake the app for its earliest waiting timer, and told again whenever that changes, including when no timer is left. That is kept separate from a ready task asking to be woken, which is what Dart's isolate gets for free by owning both queues: holding the two in one field would let a task that became ready overwrite a timer that has not run yet.
 
 - Change: a Dart `async` method is a `Task`: the part before its first `await` runs inline, the rest at the next checkpoint.
   Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.

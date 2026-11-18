@@ -1241,8 +1241,8 @@ impl BottomNavigationBarState {
         let bottom_theme = BottomNavigationBarTheme::of(app, context);
 
         let theme_color = match theme_data.brightness() {
-            Brightness::Light => theme_data.color_scheme.primary,
-            Brightness::Dark => theme_data.color_scheme.secondary,
+            Brightness::Light => theme_data.color_scheme.primary(),
+            Brightness::Dark => theme_data.color_scheme.secondary(),
         };
 
         let widget = self.widget(app);
@@ -1310,11 +1310,11 @@ impl BottomNavigationBarState {
                 widget
                     .unselected_item_color
                     .or(bottom_theme.unselected_item_color)
-                    .unwrap_or(theme_data.color_scheme.surface),
+                    .unwrap_or(theme_data.color_scheme.surface()),
                 widget
                     .effective_selected_item_color()
                     .or(bottom_theme.selected_item_color)
-                    .unwrap_or(theme_data.color_scheme.surface),
+                    .unwrap_or(theme_data.color_scheme.surface()),
             ),
         };
 
@@ -1334,7 +1334,7 @@ impl BottomNavigationBarState {
                 label_style_color(&effective_unselected_label_style)
                     .or(widget.unselected_item_color)
                     .or(bottom_theme.unselected_item_color)
-                    .unwrap_or(theme_data.color_scheme.surface),
+                    .unwrap_or(theme_data.color_scheme.surface()),
                 label_style_color(&effective_selected_label_style)
                     .or(widget.effective_selected_item_color())
                     .or(bottom_theme.selected_item_color)
@@ -1358,7 +1358,7 @@ impl BottomNavigationBarState {
                 icon_theme_color(&effective_unselected_icon_theme)
                     .or(widget.unselected_item_color)
                     .or(bottom_theme.unselected_item_color)
-                    .unwrap_or(theme_data.color_scheme.surface),
+                    .unwrap_or(theme_data.color_scheme.surface()),
                 icon_theme_color(&effective_selected_icon_theme)
                     .or(widget.effective_selected_item_color())
                     .or(bottom_theme.selected_item_color)
@@ -2274,7 +2274,7 @@ pub(crate) mod tests {
             let surface = {
                 let element = first_text(tester, "AC");
                 let mut app = tester.cell.borrow_mut();
-                Theme::of(&mut app, element).color_scheme.surface
+                Theme::of(&mut app, element).color_scheme.surface()
             };
             assert_eq!(color_of(&paragraph_style(tester, "AC")), Some(surface));
             assert_eq!(opacity_of(tester, "Alarm"), 0.0);

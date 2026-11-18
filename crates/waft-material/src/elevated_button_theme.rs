@@ -395,17 +395,17 @@ mod tests {
                     assert!(material.border_radius.is_none());
                     let shape = material.shape.as_deref().expect("a shape");
                     if use_material3 {
-                        assert_eq!(material.color, Some(color_scheme.surface));
+                        assert_eq!(material.color, Some(color_scheme.surface()));
                         assert_eq!(material.elevation, 1.0);
                         assert_eq!(material.shadow_color, Some(color_scheme.shadow()));
                         assert!(shape.eq_shape(&StadiumBorder::default()));
-                        assert_eq!(text_color(material), Some(color_scheme.primary));
+                        assert_eq!(text_color(material), Some(color_scheme.primary()));
                     } else {
-                        assert_eq!(material.color, Some(color_scheme.primary));
+                        assert_eq!(material.color, Some(color_scheme.primary()));
                         assert_eq!(material.elevation, 2.0);
                         assert_eq!(material.shadow_color, Some(Color::new(0xff000000)));
                         assert!(shape.eq_shape(&rounded(4.0)));
-                        assert_eq!(text_color(material), Some(color_scheme.on_primary));
+                        assert_eq!(text_color(material), Some(color_scheme.on_primary()));
                     }
                     let text_style = material.text_style.as_ref().expect("a text style");
                     assert_eq!(text_style.font_family.as_deref(), Some("Roboto"));

@@ -14,7 +14,7 @@ pub fn empty_coming_soon(app: &mut App, context: BuildContext) -> WidgetRef {
         .title_large
         .clone()
         .unwrap_or_default()
-        .color(theme.color_scheme.primary);
+        .color(theme.color_scheme.primary());
     let subtitle = theme
         .text_theme
         .body_small

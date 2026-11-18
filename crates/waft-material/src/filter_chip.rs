@@ -567,7 +567,7 @@ pub(crate) mod tests {
                 0.0,
                 Some(Colors::TRANSPARENT),
                 transparent,
-                rounded_rectangle(scheme.on_surface.with_alpha(0x1f)),
+                rounded_rectangle(scheme.on_surface().with_alpha(0x1f)),
             );
             assert_eq!(ink_decoration_color(tester), None);
 
@@ -608,7 +608,7 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 ink_decoration_color(tester),
-                Some(scheme.on_surface.with_alpha(0x1f))
+                Some(scheme.on_surface().with_alpha(0x1f))
             );
         });
     }
@@ -660,7 +660,7 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 ink_decoration_color(tester),
-                Some(scheme.on_surface.with_alpha(0x1f))
+                Some(scheme.on_surface().with_alpha(0x1f))
             );
 
             // Test selected enabled FilterChip.elevated defaults.
@@ -690,7 +690,7 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 ink_decoration_color(tester),
-                Some(scheme.on_surface.with_alpha(0x1f))
+                Some(scheme.on_surface().with_alpha(0x1f))
             );
         });
     }
@@ -991,7 +991,7 @@ pub(crate) mod tests {
             build_chip(tester, None);
             assert_eq!(
                 icon_data(tester).color.map(|color| color.color()),
-                Some(theme.color_scheme.primary)
+                Some(theme.color_scheme.primary())
             );
 
             // Test provided icon theme.
@@ -1283,13 +1283,13 @@ pub(crate) mod tests {
             build_chips(tester, false);
 
             // Check the flat chip icon colors.
-            assert_eq!(icon_color(tester, &flat_avatar), Some(scheme.primary));
+            assert_eq!(icon_color(tester, &flat_avatar), Some(scheme.primary()));
             assert_eq!(
                 icon_color(tester, &flat_delete_icon),
                 Some(scheme.on_surface_variant())
             );
             // Check the elevated chip icon colors.
-            assert_eq!(icon_color(tester, &elevated_avatar), Some(scheme.primary));
+            assert_eq!(icon_color(tester, &elevated_avatar), Some(scheme.primary()));
             assert_eq!(
                 icon_color(tester, &elevated_delete_icon),
                 Some(scheme.on_surface_variant())

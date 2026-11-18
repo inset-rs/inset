@@ -213,9 +213,11 @@ mod tests {
 
     use waft_embedder::{Dispatcher, Platform, TargetPlatform, ViewId, ViewRef};
 
+    use crate::delayed;
+
     use super::*;
     use crate::change_notifier::Listener;
-    use crate::completer::{Completer, CompleterFuture};
+    use crate::completer::Completer;
     use crate::timers::Timer;
 
     /// A host that keeps every timer wakeup it is given and never wakes the app itself, so
@@ -470,18 +472,6 @@ mod tests {
         cell.checkpoint();
         assert_eq!(*events.borrow(), ["task", "microtask from the task"]);
         assert!(!cell.borrow().has_pending_microtasks());
-    }
-
-    /// A timer as a future: what `Future.delayed` awaits.
-    fn delayed(app: &mut App, duration: Duration) -> CompleterFuture<()> {
-        let completer: Completer<()> = Completer::new();
-        let future = completer.future();
-        Timer::new(
-            app,
-            duration,
-            Listener::new(move |app| completer.complete(app, ())),
-        );
-        future
     }
 
     #[test]

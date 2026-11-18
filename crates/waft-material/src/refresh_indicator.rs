@@ -383,7 +383,10 @@ impl RefreshIndicatorState {
         // Reset the current value color.
         let context = self.context(app);
         let theme = crate::theme::Theme::of(app, context);
-        let color = self.widget(app).color.unwrap_or(theme.color_scheme.primary);
+        let color = self
+            .widget(app)
+            .color
+            .unwrap_or(theme.color_scheme.primary());
         app.get_mut(self).effective_value_color = Some(color);
         let value_color: AnimationRef<Option<Color>> = if color.alpha() == 0x00 {
             // Set an always stopped animation instead of a driven tween.
@@ -1690,7 +1693,7 @@ mod tests {
         test_widgets(|tester| {
             let primary_color = Color::new(0xff4caf50);
             let mut color_scheme = ColorScheme::light();
-            color_scheme.primary = primary_color;
+            color_scheme = color_scheme.with_primary(primary_color);
             let theme = ThemeData::from(color_scheme).build(&tester.cell.borrow());
             let (refresh, _called) = hold_refresh();
             let controller = ScrollController::default(&mut tester.cell.borrow_mut());

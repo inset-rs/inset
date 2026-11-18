@@ -585,7 +585,7 @@ impl ToggleButtons {
             .border_width
             .or(toggle_buttons_theme.border_width)
             .unwrap_or(Self::DEFAULT_BORDER_WIDTH);
-        let default_color = theme.color_scheme.on_surface.with_opacity(0.12);
+        let default_color = theme.color_scheme.on_surface().with_opacity(0.12);
         if self.on_pressed.is_some() && selected {
             BorderSide {
                 color: self
@@ -742,15 +742,15 @@ impl StatelessWidget for ToggleButtons {
                 let current_color = if self.on_pressed.is_some() && self.is_selected[index] {
                     self.selected_color
                         .or(toggle_buttons_theme.selected_color)
-                        .unwrap_or(theme.color_scheme.primary)
+                        .unwrap_or(theme.color_scheme.primary())
                 } else if self.on_pressed.is_some() && !self.is_selected[index] {
                     self.color
                         .or(toggle_buttons_theme.color)
-                        .unwrap_or_else(|| theme.color_scheme.on_surface.with_opacity(0.87))
+                        .unwrap_or_else(|| theme.color_scheme.on_surface().with_opacity(0.87))
                 } else {
                     self.disabled_color
                         .or(toggle_buttons_theme.disabled_color)
-                        .unwrap_or_else(|| theme.color_scheme.on_surface.with_opacity(0.38))
+                        .unwrap_or_else(|| theme.color_scheme.on_surface().with_opacity(0.38))
                 };
                 let current_text_style = self
                     .text_style
@@ -934,9 +934,9 @@ impl<'a> DefaultFillColor<'a> {
 
     fn resolve(&self, states: &WidgetStates) -> Color {
         if states.contains(&WidgetState::Selected) {
-            return self.color_scheme.primary.with_opacity(0.12);
+            return self.color_scheme.primary().with_opacity(0.12);
         }
-        self.color_scheme.surface.with_opacity(0.0)
+        self.color_scheme.surface().with_opacity(0.0)
     }
 }
 
@@ -957,13 +957,13 @@ impl ToggleButtonDefaultOverlay {
     fn primary(&self, opacity: f64) -> Option<Color> {
         self.color_scheme
             .as_ref()
-            .map(|color_scheme| color_scheme.primary.with_opacity(opacity))
+            .map(|color_scheme| color_scheme.primary().with_opacity(opacity))
     }
 
     fn on_surface(&self, opacity: f64) -> Option<Color> {
         self.color_scheme
             .as_ref()
-            .map(|color_scheme| color_scheme.on_surface.with_opacity(opacity))
+            .map(|color_scheme| color_scheme.on_surface().with_opacity(opacity))
     }
 }
 
@@ -2300,11 +2300,11 @@ pub(crate) mod tests {
 
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
-                Some(theme.color_scheme.on_surface.with_opacity(0.87))
+                Some(theme.color_scheme.on_surface().with_opacity(0.87))
             );
             assert_eq!(
                 style_color(&button_text_style(tester, "Second child")),
-                Some(theme.color_scheme.primary)
+                Some(theme.color_scheme.primary())
             );
         });
     }
@@ -2340,11 +2340,11 @@ pub(crate) mod tests {
             assert_eq!(*is_selected.borrow(), [false, true]);
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
-                Some(theme.color_scheme.on_surface.with_opacity(0.87))
+                Some(theme.color_scheme.on_surface().with_opacity(0.87))
             );
             assert_eq!(
                 style_color(&button_text_style(tester, "Second child")),
-                Some(theme.color_scheme.primary)
+                Some(theme.color_scheme.primary())
             );
 
             let center = text_center(tester, "Second child");
@@ -2354,11 +2354,11 @@ pub(crate) mod tests {
             assert_eq!(*is_selected.borrow(), [false, false]);
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
-                Some(theme.color_scheme.on_surface.with_opacity(0.87))
+                Some(theme.color_scheme.on_surface().with_opacity(0.87))
             );
             assert_eq!(
                 style_color(&button_text_style(tester, "Second child")),
-                Some(theme.color_scheme.on_surface.with_opacity(0.87))
+                Some(theme.color_scheme.on_surface().with_opacity(0.87))
             );
         });
     }
@@ -2378,7 +2378,7 @@ pub(crate) mod tests {
                 ToggleButtons::new(texts(&["First child", "Second child"]), vec![false, true]),
             ));
 
-            let disabled = Some(theme.color_scheme.on_surface.with_opacity(0.38));
+            let disabled = Some(theme.color_scheme.on_surface().with_opacity(0.38));
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
                 disabled
@@ -2561,7 +2561,7 @@ pub(crate) mod tests {
                 ToggleButtons::new(row_with_check(), vec![false]).on_pressed(|_app, _index| {}),
             ));
             // Default enabled color
-            let enabled = Some(theme.color_scheme.on_surface.with_opacity(0.87));
+            let enabled = Some(theme.color_scheme.on_surface().with_opacity(0.87));
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
                 enabled
@@ -2574,7 +2574,7 @@ pub(crate) mod tests {
             ));
             tester.pump_and_settle();
             // Default selected color
-            let selected = Some(theme.color_scheme.primary);
+            let selected = Some(theme.color_scheme.primary());
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
                 selected
@@ -2587,7 +2587,7 @@ pub(crate) mod tests {
             ));
             tester.pump_and_settle();
             // Default disabled color
-            let disabled = Some(theme.color_scheme.on_surface.with_opacity(0.38));
+            let disabled = Some(theme.color_scheme.on_surface().with_opacity(0.38));
             assert_eq!(
                 style_color(&button_text_style(tester, "First child")),
                 disabled
@@ -2607,10 +2607,10 @@ pub(crate) mod tests {
             let disabled_color = Colors::YELLOW.primary();
 
             // Tests are ineffective if the custom colors are the same as the theme's
-            assert_ne!(theme.color_scheme.on_surface, enabled_color);
-            assert_ne!(theme.color_scheme.primary, selected_color);
+            assert_ne!(theme.color_scheme.on_surface(), enabled_color);
+            assert_ne!(theme.color_scheme.primary(), selected_color);
             assert_ne!(
-                theme.color_scheme.on_surface.with_opacity(0.38),
+                theme.color_scheme.on_surface().with_opacity(0.38),
                 disabled_color
             );
 
@@ -2695,7 +2695,7 @@ pub(crate) mod tests {
 
             let (color, material_type) =
                 button_material(tester, None, |material| (material.color, material.r#type));
-            assert_eq!(color, Some(theme.color_scheme.surface.with_opacity(0.0)));
+            assert_eq!(color, Some(theme.color_scheme.surface().with_opacity(0.0)));
             assert_eq!(material_type, MaterialType::Button);
         });
     }
@@ -2709,7 +2709,7 @@ pub(crate) mod tests {
 
             let (color, material_type) =
                 button_material(tester, None, |material| (material.color, material.r#type));
-            assert_eq!(color, Some(theme.color_scheme.primary.with_opacity(0.12)));
+            assert_eq!(color, Some(theme.color_scheme.primary().with_opacity(0.12)));
             assert_eq!(material_type, MaterialType::Button);
         });
     }
@@ -2723,7 +2723,7 @@ pub(crate) mod tests {
 
             let (color, material_type) =
                 button_material(tester, None, |material| (material.color, material.r#type));
-            assert_eq!(color, Some(theme.color_scheme.surface.with_opacity(0.0)));
+            assert_eq!(color, Some(theme.color_scheme.surface().with_opacity(0.0)));
             assert_eq!(material_type, MaterialType::Button);
         });
     }
@@ -2760,7 +2760,7 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let theme = default_theme(tester);
             let selected_fill_color = Colors::YELLOW.primary();
-            let unselected = Some(theme.color_scheme.surface.with_opacity(0.0));
+            let unselected = Some(theme.color_scheme.surface().with_opacity(0.0));
 
             tester.pump_widget(boilerplate(
                 theme.clone(),
@@ -2916,7 +2916,7 @@ pub(crate) mod tests {
     fn the_default_ink_colors_of_an_unselected_button() {
         test_widgets(|tester| {
             let theme = default_theme(tester);
-            let on_surface = theme.color_scheme.on_surface;
+            let on_surface = theme.color_scheme.on_surface();
             check_ink_colors(
                 tester,
                 |focus_node| {
@@ -2942,7 +2942,7 @@ pub(crate) mod tests {
     fn the_default_ink_colors_of_a_selected_button() {
         test_widgets(|tester| {
             let theme = default_theme(tester);
-            let primary = theme.color_scheme.primary;
+            let primary = theme.color_scheme.primary();
             check_ink_colors(
                 tester,
                 |focus_node| {
@@ -3030,7 +3030,7 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             let theme = default_theme(tester);
             let border = (
-                theme.color_scheme.on_surface.with_opacity(0.12),
+                theme.color_scheme.on_surface().with_opacity(0.12),
                 DEFAULT_BORDER_WIDTH,
             );
             for (selected, enabled) in [(false, true), (true, true), (false, false)] {
@@ -3332,7 +3332,7 @@ pub(crate) mod tests {
                     .on_pressed(|_app, _index| {}),
             ));
             let border = (
-                theme.color_scheme.on_surface.with_opacity(0.12),
+                theme.color_scheme.on_surface().with_opacity(0.12),
                 DEFAULT_BORDER_WIDTH,
             );
             let objects = select_toggle_button_objects(tester);
@@ -3392,7 +3392,7 @@ pub(crate) mod tests {
             );
 
             let border = (
-                theme.color_scheme.on_surface.with_opacity(0.12),
+                theme.color_scheme.on_surface().with_opacity(0.12),
                 DEFAULT_BORDER_WIDTH,
             );
             let objects = select_toggle_button_objects(tester);
@@ -3586,7 +3586,7 @@ pub(crate) mod tests {
                 );
 
                 let border = (
-                    theme.color_scheme.on_surface.with_opacity(0.12),
+                    theme.color_scheme.on_surface().with_opacity(0.12),
                     DEFAULT_BORDER_WIDTH,
                 );
                 let render = select_toggle_button_objects(tester)[0].as_object();

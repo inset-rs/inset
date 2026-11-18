@@ -506,7 +506,7 @@ pub fn default_app_bar_theme(
 ) -> ThemeData {
     let theme = Theme::of(app, context);
     let color_scheme = &theme.color_scheme;
-    let dark = color_scheme.brightness == waft_embedder::Brightness::Dark;
+    let dark = color_scheme.brightness() == waft_embedder::Brightness::Dark;
     let input_decoration_theme = data
         .search_field_decoration_theme
         .clone()
