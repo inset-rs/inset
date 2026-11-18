@@ -40,7 +40,7 @@ pub struct SelectionArea {
     /// The delegate that builds the selection handles and toolbar; one of the platform's own
     /// when `None`.
     pub selection_controls: Option<Rc<dyn TextSelectionControls>>,
-    /// Builds the context menu; this platform's when `None`.
+    /// Builds the context menu; `None` shows none.
     pub context_menu_builder: Option<SelectableRegionContextMenuBuilder>,
     /// Called when the selected content changes.
     pub on_selection_changed: Option<ValueChanged<Option<SelectedContent>>>,
@@ -56,7 +56,7 @@ impl SelectionArea {
             magnifier_configuration: None,
             focus_node: None,
             selection_controls: None,
-            context_menu_builder: None,
+            context_menu_builder: Some(Rc::new(Self::default_context_menu_builder)),
             on_selection_changed: None,
             child: child.into_widget(),
         }
@@ -86,9 +86,9 @@ impl SelectionArea {
     /// Dart `SelectionArea(contextMenuBuilder:)`.
     pub fn context_menu_builder(
         mut self,
-        context_menu_builder: SelectableRegionContextMenuBuilder,
+        context_menu_builder: Option<SelectableRegionContextMenuBuilder>,
     ) -> SelectionArea {
-        self.context_menu_builder = Some(context_menu_builder);
+        self.context_menu_builder = context_menu_builder;
         self
     }
 
@@ -150,13 +150,11 @@ pub struct SelectionAreaState {
 
 impl SelectionAreaState {
     /// The state of the [`SelectableRegion`] this area wraps.
-    pub fn selectable_region(
-        self: Handle<Self>,
-        app: &App,
-    ) -> Option<Handle<SelectableRegionState>> {
+    pub fn selectable_region(self: Handle<Self>, app: &App) -> Handle<SelectableRegionState> {
         app.get(self)
             .selectable_region_key
             .current_state::<SelectableRegionState>(app)
+            .expect("the area has built its region")
     }
 }
 
@@ -201,14 +199,13 @@ impl State for SelectionAreaState {
         let region_key = app.get(self).selectable_region_key.clone();
         let mut region = SelectableRegion::new(controls, child)
             .key(KeyRef::Global(region_key))
-            .context_menu_builder(
-                context_menu_builder
-                    .unwrap_or_else(|| Rc::new(SelectionArea::default_context_menu_builder)),
-            )
             .magnifier_configuration(
                 magnifier_configuration
                     .unwrap_or_else(|| TextMagnifier::adaptive_magnifier_configuration(app)),
             );
+        if let Some(context_menu_builder) = context_menu_builder {
+            region = region.context_menu_builder(context_menu_builder);
+        }
         if let Some(focus_node) = focus_node {
             region = region.focus_node(focus_node);
         }

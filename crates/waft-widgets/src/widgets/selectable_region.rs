@@ -20,14 +20,13 @@ use std::any::TypeId;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::Duration;
 
 use waft_embedder::{
     AppLifecycleState, Offset, PointerDeviceKind, Rect, TargetPlatform, TextDirection, clamp_double,
 };
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener,
-    PRECISION_ERROR_TOLERANCE, Ref, ValueChanged, ValueNotifier,
+    PRECISION_ERROR_TOLERANCE, Ref, ValueChanged, ValueListenable, ValueListenableHandle,
 };
 use waft_gestures::{
     BaseTapAndDragGestureRecognizer, DragEndDetails, DragStartBehavior, DragStartDetails,
@@ -52,7 +51,10 @@ use waft_services::{
 use crate::framework::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
-use crate::widgets::actions::{ActionRef, Actions, CallbackAction, DismissIntent};
+use crate::widgets::actions::{
+    Action, ActionData, ActionRef, Actions, AnyAction, CallbackAction, ContextAction,
+    DismissIntent, Intent,
+};
 use crate::widgets::basic::CompositedTransformTarget;
 use crate::widgets::context_menu_button_item::{ContextMenuButtonItem, ContextMenuButtonType};
 use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf, FocusNodeRef};
@@ -2690,17 +2692,77 @@ pub enum SelectableRegionSelectionStatus {
 pub type SelectableRegionContextMenuBuilder =
     Rc<dyn Fn(&mut App, BuildContext, Handle<SelectableRegionState>) -> WidgetRef>;
 
+/// Notifies its listeners when the [`SelectableRegion`] that created this object is changing
+/// or finalizes its selection.
+///
+/// To access the notifier from the nearest [`SelectableRegion`] ancestor, use
+/// [`SelectableRegionSelectionStatusScope::maybe_of`].
+pub struct SelectableRegionSelectionStatusNotifier {
+    change_notifier: ChangeNotifierData,
+    selectable_region_selection_status: SelectableRegionSelectionStatus,
+}
+
+impl SelectableRegionSelectionStatusNotifier {
+    fn new() -> SelectableRegionSelectionStatusNotifier {
+        SelectableRegionSelectionStatusNotifier {
+            change_notifier: ChangeNotifierData::new(),
+            selectable_region_selection_status: SelectableRegionSelectionStatus::Finalized,
+        }
+    }
+
+    /// Sets the [`SelectableRegionSelectionStatus`] for the [`SelectableRegion`] that owns this
+    /// object.
+    ///
+    /// Listeners are notified even if the value did not change.
+    fn set_value(self: Handle<Self>, app: &mut App, new_status: SelectableRegionSelectionStatus) {
+        debug_assert!(
+            new_status == SelectableRegionSelectionStatus::Finalized
+                && *self.value_of(app) == SelectableRegionSelectionStatus::Changing
+                || new_status == SelectableRegionSelectionStatus::Changing,
+            "Attempting to finalize the selection when it is already finalized."
+        );
+        app.get_mut(self).selectable_region_selection_status = new_status;
+        self.notify_listeners(app);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        ChangeNotifierData::dispose(app, self);
+    }
+}
+
+impl ChangeNotifier for SelectableRegionSelectionStatusNotifier {
+    fn change_notifier_data(&self) -> &ChangeNotifierData {
+        &self.change_notifier
+    }
+
+    fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+        &mut self.change_notifier
+    }
+}
+
+impl ValueListenableHandle<SelectableRegionSelectionStatus>
+    for Handle<SelectableRegionSelectionStatusNotifier>
+{
+    /// The current value of the [`SelectableRegionSelectionStatus`] of the [`SelectableRegion`]
+    /// that owns this object.
+    ///
+    /// Defaults to [`SelectableRegionSelectionStatus::Finalized`].
+    fn value_of(self, app: &App) -> &SelectableRegionSelectionStatus {
+        &app.get(self).selectable_region_selection_status
+    }
+}
+
 /// An inherited widget that hosts a [`SelectableRegion`]'s selection status notifier.
 pub struct SelectableRegionSelectionStatusScope {
     pub key: Option<KeyRef>,
-    notifier: Ref<ValueNotifier<SelectableRegionSelectionStatus>>,
+    notifier: Ref<SelectableRegionSelectionStatusNotifier>,
     child: WidgetRef,
 }
 
 impl SelectableRegionSelectionStatusScope {
     /// Creates the scope; Dart's private constructor.
     pub fn new<K: 'static>(
-        notifier: Ref<ValueNotifier<SelectableRegionSelectionStatus>>,
+        notifier: Ref<SelectableRegionSelectionStatusNotifier>,
         child: impl IntoWidget<K>,
     ) -> SelectableRegionSelectionStatusScope {
         SelectableRegionSelectionStatusScope {
@@ -2720,10 +2782,13 @@ impl SelectableRegionSelectionStatusScope {
     pub fn maybe_of(
         app: &mut App,
         context: BuildContext,
-    ) -> Option<Ref<ValueNotifier<SelectableRegionSelectionStatus>>> {
+    ) -> Option<Rc<dyn ValueListenable<SelectableRegionSelectionStatus>>> {
         context
             .depend_on_inherited_widget_of_exact_type::<SelectableRegionSelectionStatusScope>(app)
-            .map(|scope| scope.notifier.clone())
+            .map(|scope| {
+                Rc::new(scope.notifier.clone())
+                    as Rc<dyn ValueListenable<SelectableRegionSelectionStatus>>
+            })
     }
 }
 
@@ -2895,12 +2960,15 @@ impl StatefulWidget for SelectableRegion {
             is_shift_pressed: false,
             selection_start_position: None,
             selection_end_position: None,
+            selection_start_handle_drag_position: Offset::ZERO,
+            selection_end_handle_drag_position: Offset::ZERO,
             scheduled_selection_start_edge_update: false,
             scheduled_selection_end_edge_update: false,
             adjusting_selection_end: None,
             directional_horizontal_baseline: None,
             local_focus_node: None,
             gesture_recognizers: None,
+            actions: None,
             selection_status_notifier: None,
         }
     }
@@ -2928,13 +2996,17 @@ pub struct SelectableRegionState {
     is_shift_pressed: bool,
     selection_start_position: Option<Offset>,
     selection_end_position: Option<Offset>,
+    selection_start_handle_drag_position: Offset,
+    selection_end_handle_drag_position: Offset,
     scheduled_selection_start_edge_update: bool,
     scheduled_selection_end_edge_update: bool,
     adjusting_selection_end: Option<bool>,
     directional_horizontal_baseline: Option<f64>,
     local_focus_node: Option<Ref<FocusNode>>,
     gesture_recognizers: Option<GestureRecognizerFactories>,
-    selection_status_notifier: Option<Ref<ValueNotifier<SelectableRegionSelectionStatus>>>,
+    /// Dart's `late final _actions`, built on the first build.
+    actions: Option<HashMap<TypeId, ActionRef>>,
+    selection_status_notifier: Option<Ref<SelectableRegionSelectionStatusNotifier>>,
 }
 
 impl SelectableRegionState {
@@ -2960,7 +3032,7 @@ impl SelectableRegionState {
     fn selection_status_notifier(
         self: Handle<Self>,
         app: &App,
-    ) -> Ref<ValueNotifier<SelectableRegionSelectionStatus>> {
+    ) -> Ref<SelectableRegionSelectionStatusNotifier> {
         app.get(self)
             .selection_status_notifier
             .as_ref()
@@ -2973,15 +3045,15 @@ impl SelectableRegionState {
         app: &mut App,
         status: SelectableRegionSelectionStatus,
     ) {
-        let notifier = self.selection_status_notifier(app);
-        if *notifier.value(app) != status {
-            notifier.set_value(app, status);
-        }
+        self.selection_status_notifier(app)
+            .handle()
+            .set_value(app, status);
     }
 
     fn finalize_selectable_region_status(self: Handle<Self>, app: &mut App) {
-        let notifier = self.selection_status_notifier(app);
-        if *notifier.value(app) != SelectableRegionSelectionStatus::Changing {
+        let notifier = self.selection_status_notifier(app).handle();
+        if notifier.value_of(app) != &SelectableRegionSelectionStatus::Changing {
+            // Don't finalize the selection again if it is not currently changing.
             return;
         }
         notifier.set_value(app, SelectableRegionSelectionStatus::Finalized);
@@ -3074,18 +3146,24 @@ impl SelectableRegionState {
             app.get_mut(self).scheduled_selection_end_edge_update = true;
             SchedulerBinding::add_post_frame_callback(
                 app,
-                FrameCallback::handle_method(self, Self::post_frame_end_edge_update),
+                FrameCallback::handle_method(self, move |this, app, _time_stamp| {
+                    this.post_frame_end_edge_update(app, text_granularity)
+                }),
                 None,
             );
         }
     }
 
-    fn post_frame_end_edge_update(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
+    fn post_frame_end_edge_update(
+        self: Handle<Self>,
+        app: &mut App,
+        text_granularity: Option<TextGranularity>,
+    ) {
         if !app.get(self).scheduled_selection_end_edge_update {
             return;
         }
         app.get_mut(self).scheduled_selection_end_edge_update = false;
-        self.trigger_selection_end_edge_update(app, None);
+        self.trigger_selection_end_edge_update(app, text_granularity);
     }
 
     /// Dart's `_triggerSelectionStartEdgeUpdate`.
@@ -3110,18 +3188,24 @@ impl SelectableRegionState {
             app.get_mut(self).scheduled_selection_start_edge_update = true;
             SchedulerBinding::add_post_frame_callback(
                 app,
-                FrameCallback::handle_method(self, Self::post_frame_start_edge_update),
+                FrameCallback::handle_method(self, move |this, app, _time_stamp| {
+                    this.post_frame_start_edge_update(app, text_granularity)
+                }),
                 None,
             );
         }
     }
 
-    fn post_frame_start_edge_update(self: Handle<Self>, app: &mut App, _time_stamp: Duration) {
+    fn post_frame_start_edge_update(
+        self: Handle<Self>,
+        app: &mut App,
+        text_granularity: Option<TextGranularity>,
+    ) {
         if !app.get(self).scheduled_selection_start_edge_update {
             return;
         }
         app.get_mut(self).scheduled_selection_start_edge_update = false;
-        self.trigger_selection_start_edge_update(app, None);
+        self.trigger_selection_start_edge_update(app, text_granularity);
     }
 
     /// Dart's `_stopSelectionEndEdgeUpdate`.
@@ -3617,7 +3701,7 @@ impl SelectableRegionState {
         details: TapDragDownDetails,
     ) {
         app.get_mut(self).last_pointer_device_kind = details.kind;
-        let kind = details.kind.unwrap_or(PointerDeviceKind::Touch);
+        let kind = details.kind;
         let platform = app.platform().target_platform();
         match self.effective_consecutive_tap_count(app, details.consecutive_tap_count) {
             1 => {
@@ -3631,14 +3715,10 @@ impl SelectableRegionState {
                             && self.selection_geometry(app).start_selection_point.is_some();
                         if is_shift_pressed_valid {
                             self.select_end_to(app, details.global_position, false, None);
-                            self.set_selection_status(
-                                app,
-                                SelectableRegionSelectionStatus::Changing,
-                            );
-                            return;
+                        } else {
+                            self.clear_selection(app);
+                            self.collapse_selection_at(app, details.global_position);
                         }
-                        self.clear_selection(app);
-                        self.collapse_selection_at(app, details.global_position);
                         self.set_selection_status(app, SelectableRegionSelectionStatus::Changing);
                     }
                 }
@@ -3646,13 +3726,15 @@ impl SelectableRegionState {
             2 => {
                 self.select_word_at(app, details.global_position);
                 self.set_selection_status(app, SelectableRegionSelectionStatus::Changing);
-                if platform == TargetPlatform::IOS && !Self::is_precise_pointer_device(kind) {
+                if platform == TargetPlatform::IOS
+                    && kind.is_some_and(|kind| !Self::is_precise_pointer_device(kind))
+                {
                     self.show_handles(app);
                 }
             }
             3 => match platform {
                 TargetPlatform::Android | TargetPlatform::Fuchsia | TargetPlatform::IOS => {
-                    if Self::is_precise_pointer_device(kind) {
+                    if kind.is_some_and(Self::is_precise_pointer_device) {
                         self.select_paragraph_at(app, details.global_position);
                         self.set_selection_status(app, SelectableRegionSelectionStatus::Changing);
                     }
@@ -3669,9 +3751,9 @@ impl SelectableRegionState {
 
     /// Dart's `_handleMouseDragStart`.
     fn handle_mouse_drag_start(self: Handle<Self>, app: &mut App, details: TapDragStartDetails) {
-        let kind = details.kind.unwrap_or(PointerDeviceKind::Touch);
+        let kind = details.kind;
         if self.effective_consecutive_tap_count(app, details.consecutive_tap_count) == 1 {
-            if !Self::is_precise_pointer_device(kind) {
+            if kind.is_some_and(|kind| !Self::is_precise_pointer_device(kind)) {
                 return;
             }
             self.select_start_to(app, details.global_position, false, None);
@@ -3682,11 +3764,11 @@ impl SelectableRegionState {
 
     /// Dart's `_handleMouseDragUpdate`.
     fn handle_mouse_drag_update(self: Handle<Self>, app: &mut App, details: TapDragUpdateDetails) {
-        let kind = details.kind.unwrap_or(PointerDeviceKind::Touch);
+        let kind = details.kind;
         let platform = app.platform().target_platform();
         match self.effective_consecutive_tap_count(app, details.consecutive_tap_count) {
             1 => {
-                if !Self::is_precise_pointer_device(kind) {
+                if kind.is_some_and(|kind| !Self::is_precise_pointer_device(kind)) {
                     return;
                 }
                 self.select_end_to(app, details.global_position, true, None);
@@ -3710,7 +3792,7 @@ impl SelectableRegionState {
                         Some(TextGranularity::Word),
                     );
                     self.set_selection_status(app, SelectableRegionSelectionStatus::Changing);
-                    if !Self::is_precise_pointer_device(kind) {
+                    if kind.is_some_and(|kind| !Self::is_precise_pointer_device(kind)) {
                         self.show_handles(app);
                     }
                 }
@@ -3726,7 +3808,7 @@ impl SelectableRegionState {
             },
             3 => match platform {
                 TargetPlatform::Android | TargetPlatform::Fuchsia | TargetPlatform::IOS => {
-                    if Self::is_precise_pointer_device(kind) {
+                    if kind.is_some_and(Self::is_precise_pointer_device) {
                         self.select_end_to(
                             app,
                             details.global_position,
@@ -3916,7 +3998,11 @@ impl SelectableRegionState {
     }
 
     /// Dart's `_determineIsAdjustingSelectionEnd`.
-    fn determine_is_adjusting_selection_end(self: Handle<Self>, app: &App, forward: bool) -> bool {
+    fn determine_is_adjusting_selection_end(
+        self: Handle<Self>,
+        app: &mut App,
+        forward: bool,
+    ) -> bool {
         if let Some(adjusting) = app.get(self).adjusting_selection_end {
             return adjusting;
         }
@@ -3934,9 +4020,10 @@ impl SelectableRegionState {
         } else {
             start.local_position.dx() > end.local_position.dx()
         };
-        let adjusting = forward != is_reversed;
-        // `_determineIsAdjustingSelectionEnd` caches its answer in Dart.
-        adjusting
+        // Always move the selection edge that increases the selection range.
+        let adjusting_selection_end = forward != is_reversed;
+        app.get_mut(self).adjusting_selection_end = Some(adjusting_selection_end);
+        adjusting_selection_end
     }
 
     /// Dart's `_granularlyExtendSelection`.
@@ -3951,7 +4038,6 @@ impl SelectableRegionState {
             return;
         }
         let is_end = self.determine_is_adjusting_selection_end(app, forward);
-        app.get_mut(self).adjusting_selection_end = Some(is_end);
         if let Some(selectable) = self.selectable(app) {
             selectable.dispatch_selection_event(
                 app,
@@ -3973,7 +4059,6 @@ impl SelectableRegionState {
             return;
         }
         let adjusting_selection_end = self.determine_is_adjusting_selection_end(app, forward);
-        app.get_mut(self).adjusting_selection_end = Some(adjusting_selection_end);
         let geometry = self.selection_geometry(app);
         let baseline_point = if adjusting_selection_end {
             geometry
@@ -4225,67 +4310,63 @@ impl SelectableRegionState {
         }
     }
 
-    /// Builds the actions a key press or a menu item runs.
+    /// Dart's `_actions`: the actions a key press or a menu item runs, each but the dismiss one
+    /// overridable by an ancestor `Actions`.
     fn build_actions(self: Handle<Self>, app: &mut App) -> HashMap<TypeId, ActionRef> {
+        let context = self.context(app);
         let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
-        let select_all = CallbackAction::<SelectAllTextIntent>::new(
+        let mut insert_overridable = |app: &mut App, intent: TypeId, action: ActionRef| {
+            actions.insert(intent, AnyAction::overridable(app, action, context));
+        };
+        // Dart's `_SelectAllAction`.
+        let select_all = NonOverrideAction::<SelectAllTextIntent>::new(
             app,
             Rc::new(move |app, _intent| {
                 self.select_all(app, Some(SelectionChangedCause::Keyboard));
-                None
             }),
         );
-        actions.insert(
+        insert_overridable(
+            app,
             TypeId::of::<SelectAllTextIntent>(),
             select_all.into_erased(),
         );
-        let copy = CallbackAction::<CopySelectionTextIntent>::new(
+        // Dart's `_CopySelectionAction`.
+        let copy = NonOverrideAction::<CopySelectionTextIntent>::new(
             app,
-            Rc::new(move |app, _intent| {
-                self.copy_selected_content(app);
-                None
-            }),
+            Rc::new(move |app, _intent| self.copy_selected_content(app)),
         );
-        actions.insert(TypeId::of::<CopySelectionTextIntent>(), copy.into_erased());
-        let dismiss = CallbackAction::<DismissIntent>::new(
+        insert_overridable(
             app,
-            Rc::new(move |app, intent| {
-                if self.hide_toolbar_if_visible(app) {
-                    None
-                } else {
-                    let context = self.context(app);
-                    Actions::invoke(app, context, intent)
-                }
-            }),
+            TypeId::of::<CopySelectionTextIntent>(),
+            copy.into_erased(),
         );
-        actions.insert(TypeId::of::<DismissIntent>(), dismiss.into_erased());
 
+        // Dart's `_GranularlyExtendSelectionAction`.
         macro_rules! granular_action {
             ($intent:ty, $granularity:expr) => {{
-                let action = CallbackAction::<$intent>::new(
+                let action = NonOverrideAction::<$intent>::new(
                     app,
-                    Rc::new(move |app, intent| {
+                    Rc::new(move |app, intent: &$intent| {
                         self.granularly_extend_selection(app, $granularity, intent.forward);
-                        None
                     }),
                 );
-                actions.insert(TypeId::of::<$intent>(), action.into_erased());
+                insert_overridable(app, TypeId::of::<$intent>(), action.into_erased());
             }};
         }
+        // Dart's `_GranularlyExtendCaretSelectionAction`.
         macro_rules! granular_caret_action {
             ($intent:ty, $granularity:expr) => {{
-                let action = CallbackAction::<$intent>::new(
+                let action = NonOverrideAction::<$intent>::new(
                     app,
-                    Rc::new(move |app, intent| {
+                    Rc::new(move |app, intent: &$intent| {
                         if intent.collapse_selection {
-                            // A selectable region never collapses its selection.
-                            return None;
+                            // Selectable region never collapses selection.
+                            return;
                         }
                         self.granularly_extend_selection(app, $granularity, intent.forward);
-                        None
                     }),
                 );
-                actions.insert(TypeId::of::<$intent>(), action.into_erased());
+                insert_overridable(app, TypeId::of::<$intent>(), action.into_erased());
             }};
         }
         granular_action!(
@@ -4303,24 +4384,38 @@ impl SelectableRegionState {
             TextGranularity::Word
         );
         granular_caret_action!(ExtendSelectionToLineBreakIntent, TextGranularity::Line);
+        // Dart's `_DirectionallyExtendCaretSelectionAction`.
+        let directional = NonOverrideAction::<ExtendSelectionVerticallyToAdjacentLineIntent>::new(
+            app,
+            Rc::new(move |app, intent| {
+                if intent.collapse_selection {
+                    // Selectable region never collapses selection.
+                    return;
+                }
+                self.directionally_extend_selection(app, intent.forward);
+            }),
+        );
+        insert_overridable(
+            app,
+            TypeId::of::<ExtendSelectionVerticallyToAdjacentLineIntent>(),
+            directional.into_erased(),
+        );
         granular_caret_action!(
             ExtendSelectionToDocumentBoundaryIntent,
             TextGranularity::Document
         );
-        let directional = CallbackAction::<ExtendSelectionVerticallyToAdjacentLineIntent>::new(
+        let dismiss = CallbackAction::<DismissIntent>::new(
             app,
             Rc::new(move |app, intent| {
-                if intent.collapse_selection {
-                    return None;
+                if self.hide_toolbar_if_visible(app) {
+                    None
+                } else {
+                    let context = self.context(app);
+                    Actions::invoke(app, context, intent)
                 }
-                self.directionally_extend_selection(app, intent.forward);
-                None
             }),
         );
-        actions.insert(
-            TypeId::of::<ExtendSelectionVerticallyToAdjacentLineIntent>(),
-            directional.into_erased(),
-        );
+        actions.insert(TypeId::of::<DismissIntent>(), dismiss.into_erased());
         actions
     }
 
@@ -4369,8 +4464,8 @@ impl SelectableRegionState {
         };
         let selectable = self.selectable(app).expect("a selection has a selectable");
         let global_transform = selectable.get_transform_to(app, None);
-        app.get_mut(self).selection_start_position =
-            Some(transform_point(&global_transform, start.local_position));
+        app.get_mut(self).selection_start_handle_drag_position =
+            transform_point(&global_transform, start.local_position);
         let info = self.build_info_for_magnifier(app, details.global_position, start);
         if let Some(overlay) = self.selection_overlay(app) {
             overlay.show_magnifier(app, info);
@@ -4386,12 +4481,13 @@ impl SelectableRegionState {
         let Some(start) = self.selection_geometry(app).start_selection_point else {
             return;
         };
-        let current = app
-            .get(self)
-            .selection_start_position
-            .unwrap_or(start.local_position);
-        let next = current + details.delta;
-        app.get_mut(self).selection_start_position = Some(next);
+        let drag_position = app.get(self).selection_start_handle_drag_position + details.delta;
+        let state = app.get_mut(self);
+        state.selection_start_handle_drag_position = drag_position;
+        // The value corresponds to the paint origin of the selection handle.
+        // Offset it to the center of the line to make it feel more natural.
+        state.selection_start_position =
+            Some(drag_position - Offset::new(0.0, start.line_height / 2.0));
         self.trigger_selection_start_edge_update(app, None);
         let info = self.build_info_for_magnifier(app, details.global_position, start);
         if let Some(overlay) = self.selection_overlay(app) {
@@ -4411,8 +4507,8 @@ impl SelectableRegionState {
         };
         let selectable = self.selectable(app).expect("a selection has a selectable");
         let global_transform = selectable.get_transform_to(app, None);
-        app.get_mut(self).selection_end_position =
-            Some(transform_point(&global_transform, end.local_position));
+        app.get_mut(self).selection_end_handle_drag_position =
+            transform_point(&global_transform, end.local_position);
         let info = self.build_info_for_magnifier(app, details.global_position, end);
         if let Some(overlay) = self.selection_overlay(app) {
             overlay.show_magnifier(app, info);
@@ -4428,12 +4524,13 @@ impl SelectableRegionState {
         let Some(end) = self.selection_geometry(app).end_selection_point else {
             return;
         };
-        let current = app
-            .get(self)
-            .selection_end_position
-            .unwrap_or(end.local_position);
-        let next = current + details.delta;
-        app.get_mut(self).selection_end_position = Some(next);
+        let drag_position = app.get(self).selection_end_handle_drag_position + details.delta;
+        let state = app.get_mut(self);
+        state.selection_end_handle_drag_position = drag_position;
+        // The value corresponds to the paint origin of the selection handle.
+        // Offset it to the center of the line to make it feel more natural.
+        state.selection_end_position =
+            Some(drag_position - Offset::new(0.0, end.line_height / 2.0));
         self.trigger_selection_end_edge_update(app, None);
         let info = self.build_info_for_magnifier(app, details.global_position, end);
         if let Some(overlay) = self.selection_overlay(app) {
@@ -4473,9 +4570,7 @@ impl State for SelectableRegionState {
         } else {
             None
         };
-        let selection_status_notifier = app.create(ValueNotifier::new(
-            SelectableRegionSelectionStatus::Finalized,
-        ));
+        let selection_status_notifier = app.create(SelectableRegionSelectionStatusNotifier::new());
         {
             let state = app.get_mut(self);
             state.selection_delegate = Some(delegate);
@@ -4498,30 +4593,33 @@ impl State for SelectableRegionState {
         if new_focus_node.as_ref().map(|node| node.id())
             != old_widget.focus_node.as_ref().map(|node| node.id())
         {
-            let old_has_focus = old_widget
-                .focus_node
-                .as_ref()
-                .map(|node| node.handle().has_focus(app))
-                .unwrap_or(false);
-            if old_widget.focus_node.is_some() && new_focus_node.is_none() {
-                // The local node replaces the removed one.
-                let local = FocusNode::new(app);
-                app.get_mut(self).local_focus_node = Some(local);
-            } else if old_widget.focus_node.is_none()
-                && new_focus_node.is_some()
-                && let Some(local) = app.get_mut(self).local_focus_node.take()
-            {
-                local.handle().remove_listener(
+            if old_widget.focus_node.is_none() && new_focus_node.is_some() {
+                if let Some(local) = app.get_mut(self).local_focus_node.take() {
+                    local.handle().remove_listener(
+                        app,
+                        &Listener::handle_method(self, Self::handle_focus_changed),
+                    );
+                    local.handle().dispose(app);
+                }
+            } else if let (None, Some(old_focus_node)) = (&new_focus_node, &old_widget.focus_node) {
+                old_focus_node.handle().remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_focus_changed),
                 );
+                // Dart's `_focusNode` creates the local node on first read.
+                let local = FocusNode::new(app);
+                app.get_mut(self).local_focus_node = Some(local);
             }
             self.focus_node(app).add_listener(
                 app,
                 Listener::handle_method(self, Self::handle_focus_changed),
             );
             let has_focus = self.focus_node(app).has_focus(app);
-            if has_focus != old_has_focus {
+            let old_has_focus = old_widget
+                .focus_node
+                .as_ref()
+                .map(|node| node.handle().has_focus(app));
+            if Some(has_focus) != old_has_focus {
                 self.handle_focus_changed(app);
             }
         }
@@ -4588,7 +4686,11 @@ impl State for SelectableRegionState {
             .gesture_recognizers
             .clone()
             .expect("the gestures are created in init_state");
-        let actions = self.build_actions(app);
+        if app.get(self).actions.is_none() {
+            let actions = self.build_actions(app);
+            app.get_mut(self).actions = Some(actions);
+        }
+        let actions = app.get(self).actions.clone().expect("built above");
         let focus_node = self.focus_node(app);
         let toolbar_layer_link = app
             .get(self)
@@ -4608,6 +4710,47 @@ impl State for SelectableRegionState {
         TapRegion::new(target)
             .group_id(TypeId::of::<SelectableRegion>())
             .into_widget()
+    }
+}
+
+/// Dart's `_NonOverrideAction`: an action that, when it overrides another, runs the action it
+/// overrides instead of its own body.
+///
+/// Dart's subclasses (`_SelectAllAction`, `_CopySelectionAction`, the granular and directional
+/// extend actions) are the `invoke_action` closures `SelectableRegionState::build_actions` gives.
+struct NonOverrideAction<T: Intent> {
+    action: ActionData,
+    invoke_action: Rc<dyn Fn(&mut App, &T)>,
+}
+
+impl<T: Intent> NonOverrideAction<T> {
+    fn new(app: &mut App, invoke_action: Rc<dyn Fn(&mut App, &T)>) -> Ref<NonOverrideAction<T>> {
+        app.create(NonOverrideAction {
+            action: ActionData::new(),
+            invoke_action,
+        })
+    }
+}
+
+impl<T: Intent> Action for NonOverrideAction<T> {
+    type Intent = T;
+    crate::action_accessors!();
+    crate::context_action_overrides!();
+}
+
+impl<T: Intent> ContextAction for NonOverrideAction<T> {
+    fn invoke(
+        self: Handle<Self>,
+        app: &mut App,
+        intent: &T,
+        _context: Option<BuildContext>,
+    ) -> Option<Rc<dyn std::any::Any>> {
+        if let Some(calling_action) = Action::calling_action(self, app) {
+            return calling_action.invoke(app, intent, None);
+        }
+        let invoke_action = Rc::clone(&app.get(self).invoke_action);
+        invoke_action(app, intent);
+        None
     }
 }
 
@@ -4653,6 +4796,7 @@ mod tests {
     use super::*;
     use crate::Placeholder;
     use crate::framework::{IntoWidget, WidgetRef};
+    use std::time::Duration;
     use waft_scheduler::{FrameTarget, SchedulerBinding};
 
     use crate::testing::{TestPointer, WidgetTester, find, test_widgets};
@@ -4955,60 +5099,6 @@ mod tests {
         })
     }
 
-    /// Selection controls that also mix in [`TextSelectionHandleControls`], so a region
-    /// leaves its toolbar to its context menu builder, as `testTextSelectionHandleControls`
-    /// does in Flutter's tests.
-    struct RegionHandleControls;
-
-    #[allow(deprecated)]
-    impl crate::widgets::text_selection::TextSelectionControls for RegionHandleControls {
-        fn build_handle(
-            &self,
-            _app: &mut App,
-            _context: BuildContext,
-            _handle_type: waft_rendering::TextSelectionHandleType,
-            _text_line_height: f64,
-            _on_tap: Option<Listener>,
-        ) -> WidgetRef {
-            crate::widgets::basic::SizedBox::shrink().into_widget()
-        }
-
-        fn get_handle_anchor(
-            &self,
-            _handle_type: waft_rendering::TextSelectionHandleType,
-            _text_line_height: f64,
-        ) -> Offset {
-            Offset::ZERO
-        }
-
-        fn build_toolbar(
-            &self,
-            _app: &mut App,
-            _context: BuildContext,
-            _global_editable_region: Rect,
-            _text_line_height: f64,
-            _selection_midpoint: Offset,
-            _endpoints: &[waft_rendering::TextSelectionPoint],
-            _delegate: waft_services::AnyTextSelectionDelegate,
-            _clipboard_status: Option<Ref<crate::widgets::text_selection::ClipboardStatusNotifier>>,
-            _last_secondary_tap_down_position: Option<Offset>,
-        ) -> WidgetRef {
-            crate::widgets::basic::SizedBox::shrink().into_widget()
-        }
-
-        fn get_handle_size(&self, _text_line_height: f64) -> Size {
-            Size::ZERO
-        }
-
-        fn as_text_selection_handle_controls(
-            &self,
-        ) -> Option<&dyn crate::widgets::text_selection::TextSelectionHandleControls> {
-            Some(self)
-        }
-    }
-
-    impl crate::widgets::text_selection::TextSelectionHandleControls for RegionHandleControls {}
-
     /// The paragraph showing `text`.
     fn paragraph_showing(tester: &WidgetTester, text: &str) -> RenderHandle<RenderParagraph> {
         let paragraphs = tester.all::<RenderParagraph>();
@@ -5173,7 +5263,7 @@ mod tests {
             let types = Rc::new(RefCell::new(Vec::new()));
             let types_log = Rc::clone(&types);
             let region = SelectableRegion::new(
-                Rc::new(RegionHandleControls),
+                Rc::new(crate::testing::TestTextSelectionHandleControls),
                 crate::widgets::basic::Column::new().children([
                     Text::new("How are you?").into_widget(),
                     Text::new("Good, and you?").into_widget(),
