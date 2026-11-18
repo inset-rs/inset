@@ -11,6 +11,41 @@
 //!
 //! `NSHTTPURLResponse` joins a repeated response header into one value, and says nothing of the
 //! protocol version, so a response answers each header once and as HTTP/1.1 whatever was spoken.
+//!
+//! ## Timeouts
+//!
+//! `between_bytes_timeout` is the request's `timeoutInterval`, which `NSURLSession` applies as
+//! the gap between pieces of data; `connect_timeout` and `first_byte_timeout` are timers this
+//! client starts itself from the request's start, the first until the response head arrives and
+//! the second until the first body byte does. `None` leaves the request interval at a day and the
+//! timers unstarted.
+//!
+//! ## Back-pressure
+//!
+//! A response's data is held in an unbounded queue as the session delivers it, up to
+//! [`BUFFER_LIMIT`] bytes: at that point the task is suspended, which stops the session reading
+//! from the network, and the reader resumes it once the queue falls below the limit. A slow
+//! reader therefore holds a bounded amount of memory while the connection stays open, and no
+//! received byte is dropped, which an HTTP body cannot be.
+//!
+//! ## `NSURLSession` failures as [`HttpError`]
+//!
+//! | `NSURLError` | [`HttpError`] |
+//! | --- | --- |
+//! | `TimedOut` (the request interval, between bytes) | `HttpResponseTimeout` |
+//! | `BadURL`, `UnsupportedURL` | `HttpRequestUriInvalid` |
+//! | `CannotFindHost`, `DNSLookupFailed` | `DnsError` |
+//! | `CannotConnectToHost` | `ConnectionRefused` |
+//! | `NetworkConnectionLost` | `ConnectionTerminated` |
+//! | `Cancelled` | `ConnectionTerminated` |
+//! | `NotConnectedToInternet`, `DataNotAllowed`, `InternationalRoamingOff`, `CallIsActive`, `ResourceUnavailable`, `CannotLoadFromNetwork` | `DestinationUnavailable` |
+//! | `HTTPTooManyRedirects` | `TooManyRedirects` |
+//! | `RedirectToNonExistentLocation` | `DestinationNotFound` |
+//! | `SecureConnectionFailed` | `TlsProtocolError` |
+//! | `ServerCertificateHasBadDate`, `ServerCertificateUntrusted`, `ServerCertificateHasUnknownRoot`, `ServerCertificateNotYetValid`, `ClientCertificateRejected`, `ClientCertificateRequired`, `AppTransportSecurityRequiresSecureConnection` | `TlsCertificateError` |
+//! | `UserCancelledAuthentication`, `UserAuthenticationRequired` | `HttpRequestDenied` |
+//! | `BadServerResponse`, `CannotParseResponse`, `ZeroByteResource`, `CannotDecodeRawData`, `CannotDecodeContentData` | `HttpProtocolError` |
+//! | anything else | `Internal`, with the system's description |
 #![allow(unsafe_code)]
 
 use std::collections::{BTreeMap, VecDeque};
@@ -18,27 +53,35 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
 use block2::DynBlock;
+use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, DispatchTime, GlobalQueueIdentifier};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode, Uri, Version};
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_foundation::{
     NSData, NSError, NSHTTPURLResponse, NSMutableURLRequest, NSOperationQueue, NSString, NSURL,
-    NSURLErrorBadServerResponse, NSURLErrorBadURL, NSURLErrorCannotConnectToHost,
-    NSURLErrorCannotParseResponse, NSURLErrorClientCertificateRejected,
-    NSURLErrorClientCertificateRequired, NSURLErrorHTTPTooManyRedirects,
-    NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateHasBadDate,
-    NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid,
-    NSURLErrorServerCertificateUntrusted, NSURLErrorTimedOut, NSURLErrorUnsupportedURL,
-    NSURLRequest, NSURLResponse, NSURLSession, NSURLSessionDataDelegate, NSURLSessionDataTask,
-    NSURLSessionDelegate, NSURLSessionResponseDisposition, NSURLSessionTask,
-    NSURLSessionTaskDelegate,
+    NSURLErrorAppTransportSecurityRequiresSecureConnection, NSURLErrorBadServerResponse,
+    NSURLErrorBadURL, NSURLErrorCallIsActive, NSURLErrorCancelled, NSURLErrorCannotConnectToHost,
+    NSURLErrorCannotDecodeContentData, NSURLErrorCannotDecodeRawData, NSURLErrorCannotFindHost,
+    NSURLErrorCannotLoadFromNetwork, NSURLErrorCannotParseResponse,
+    NSURLErrorClientCertificateRejected, NSURLErrorClientCertificateRequired,
+    NSURLErrorDNSLookupFailed, NSURLErrorDataNotAllowed, NSURLErrorHTTPTooManyRedirects,
+    NSURLErrorInternationalRoamingOff, NSURLErrorNetworkConnectionLost,
+    NSURLErrorNotConnectedToInternet, NSURLErrorRedirectToNonExistentLocation,
+    NSURLErrorResourceUnavailable, NSURLErrorSecureConnectionFailed,
+    NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateHasUnknownRoot,
+    NSURLErrorServerCertificateNotYetValid, NSURLErrorServerCertificateUntrusted,
+    NSURLErrorTimedOut, NSURLErrorUnsupportedURL, NSURLErrorUserAuthenticationRequired,
+    NSURLErrorUserCancelledAuthentication, NSURLErrorZeroByteResource, NSURLRequest, NSURLResponse,
+    NSURLSession, NSURLSessionDataDelegate, NSURLSessionDataTask, NSURLSessionDelegate,
+    NSURLSessionResponseDisposition, NSURLSessionTask, NSURLSessionTaskDelegate,
 };
 use waft_embedder::{
-    Body, BodyReadFuture, BodyStream, BodyTrailersFuture, HttpClient, HttpError, HttpFuture,
-    RedirectPolicy, SendOptions,
+    Body, BodyReadFuture, BodyStream, BodyTrailersFuture, DnsErrorPayload, HttpClient, HttpError,
+    HttpFuture, RedirectPolicy, SendOptions,
 };
 
 use crate::abort_on_panic;
@@ -123,9 +166,7 @@ impl HttpClient for AppleHttpClient {
                 length: head.length,
                 _transfer: transfer,
             });
-            answer
-                .body(body)
-                .map_err(|error| HttpError::Protocol(error.to_string()))
+            answer.body(body).map_err(|_| HttpError::HttpProtocolError)
         })
     }
 }
@@ -146,9 +187,14 @@ async fn load(
     let request = NSMutableURLRequest::new();
     request.setURL(Some(&url));
     request.setHTTPMethod(&NSString::from_str(&method));
-    if let Some(timeout) = options.timeout {
-        request.setTimeoutInterval(timeout.as_secs_f64());
-    }
+    // `NSURLSession` applies its request interval as the gap between pieces of data, which is
+    // WASI's between-bytes timeout. Without one, a day is far past any exchange.
+    request.setTimeoutInterval(
+        options
+            .between_bytes_timeout
+            .map(|timeout| timeout.as_secs_f64())
+            .unwrap_or(24.0 * 60.0 * 60.0),
+    );
     // `addValue` joins a repeated header's values with commas, as HTTP allows for every header
     // but `Set-Cookie`, which a request does not send.
     for (name, value) in &headers {
@@ -164,6 +210,23 @@ async fn load(
     exchanges
         .lock()
         .insert(task.taskIdentifier(), Arc::clone(&exchange));
+    exchange.set_task(&task);
+    if let Some(timeout) = options.connect_timeout {
+        start_timer(
+            Arc::clone(&exchange),
+            task.clone(),
+            timeout,
+            Timeout::Connect,
+        );
+    }
+    if let Some(timeout) = options.first_byte_timeout {
+        start_timer(
+            Arc::clone(&exchange),
+            task.clone(),
+            timeout,
+            Timeout::FirstByte,
+        );
+    }
     task.resume();
     Ok(Transfer { task, exchanges })
 }
@@ -171,9 +234,10 @@ async fn load(
 fn url_of(uri: &Uri) -> Result<Retained<NSURL>, HttpError> {
     let scheme = uri.scheme_str();
     if !matches!(scheme, Some("http") | Some("https")) || uri.host().is_none() {
-        return Err(HttpError::InvalidUrl);
+        return Err(HttpError::HttpRequestUriInvalid);
     }
-    NSURL::URLWithString(&NSString::from_str(&uri.to_string())).ok_or(HttpError::InvalidUrl)
+    NSURL::URLWithString(&NSString::from_str(&uri.to_string()))
+        .ok_or(HttpError::HttpRequestUriInvalid)
 }
 
 /// What keeps one request alive: its task, which is cancelled when this is dropped, and the
@@ -225,12 +289,24 @@ struct State {
     head: Option<Result<Head, HttpError>>,
     head_waiter: Option<Waker>,
     chunks: VecDeque<Vec<u8>>,
+    /// How many bytes the queue holds, which back-pressure bounds.
+    buffered: usize,
+    /// Whether the session's task is suspended for want of a reader.
+    paused: bool,
+    /// The task, for suspending and resuming it, and for the timers.
+    task: Option<Retained<NSURLSessionDataTask>>,
     body_waiter: Option<Waker>,
+    /// Whether a body byte has arrived since the head, which the first-byte timer watches.
+    first_body_byte: bool,
     ended: bool,
     error: Option<HttpError>,
     redirects_left: usize,
     redirect_policy: RedirectPolicy,
 }
+
+/// How much a response's delivered but unread data may hold before its task is suspended: 256
+/// KiB, plus at most the piece the session was already delivering.
+const BUFFER_LIMIT: usize = 256 * 1024;
 
 impl Exchange {
     fn new(options: &SendOptions) -> Exchange {
@@ -243,7 +319,11 @@ impl Exchange {
                 head: None,
                 head_waiter: None,
                 chunks: VecDeque::new(),
+                buffered: 0,
+                paused: false,
+                task: None,
                 body_waiter: None,
+                first_body_byte: false,
                 ended: false,
                 error: None,
                 redirects_left,
@@ -268,13 +348,57 @@ impl Exchange {
         wake(waiter);
     }
 
+    /// Stores the task, which the timers and back-pressure need.
+    fn set_task(&self, task: &Retained<NSURLSessionDataTask>) {
+        self.lock().task = Some(task.clone());
+    }
+
     fn chunk(&self, bytes: Vec<u8>) {
         let waiter = {
             let mut state = self.lock();
+            state.buffered += bytes.len();
+            state.first_body_byte = true;
             state.chunks.push_back(bytes);
+            if !state.paused && state.buffered >= BUFFER_LIMIT {
+                state.paused = true;
+                if let Some(task) = &state.task {
+                    task.suspend();
+                }
+            }
             state.body_waiter.take()
         };
         wake(waiter);
+    }
+
+    /// Fails the exchange as `error` unless `still_waiting` says the step it bounds is over,
+    /// and answers whether it failed; the caller cancels the task.
+    fn timed_out(&self, timeout: Timeout) -> bool {
+        let error = match timeout {
+            Timeout::Connect => HttpError::ConnectionTimeout,
+            Timeout::FirstByte => HttpError::HttpResponseTimeout,
+        };
+        let (failed, head_waiter, body_waiter) = {
+            let mut state = self.lock();
+            let waiting = !state.ended
+                && state.error.is_none()
+                && match timeout {
+                    Timeout::Connect => state.head.is_none(),
+                    Timeout::FirstByte => !state.first_body_byte,
+                };
+            if !waiting {
+                (false, None, None)
+            } else {
+                state.ended = true;
+                if state.head.is_none() {
+                    state.head = Some(Err(error.clone()));
+                }
+                state.error = Some(error);
+                (true, state.head_waiter.take(), state.body_waiter.take())
+            }
+        };
+        wake(head_waiter);
+        wake(body_waiter);
+        failed
     }
 
     fn finished(&self, error: Option<HttpError>) {
@@ -290,9 +414,10 @@ impl Exchange {
                 state.error = Some(error);
             }
             if state.head.is_none() {
-                let reason = state.error.clone().unwrap_or_else(|| {
-                    HttpError::Connection("the response ended without a head".to_owned())
-                });
+                let reason = state
+                    .error
+                    .clone()
+                    .unwrap_or(HttpError::ConnectionTerminated);
                 state.head = Some(Err(reason));
             }
             (state.head_waiter.take(), state.body_waiter.take())
@@ -308,9 +433,15 @@ impl Exchange {
         match state.redirect_policy {
             RedirectPolicy::Never => Redirect::Answer,
             RedirectPolicy::Follow { .. } if state.redirects_left == 0 => {
+                if state.error.is_none() && !state.ended {
+                    state.ended = true;
+                    if state.head.is_none() {
+                        state.head = Some(Err(HttpError::TooManyRedirects));
+                    }
+                    state.error = Some(HttpError::TooManyRedirects);
+                }
                 drop(state);
-                self.responded(Err(HttpError::TooManyRedirects));
-                self.lock().error.get_or_insert(HttpError::TooManyRedirects);
+                self.wake_all();
                 Redirect::Fail
             }
             RedirectPolicy::Follow { .. } => {
@@ -318,6 +449,16 @@ impl Exchange {
                 Redirect::Follow
             }
         }
+    }
+
+    /// Wakes both waiters, after a failure set by a timer or a redirect limit.
+    fn wake_all(&self) {
+        let (head_waiter, body_waiter) = {
+            let mut state = self.lock();
+            (state.head_waiter.take(), state.body_waiter.take())
+        };
+        wake(head_waiter);
+        wake(body_waiter);
     }
 }
 
@@ -395,6 +536,13 @@ impl HttpBodyStream {
             buf[..read].copy_from_slice(&chunk[..read]);
             if read < chunk.len() {
                 state.chunks.push_front(chunk[read..].to_vec());
+            }
+            state.buffered -= read;
+            if state.paused && state.buffered < BUFFER_LIMIT {
+                state.paused = false;
+                if let Some(task) = &state.task {
+                    task.resume();
+                }
             }
             return Poll::Ready(Ok(read));
         }
@@ -512,12 +660,10 @@ impl HttpDelegate {
 
 fn head_of(response: &NSURLResponse) -> Result<Head, HttpError> {
     let Some(response) = response.downcast_ref::<NSHTTPURLResponse>() else {
-        return Err(HttpError::Protocol(
-            "the response is not an HTTP response".to_owned(),
-        ));
+        return Err(HttpError::HttpProtocolError);
     };
     let status = StatusCode::from_u16(u16::try_from(response.statusCode()).unwrap_or(0))
-        .map_err(|_| HttpError::Protocol("the status is not an HTTP status".to_owned()))?;
+        .map_err(|_| HttpError::HttpProtocolError)?;
     let all = response.allHeaderFields();
     // SAFETY: the dictionary is the response's header fields, which are strings.
     let fields: &objc2_foundation::NSDictionary<NSString, NSString> =
@@ -556,25 +702,74 @@ fn head_of(response: &NSURLResponse) -> Result<Head, HttpError> {
     })
 }
 
-/// Why `NSURLSession` failed, in Waft's terms. A task this client cancels has no one waiting
-/// any more, or has failed already; one cancelled by anyone else ends short, which is an error.
+/// What a timer in the client bounds.
+#[derive(Clone, Copy)]
+enum Timeout {
+    /// From the task's start until the response head.
+    Connect,
+    /// From the response head until the first body byte.
+    FirstByte,
+}
+
+/// Starts `timeout` for `exchange`: when it fires, the exchange fails unless its step is over.
+fn start_timer(
+    exchange: Arc<Exchange>,
+    task: Retained<NSURLSessionDataTask>,
+    timeout: Duration,
+    which: Timeout,
+) {
+    let when = DispatchTime::try_from(timeout).unwrap_or(DispatchTime::FOREVER);
+    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+        DispatchQueueGlobalPriority::Default,
+    ));
+    let _ = queue.after(when, move || {
+        if exchange.timed_out(which) {
+            task.cancel();
+        }
+    });
+}
+
+/// Why `NSURLSession` failed, in WASI's terms. A task this client cancels has no one waiting any
+/// more, or has failed already; one cancelled by anyone else ends short, which is an error.
 #[allow(non_upper_case_globals, reason = "the codes keep Foundation's names")]
 fn error_of(error: &NSError) -> HttpError {
     let code = error.code();
     let reason = error.localizedDescription().to_string();
     match code {
-        NSURLErrorTimedOut => HttpError::Timeout,
-        NSURLErrorBadURL | NSURLErrorUnsupportedURL => HttpError::InvalidUrl,
+        NSURLErrorTimedOut => HttpError::HttpResponseTimeout,
+        NSURLErrorBadURL | NSURLErrorUnsupportedURL => HttpError::HttpRequestUriInvalid,
+        NSURLErrorCannotFindHost | NSURLErrorDNSLookupFailed => {
+            HttpError::DnsError(DnsErrorPayload {
+                rcode: Some(reason),
+                info_code: None,
+            })
+        }
+        NSURLErrorCannotConnectToHost => HttpError::ConnectionRefused,
+        NSURLErrorNetworkConnectionLost | NSURLErrorCancelled => HttpError::ConnectionTerminated,
+        NSURLErrorNotConnectedToInternet
+        | NSURLErrorDataNotAllowed
+        | NSURLErrorInternationalRoamingOff
+        | NSURLErrorCallIsActive
+        | NSURLErrorResourceUnavailable
+        | NSURLErrorCannotLoadFromNetwork => HttpError::DestinationUnavailable,
         NSURLErrorHTTPTooManyRedirects => HttpError::TooManyRedirects,
-        NSURLErrorCannotConnectToHost => HttpError::Refused(reason),
-        NSURLErrorSecureConnectionFailed
-        | NSURLErrorServerCertificateHasBadDate
+        NSURLErrorRedirectToNonExistentLocation => HttpError::DestinationNotFound,
+        NSURLErrorSecureConnectionFailed => HttpError::TlsProtocolError,
+        NSURLErrorServerCertificateHasBadDate
         | NSURLErrorServerCertificateUntrusted
         | NSURLErrorServerCertificateHasUnknownRoot
         | NSURLErrorServerCertificateNotYetValid
         | NSURLErrorClientCertificateRejected
-        | NSURLErrorClientCertificateRequired => HttpError::Tls(reason),
-        NSURLErrorBadServerResponse | NSURLErrorCannotParseResponse => HttpError::Protocol(reason),
-        _ => HttpError::Connection(reason),
+        | NSURLErrorClientCertificateRequired
+        | NSURLErrorAppTransportSecurityRequiresSecureConnection => HttpError::TlsCertificateError,
+        NSURLErrorUserCancelledAuthentication | NSURLErrorUserAuthenticationRequired => {
+            HttpError::HttpRequestDenied
+        }
+        NSURLErrorBadServerResponse
+        | NSURLErrorCannotParseResponse
+        | NSURLErrorZeroByteResource
+        | NSURLErrorCannotDecodeRawData
+        | NSURLErrorCannotDecodeContentData => HttpError::HttpProtocolError,
+        _ => HttpError::Internal(Some(reason)),
     }
 }

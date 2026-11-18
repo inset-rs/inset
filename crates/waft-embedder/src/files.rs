@@ -32,6 +32,10 @@ pub trait Files {
     /// What is in the folder at `path`, in no particular order.
     fn list(&self, path: &Path) -> ListFilesFuture;
 
+    /// Makes an empty folder at `path`, and the folders above it where they are missing, as
+    /// Dart's `Directory.create(recursive: true)` does. A folder already there is left as it is.
+    fn create_folder(&self, path: &Path) -> FileOperationFuture;
+
     /// Renames `from` to `to`, which may be in another folder.
     fn rename(&self, from: &Path, to: &Path) -> FileOperationFuture;
 

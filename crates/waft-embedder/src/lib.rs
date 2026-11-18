@@ -94,8 +94,9 @@ pub use fragment_shader::{
 pub use geometry::*;
 pub use hardware_buffers::{HardwareBuffer, HardwareBufferAllocator, HardwareBufferUsage};
 pub use http::{
-    Body, BodyReadAllFuture, BodyReadFuture, BodyStream, BodyTrailersFuture, HttpClient, HttpError,
-    HttpFuture, RedirectPolicy, SendOptions,
+    Body, BodyReadAllFuture, BodyReadFuture, BodyStream, BodyTrailersFuture, DnsErrorPayload,
+    FieldSizePayload, HttpClient, HttpError, HttpFuture, RedirectPolicy, SendOptions,
+    TlsAlertReceivedPayload,
 };
 pub use image::{
     ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition,

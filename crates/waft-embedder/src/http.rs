@@ -29,23 +29,33 @@ pub trait HttpClient {
     fn send(&self, request: Request<Body>, options: SendOptions) -> HttpFuture;
 }
 
-/// How a request follows redirects and how long it may take.
+/// How a request follows redirects and how long each step of it may take.
+///
+/// The three timeouts are WASI 0.3's `request-options`: how long connecting may take, how long
+/// the first byte of the response body may take after the head, and how long the gap between
+/// bytes of the body may take. Each `None` means no limit, as WASI's does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SendOptions {
     /// Which redirects the client follows.
     pub redirects: RedirectPolicy,
-    /// How long the whole exchange may take, from sending the request to the body's end, or
-    /// `None` for the client's own limit. A client reports [`HttpError::Timeout`] when it runs
-    /// out.
-    pub timeout: Option<Duration>,
+    /// WASI `connect-timeout`: how long the initial connection to the server may take.
+    pub connect_timeout: Option<Duration>,
+    /// WASI `first-byte-timeout`: how long the first byte of the response body may take after
+    /// the response head arrived.
+    pub first_byte_timeout: Option<Duration>,
+    /// WASI `between-bytes-timeout`: how long the gap between one piece of the response body and
+    /// the next may take.
+    pub between_bytes_timeout: Option<Duration>,
 }
 
 impl SendOptions {
-    /// Follow up to five redirects, and wait as long as the platform does.
+    /// Follow up to five redirects, and let every step take as long as the platform does.
     pub const fn new() -> SendOptions {
         SendOptions {
             redirects: RedirectPolicy::DEFAULT,
-            timeout: None,
+            connect_timeout: None,
+            first_byte_timeout: None,
+            between_bytes_timeout: None,
         }
     }
 
@@ -55,10 +65,22 @@ impl SendOptions {
         self
     }
 
-    /// How long the whole exchange may take. Dart's `HttpClient.connectionTimeout` bounds only
-    /// the connection; this bounds the response's head and body too.
-    pub fn timeout(mut self, timeout: Duration) -> SendOptions {
-        self.timeout = Some(timeout);
+    /// WASI `connect-timeout`: how long the initial connection may take.
+    pub fn connect_timeout(mut self, timeout: Duration) -> SendOptions {
+        self.connect_timeout = Some(timeout);
+        self
+    }
+
+    /// WASI `first-byte-timeout`: how long the first byte of the response body may take.
+    pub fn first_byte_timeout(mut self, timeout: Duration) -> SendOptions {
+        self.first_byte_timeout = Some(timeout);
+        self
+    }
+
+    /// WASI `between-bytes-timeout`: how long the gap between two pieces of the response body
+    /// may take.
+    pub fn between_bytes_timeout(mut self, timeout: Duration) -> SendOptions {
+        self.between_bytes_timeout = Some(timeout);
         self
     }
 }
@@ -95,38 +117,289 @@ impl Default for RedirectPolicy {
 }
 
 /// Why a request got no response, or its body stopped short.
+///
+/// WASI 0.3's `error-code` cases, Rust-named, so a WebAssembly component's adapter passes them
+/// through and every other platform maps its own failures into them; [`TooManyRedirects`] is
+/// Waft's, the one thing WASI leaves to the application.
+///
+/// [`TooManyRedirects`]: HttpError::TooManyRedirects
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HttpError {
-    /// The URI is not one a client can send to: it has no scheme, or no host.
-    InvalidUrl,
+    /// The DNS lookup did not finish in the time the platform allowed.
+    DnsTimeout,
+    /// The DNS lookup failed: `rcode` is the resolver's response code when it gave one, and
+    /// `info_code` its extended information code.
+    DnsError(DnsErrorPayload),
+    /// The destination host or path was not found.
+    DestinationNotFound,
+    /// The destination is temporarily unavailable.
+    DestinationUnavailable,
+    /// The destination's address is one the platform's policy forbids.
+    DestinationIpProhibited,
+    /// The destination's address cannot be routed from this network.
+    DestinationIpUnroutable,
     /// The server refused the connection.
-    Refused(String),
-    /// The connection failed, or ended before the body did.
-    Connection(String),
-    /// TLS refused the server's certificate, or the handshake failed.
-    Tls(String),
-    /// The exchange took longer than its timeout.
-    Timeout,
-    /// A redirect policy allowed fewer redirects than the server sent.
+    ConnectionRefused,
+    /// The connection ended before the exchange did.
+    ConnectionTerminated,
+    /// Connecting to the server took longer than [`SendOptions::connect_timeout`].
+    ConnectionTimeout,
+    /// Reading from the connection took longer than the platform allows.
+    ConnectionReadTimeout,
+    /// Writing to the connection took longer than the platform allows.
+    ConnectionWriteTimeout,
+    /// The platform's limit on open connections was reached.
+    ConnectionLimitReached,
+    /// TLS failed: the handshake or one of its records was not valid TLS.
+    TlsProtocolError,
+    /// TLS refused the server's certificate, or the server refused the client's.
+    TlsCertificateError,
+    /// The peer sent a TLS alert: `alert_id` is the alert's number when it gave one, and
+    /// `alert_message` its description.
+    TlsAlertReceived(TlsAlertReceivedPayload),
+    /// The platform's policy does not allow the request.
+    HttpRequestDenied,
+    /// The request must say its length, and does not.
+    HttpRequestLengthRequired,
+    /// The request body is larger than the platform allows; the limit, when it names one.
+    HttpRequestBodySize(Option<u64>),
+    /// The method is not a valid HTTP method.
+    HttpRequestMethodInvalid,
+    /// The URI is not one the client can send to.
+    HttpRequestUriInvalid,
+    /// The URI is longer than the platform allows.
+    HttpRequestUriTooLong,
+    /// The request's header section is larger than the platform allows; the limit, when it
+    /// names one.
+    HttpRequestHeaderSectionSize(Option<u32>),
+    /// One of the request's header fields is too large: which field, and the limit, when the
+    /// platform names them.
+    HttpRequestHeaderSize(Option<FieldSizePayload>),
+    /// The request's trailer section is larger than the platform allows; the limit, when it
+    /// names one.
+    HttpRequestTrailerSectionSize(Option<u32>),
+    /// One of the request's trailer fields is too large.
+    HttpRequestTrailerSize(FieldSizePayload),
+    /// The response ended before its head or body was whole.
+    HttpResponseIncomplete,
+    /// The response's header section is larger than the platform allows; the limit, when it
+    /// names one.
+    HttpResponseHeaderSectionSize(Option<u32>),
+    /// One of the response's header fields is too large.
+    HttpResponseHeaderSize(FieldSizePayload),
+    /// The response body is larger than the platform allows; the limit, when it names one.
+    HttpResponseBodySize(Option<u64>),
+    /// The response's trailer section is larger than the platform allows; the limit, when it
+    /// names one.
+    HttpResponseTrailerSectionSize(Option<u32>),
+    /// One of the response's trailer fields is too large.
+    HttpResponseTrailerSize(FieldSizePayload),
+    /// The response's transfer coding is one the platform does not take; its name, when known.
+    HttpResponseTransferCoding(Option<String>),
+    /// The response's content coding is one the platform does not take; its name, when known.
+    HttpResponseContentCoding(Option<String>),
+    /// The response did not arrive in time: its first body byte after the head, or the next one
+    /// after the last, took longer than [`SendOptions::first_byte_timeout`] or
+    /// [`SendOptions::between_bytes_timeout`] allowed.
+    HttpResponseTimeout,
+    /// The request's protocol upgrade failed.
+    HttpUpgradeFailed,
+    /// The server spoke something that is not valid HTTP.
+    HttpProtocolError,
+    /// A proxy on the way detected a loop.
+    LoopDetected,
+    /// The platform's HTTP implementation is not configured to send this request.
+    ConfigurationError,
+    /// A failure that fits no other case, with an unstructured description when one is known;
+    /// WASI warns that the string need not mean the same between implementations.
+    Internal(Option<String>),
+    /// A redirect policy allowed fewer redirects than the server sent. Not a WASI case: WASI
+    /// leaves the redirect limit to the application.
     TooManyRedirects,
-    /// The server answered something that is not HTTP, or the client could not read it.
-    Protocol(String),
+}
+
+/// The payload of [`HttpError::DnsError`], as WASI's `DNS-error-payload`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DnsErrorPayload {
+    /// The resolver's response code, when it gave one.
+    pub rcode: Option<String>,
+    /// The resolver's extended information code, when it gave one.
+    pub info_code: Option<u16>,
+}
+
+/// The payload of [`HttpError::TlsAlertReceived`], as WASI's `TLS-alert-received-payload`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TlsAlertReceivedPayload {
+    /// The alert's number, when the peer gave one.
+    pub alert_id: Option<u8>,
+    /// The alert's description, when the peer gave one.
+    pub alert_message: Option<String>,
+}
+
+/// A header or trailer field too large for the platform, as WASI's `field-size-payload`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldSizePayload {
+    /// The field's name, when the platform names it.
+    pub field_name: Option<String>,
+    /// The field's size, when the platform names it.
+    pub field_size: Option<u32>,
 }
 
 impl fmt::Display for HttpError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HttpError::InvalidUrl => {
-                formatter.write_str("the URL is not one an HTTP client can send to")
+            HttpError::DnsTimeout => formatter.write_str("the DNS lookup timed out"),
+            HttpError::DnsError(payload) => write!(
+                formatter,
+                "the DNS lookup failed: {}{}",
+                payload.rcode.as_deref().unwrap_or("no response code"),
+                payload
+                    .info_code
+                    .map(|code| format!(" (info code {code})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::DestinationNotFound => formatter.write_str("the destination was not found"),
+            HttpError::DestinationUnavailable => {
+                formatter.write_str("the destination is unavailable")
             }
-            HttpError::Refused(reason) => write!(formatter, "the connection was refused: {reason}"),
-            HttpError::Connection(reason) => write!(formatter, "the connection failed: {reason}"),
-            HttpError::Tls(reason) => write!(formatter, "TLS failed: {reason}"),
-            HttpError::Timeout => formatter.write_str("the request timed out"),
+            HttpError::DestinationIpProhibited => {
+                formatter.write_str("the destination's address is prohibited")
+            }
+            HttpError::DestinationIpUnroutable => {
+                formatter.write_str("the destination's address is unroutable")
+            }
+            HttpError::ConnectionRefused => formatter.write_str("the connection was refused"),
+            HttpError::ConnectionTerminated => formatter.write_str("the connection terminated"),
+            HttpError::ConnectionTimeout => formatter.write_str("the connection timed out"),
+            HttpError::ConnectionReadTimeout => {
+                formatter.write_str("reading from the connection timed out")
+            }
+            HttpError::ConnectionWriteTimeout => {
+                formatter.write_str("writing to the connection timed out")
+            }
+            HttpError::ConnectionLimitReached => {
+                formatter.write_str("the connection limit was reached")
+            }
+            HttpError::TlsProtocolError => formatter.write_str("TLS failed"),
+            HttpError::TlsCertificateError => {
+                formatter.write_str("the TLS certificate was refused")
+            }
+            HttpError::TlsAlertReceived(payload) => write!(
+                formatter,
+                "a TLS alert was received: {}",
+                payload.alert_message.as_deref().unwrap_or("no description")
+            ),
+            HttpError::HttpRequestDenied => formatter.write_str("the request was denied"),
+            HttpError::HttpRequestLengthRequired => {
+                formatter.write_str("the request must say its length")
+            }
+            HttpError::HttpRequestBodySize(limit) => write!(
+                formatter,
+                "the request body is too large{}",
+                limit
+                    .map(|limit| format!(" (limit {limit})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpRequestMethodInvalid => formatter.write_str("the method is not valid"),
+            HttpError::HttpRequestUriInvalid => formatter.write_str("the URI is not valid"),
+            HttpError::HttpRequestUriTooLong => formatter.write_str("the URI is too long"),
+            HttpError::HttpRequestHeaderSectionSize(limit) => write!(
+                formatter,
+                "the request's header section is too large{}",
+                limit
+                    .map(|limit| format!(" (limit {limit})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpRequestHeaderSize(field) => write_field_size(
+                formatter,
+                "a request header field is too large",
+                field.as_ref(),
+            ),
+            HttpError::HttpRequestTrailerSectionSize(limit) => write!(
+                formatter,
+                "the request's trailer section is too large{}",
+                limit
+                    .map(|limit| format!(" (limit {limit})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpRequestTrailerSize(field) => write_field_size(
+                formatter,
+                "a request trailer field is too large",
+                Some(field),
+            ),
+            HttpError::HttpResponseIncomplete => formatter.write_str("the response is incomplete"),
+            HttpError::HttpResponseHeaderSectionSize(limit) => write!(
+                formatter,
+                "the response's header section is too large{}",
+                limit
+                    .map(|limit| format!(" (limit {limit})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpResponseHeaderSize(field) => write_field_size(
+                formatter,
+                "a response header field is too large",
+                Some(field),
+            ),
+            HttpError::HttpResponseBodySize(limit) => write!(
+                formatter,
+                "the response body is too large{}",
+                limit
+                    .map(|limit| format!(" (limit {limit})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpResponseTrailerSectionSize(limit) => write!(
+                formatter,
+                "the response's trailer section is too large{}",
+                limit
+                    .map(|limit| format!(" (limit {limit})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpResponseTrailerSize(field) => write_field_size(
+                formatter,
+                "a response trailer field is too large",
+                Some(field),
+            ),
+            HttpError::HttpResponseTransferCoding(coding) => write!(
+                formatter,
+                "the response's transfer coding is not accepted{}",
+                coding
+                    .as_ref()
+                    .map(|coding| format!(" ({coding})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpResponseContentCoding(coding) => write!(
+                formatter,
+                "the response's content coding is not accepted{}",
+                coding
+                    .as_ref()
+                    .map(|coding| format!(" ({coding})"))
+                    .unwrap_or_default()
+            ),
+            HttpError::HttpResponseTimeout => formatter.write_str("the response timed out"),
+            HttpError::HttpUpgradeFailed => formatter.write_str("the protocol upgrade failed"),
+            HttpError::HttpProtocolError => formatter.write_str("the server spoke invalid HTTP"),
+            HttpError::LoopDetected => formatter.write_str("a proxy detected a loop"),
+            HttpError::ConfigurationError => {
+                formatter.write_str("the HTTP client is not configured for this request")
+            }
+            HttpError::Internal(reason) => match reason {
+                Some(reason) => write!(formatter, "HTTP failed: {reason}"),
+                None => formatter.write_str("HTTP failed"),
+            },
             HttpError::TooManyRedirects => formatter.write_str("too many redirects"),
-            HttpError::Protocol(reason) => write!(formatter, "HTTP failed: {reason}"),
         }
+    }
+}
+
+fn write_field_size(
+    formatter: &mut fmt::Formatter<'_>,
+    what: &str,
+    field: Option<&FieldSizePayload>,
+) -> fmt::Result {
+    match field.and_then(|field| field.field_name.as_deref()) {
+        Some(name) => write!(formatter, "{what}: {name}"),
+        None => formatter.write_str(what),
     }
 }
 
@@ -333,16 +606,22 @@ mod tests {
     }
 
     #[test]
-    fn send_options_default_to_five_redirects_and_the_clients_own_limit() {
+    fn send_options_default_to_five_redirects_and_no_timeouts() {
         let options = SendOptions::default();
         assert_eq!(options.redirects, RedirectPolicy::Follow { max: 5 });
-        assert_eq!(options.timeout, None);
+        assert_eq!(options.connect_timeout, None);
+        assert_eq!(options.first_byte_timeout, None);
+        assert_eq!(options.between_bytes_timeout, None);
         assert_eq!(RedirectPolicy::default(), options.redirects);
         let options = SendOptions::new()
             .redirects(RedirectPolicy::Never)
-            .timeout(Duration::from_secs(2));
+            .connect_timeout(Duration::from_secs(1))
+            .first_byte_timeout(Duration::from_secs(2))
+            .between_bytes_timeout(Duration::from_secs(3));
         assert_eq!(options.redirects, RedirectPolicy::Never);
-        assert_eq!(options.timeout, Some(Duration::from_secs(2)));
+        assert_eq!(options.connect_timeout, Some(Duration::from_secs(1)));
+        assert_eq!(options.first_byte_timeout, Some(Duration::from_secs(2)));
+        assert_eq!(options.between_bytes_timeout, Some(Duration::from_secs(3)));
     }
 
     #[test]
@@ -351,6 +630,21 @@ mod tests {
             HttpError::TooManyRedirects.to_string(),
             "too many redirects"
         );
-        assert_eq!(HttpError::Timeout.to_string(), "the request timed out");
+        assert_eq!(
+            HttpError::ConnectionTimeout.to_string(),
+            "the connection timed out"
+        );
+        assert_eq!(
+            HttpError::DnsError(DnsErrorPayload {
+                rcode: Some("NXDOMAIN".to_owned()),
+                info_code: None,
+            })
+            .to_string(),
+            "the DNS lookup failed: NXDOMAIN"
+        );
+        assert_eq!(
+            HttpError::Internal(Some("CORS".to_owned())).to_string(),
+            "HTTP failed: CORS"
+        );
     }
 }

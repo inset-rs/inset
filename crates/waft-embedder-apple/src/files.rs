@@ -65,6 +65,13 @@ impl Files for AppleFiles {
         off_main(Arc::clone(&self.dispatcher), move || list_in(&path))
     }
 
+    fn create_folder(&self, path: &Path) -> FileOperationFuture {
+        let path = path.to_owned();
+        off_main(Arc::clone(&self.dispatcher), move || {
+            fs::create_dir_all(path)
+        })
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> FileOperationFuture {
         let from = from.to_owned();
         let to = to.to_owned();
@@ -316,6 +323,18 @@ mod tests {
         assert_eq!(now(files.read(&path)).unwrap(), b"1ab45");
         now(file.set_len(4)).unwrap();
         assert_eq!(now(files.read(&path)).unwrap(), b"1ab4");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_folder_made_with_its_parents_is_a_folder() {
+        let root = temp("made");
+        let folder = root.join("photos/2026");
+        let files = files();
+        now(files.create_folder(&folder)).unwrap();
+        assert!(folder.is_dir());
+        assert_eq!(now(files.metadata(&folder)).unwrap().kind, FileKind::Folder);
+        now(files.create_folder(&folder)).unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
 

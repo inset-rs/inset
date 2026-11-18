@@ -205,22 +205,109 @@ fn a_request_carries_its_method_headers_and_body() {
 }
 
 #[test]
-fn a_server_that_takes_too_long_times_out() {
+fn a_connection_that_never_gets_a_head_times_out() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
     let address = listener.local_addr().unwrap();
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("a connection");
         read_request(&mut stream);
         thread::sleep(Duration::from_secs(2));
-        let _ = stream.write_all(&ok(b"late"));
     });
     let client = AppleHttpClient::new();
     let error = pollster::block_on(client.send(
-        get(&format!("http://{address}/slow")),
-        SendOptions::default().timeout(Duration::from_millis(200)),
+        get(&format!("http://{address}/silent")),
+        SendOptions::default().connect_timeout(Duration::from_millis(200)),
     ))
     .unwrap_err();
-    assert_eq!(error, HttpError::Timeout);
+    assert_eq!(error, HttpError::ConnectionTimeout);
+}
+
+#[test]
+fn a_server_that_never_sends_the_first_body_byte_times_out() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("a connection");
+        read_request(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+            .unwrap();
+        stream.flush().unwrap();
+        thread::sleep(Duration::from_secs(2));
+        let _ = stream.write_all(b"ok");
+    });
+    let client = AppleHttpClient::new();
+    // `NSURLSession` reports the head and body together for a body this small, so the timeout
+    // fails the exchange rather than only its body.
+    let error = pollster::block_on(client.send(
+        get(&format!("http://{address}/late-first-byte")),
+        SendOptions::default().first_byte_timeout(Duration::from_secs(1)),
+    ))
+    .unwrap_err();
+    assert_eq!(error, HttpError::HttpResponseTimeout);
+}
+
+#[test]
+fn a_body_that_pauses_between_bytes_times_out() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("a connection");
+        read_request(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+            .unwrap();
+        stream.write_all(b"o").unwrap();
+        stream.flush().unwrap();
+        thread::sleep(Duration::from_secs(3));
+        let _ = stream.write_all(b"k");
+    });
+    let client = AppleHttpClient::new();
+    let error = pollster::block_on(client.send(
+        get(&format!("http://{address}/slow-body")),
+        SendOptions::default().between_bytes_timeout(Duration::from_secs(1)),
+    ))
+    .unwrap_err();
+    assert_eq!(error, HttpError::HttpResponseTimeout);
+}
+
+#[test]
+fn a_body_larger_than_the_buffer_reads_whole_in_order() {
+    const LEN: usize = 1024 * 1024;
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("a connection");
+        read_request(&mut stream);
+        let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {LEN}\r\n\r\n");
+        stream.write_all(head.as_bytes()).unwrap();
+        stream.flush().unwrap();
+        let piece: Vec<u8> = (0..64 * 1024).map(|byte| byte as u8).collect();
+        for _ in 0..LEN / piece.len() {
+            stream.write_all(&piece).unwrap();
+        }
+    });
+    let client = AppleHttpClient::new();
+    let mut response = pollster::block_on(client.send(
+        get(&format!("http://{address}/large")),
+        SendOptions::default(),
+    ))
+    .expect("the head arrives");
+    let mut body = Vec::with_capacity(LEN);
+    let mut chunk = vec![0u8; 4 * 1024];
+    loop {
+        let read = pollster::block_on(response.body_mut().read(&mut chunk)).unwrap();
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
+    assert_eq!(body.len(), LEN);
+    assert!(
+        body.iter()
+            .enumerate()
+            .all(|(index, byte)| *byte as usize == index % 256)
+    );
 }
 
 #[test]
@@ -235,10 +322,7 @@ fn a_url_no_one_listens_on_is_refused() {
         SendOptions::default(),
     ))
     .unwrap_err();
-    assert!(
-        matches!(error, HttpError::Refused(_) | HttpError::Connection(_)),
-        "{error:?}"
-    );
+    assert_eq!(error, HttpError::ConnectionRefused);
 }
 
 #[test]
@@ -247,5 +331,5 @@ fn a_url_that_is_not_http_is_invalid() {
     let error =
         pollster::block_on(client.send(get("ftp://example.test/a"), SendOptions::default()))
             .unwrap_err();
-    assert_eq!(error, HttpError::InvalidUrl);
+    assert_eq!(error, HttpError::HttpRequestUriInvalid);
 }

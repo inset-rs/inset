@@ -55,17 +55,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — Waft's body reads through futures, which an `NSInputStream` cannot drive without blocking.
   Affect: an upload is held in memory on Apple; the interface still streams a request body for a host whose client can.
 
-- Change: redirect policy and timeout are per request (`SendOptions`), where Dart sets `followRedirects`, `maxRedirects` and `connectionTimeout` on the client.
-  Reason: language — a client here is shared and immutable, so what differs between calls travels with the call.
-  Affect: each call names its policy, and two requests to one client may differ.
+- Change: redirect policy and the three timeouts are per request (`SendOptions { redirects, connect_timeout, first_byte_timeout, between_bytes_timeout }`), where Dart sets `followRedirects`, `maxRedirects` and `connectionTimeout` on the client and has no first-byte or between-bytes bound.
+  Reason: language and interface — a client here is shared and immutable, and the timeouts are WASI 0.3's `request-options`, so a WebAssembly component passes them through.
+  Affect: each call names its policy and which steps are bounded; a timeout covers the whole exchange on Apple, where `NSURLSession` has no first-byte timer of its own.
 
-- Change: a failure is an `HttpError` naming an invalid URL, a refusal, a connection, TLS, a timeout, too many redirects or a protocol failure, where Dart throws `SocketException`, `HandshakeException`, `HttpException` and others.
-  Reason: language — a Rust error is matched rather than caught.
-  Affect: a caller matches `HttpError` and writes one error path.
+- Change: a failure is WASI 0.3's `error-code` cases, Rust-named, plus `TooManyRedirects`, where Dart throws `SocketException`, `HandshakeException`, `HttpException` and others.
+  Reason: interface — a WebAssembly component's adapter passes WASI's errors through, and another platform maps its own failures into the closest case.
+  Affect: a caller matches cases such as `ConnectionRefused`, `HttpRequestUriInvalid` and `HttpResponseTimeout`; each platform's module doc gives its mapping.
 
-- Change: the browser's client follows redirects up to the browser's own limit whatever `RedirectPolicy::Follow`'s `max`, fails with `TooManyRedirects` at the first redirect where the policy follows none, applies the page's CORS rules and proxy, and exposes no trailers.
-  Reason: platform — `fetch` takes no redirect limit, hides a redirect response from the page, and gives no trailers.
-  Affect: on the web a redirect limit above zero is the browser's, a redirect response cannot be read, and `BodyStream::trailers` answers `None`.
+- Change: the browser's client follows redirects up to the browser's own limit whatever `RedirectPolicy::Follow`'s `max`, fails with `TooManyRedirects` at the first redirect where the policy follows none, applies the page's CORS rules and proxy, restarts one timer for the head and then for each piece of the body, and exposes no trailers.
+  Reason: platform — `fetch` takes no redirect limit, hides a redirect response from the page, gives no connection callback to time separately, and gives no trailers.
+  Affect: on the web a redirect limit above zero is the browser's, a redirect response cannot be read, `connect_timeout` bounds the head and `first_byte_timeout` the body after it, and `BodyStream::trailers` answers `None`.
 
 ## files.rs → dart:io `File` / `RandomAccessFile`
 
@@ -85,9 +85,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: language — the modes are Rust values, and a write at an offset after opening in append mode is allowed, as Dart allows it.
   Affect: opening in an append mode places the cursor at the end; a later write at an offset stays at that offset.
 
-- Change: `metadata` and `list` answer `Metadata` and `ListedEntry` values, where dart:io answers `FileStat` and `FileSystemEntity` with their own methods.
-  Reason: language — plain values cross a host boundary unchanged.
-  Affect: a listing is a `Vec` of names, paths and kinds; a stat is a struct.
+- Change: `metadata` and `list` answer `Metadata` and `ListedEntry` values, where dart:io answers `FileStat` and `FileSystemEntity` with their own methods; `create_folder` makes a folder and its parents, as Dart's `Directory.create(recursive: true)` does.
+  Reason: language — plain values cross a host boundary unchanged, and a folder is made by the file system rather than a `Directory` object.
+  Affect: a listing is a `Vec` of names, paths and kinds; a stat is a struct; there is no `Directory` to hold.
 
 ## file_dialogs.rs → `file_selector` `XFile`
 

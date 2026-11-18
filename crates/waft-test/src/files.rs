@@ -218,6 +218,23 @@ impl Files for MemoryFiles {
         Box::pin(std::future::ready(Ok(listed)))
     }
 
+    fn create_folder(&self, path: &Path) -> FileOperationFuture {
+        let tree = self.0.borrow();
+        match tree.entries.get(path) {
+            Some(entry) if entry.kind != FileKind::Folder => {
+                return Box::pin(std::future::ready(Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "a file is there",
+                ))));
+            }
+            Some(_) => return Box::pin(std::future::ready(Ok(()))),
+            None => {}
+        }
+        drop(tree);
+        self.make_folder(path);
+        Box::pin(std::future::ready(Ok(())))
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> FileOperationFuture {
         let mut tree = self.0.borrow_mut();
         if !tree.entries.contains_key(from) {
@@ -413,6 +430,23 @@ mod tests {
         let mut file = now(files.open(Path::new("/a"), OpenMode::Read)).unwrap();
         assert!(now(file.write(b"y")).is_err());
         assert!(now(files.open(Path::new("/none"), OpenMode::Read)).is_err());
+    }
+
+    #[test]
+    fn a_folder_made_with_its_parents_is_listed() {
+        let files = MemoryFiles::new();
+        now(files.create_folder(Path::new("/photos/2026"))).unwrap();
+        assert_eq!(files.kind("/photos/2026"), Some(FileKind::Folder));
+        let listed = now(files.list(Path::new("/photos"))).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "2026");
+        assert_eq!(
+            now(files.metadata(Path::new("/photos/2026"))).unwrap().kind,
+            FileKind::Folder
+        );
+        now(files.create_folder(Path::new("/photos/2026"))).unwrap();
+        files.set_file("/photos/2026/a.png", b"x");
+        assert!(now(files.create_folder(Path::new("/photos/2026/a.png"))).is_err());
     }
 
     #[test]

@@ -150,16 +150,14 @@ impl HttpClient for MockHttpClient {
                 options,
             });
             let response = response.ok_or_else(|| {
-                HttpError::Connection(format!("no response is configured for {uri}"))
+                HttpError::Internal(Some(format!("no response is configured for {uri}")))
             })?;
             let mut answer = Response::builder().status(response.status);
             for (name, value) in &response.headers {
                 answer = answer.header(name, value);
             }
             let body = Body::from_stream(MockBodyStream::new(response));
-            answer
-                .body(body)
-                .map_err(|error| HttpError::Protocol(error.to_string()))
+            answer.body(body).map_err(|_| HttpError::HttpProtocolError)
         })
     }
 }
@@ -273,6 +271,6 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let error = now(client.send(request, SendOptions::default())).unwrap_err();
-        assert!(matches!(error, HttpError::Connection(_)));
+        assert!(matches!(error, HttpError::Internal(_)));
     }
 }

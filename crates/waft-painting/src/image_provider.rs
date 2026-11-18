@@ -1335,7 +1335,7 @@ mod tests {
     #[test]
     fn a_network_image_whose_client_fails_is_evicted() {
         // Flutter's "NetworkImage is evicted from cache on SocketException": no answer is
-        // configured, so the client fails the connection.
+        // configured, so the client fails the exchange.
         let cell = app_with(Some(MockHttpClient::new()), None);
         let provider = NetworkImage::new("https://example.test/testing.png");
         let stream = {
@@ -1357,7 +1357,13 @@ mod tests {
             );
         }
         settle(&cell, &|| failed.borrow().is_some());
-        assert!(failed.borrow().as_ref().unwrap().contains("connection"));
+        assert!(
+            failed
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .contains("no response is configured")
+        );
         let mut app = cell.borrow_mut();
         let cache = ImageCache::instance(&mut app);
         assert_eq!(cache.pending_image_count(&app), 0);

@@ -178,10 +178,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 
 **HTTP**
 - `Platform::http`, `HttpClient::send`, `Body`, `BodyStream`, `SendOptions`, `RedirectPolicy`, `HttpError`, the `http` crate's `Request`, `Response`, `Method`, `StatusCode`, `HeaderMap`, `Uri`
-- Send every method with the headers the app gives, answer the response once its head arrives with the body still streaming, honour the request's redirect policy and timeout, cancel a transfer whose future or response is dropped, and answer `None` where the host has no client. The client is the system's where it has one — `NSURLSession` on Apple's systems, `fetch` in a browser, the engine's asynchronous HTTP on a WebAssembly component — so the system's proxy, certificates and connection reuse apply. `NetworkImage` fetches through it.
+- Send every method with the headers the app gives, answer the response once its head arrives with the body still streaming, honour the request's redirect policy and its connect, first-byte and between-bytes timeouts, cancel a transfer whose future or response is dropped, and answer `None` where the host has no client. The client is the system's where it has one — `NSURLSession` on Apple's systems, `fetch` in a browser, the engine's asynchronous HTTP on a WebAssembly component — so the system's proxy, certificates and connection reuse apply. `NetworkImage` fetches through it.
 
 **Files**
-- `Platform::files`, `Files::read`, `write`, `open`, `metadata`, `list`, `rename`, `delete`, `File`, `OpenMode`, `Metadata`, `FileKind`, `ListedEntry`
+- `Platform::files`, `Files::read`, `write`, `open`, `metadata`, `list`, `create_folder`, `rename`, `delete`, `File`, `OpenMode`, `Metadata`, `FileKind`, `ListedEntry`
 - Read a path whole, write one whole, open one to read and write at an offset and stream, answer what a path is, what a folder holds, and rename and delete, each through a future; run blocking file work off the main thread on the host's threads, and answer `None` where the host has no file system, as a browser tab has none. `FileImage` and a picked path read through it; picked files are read by `PickedFile::read_all`, which takes it.
 
 Windows' and Linux's HTTP clients, Android's, and an image cache on disk are not built yet: their hosts answer `None` for HTTP and files until then.

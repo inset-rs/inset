@@ -334,6 +334,10 @@ mod tests {
             Box::pin(std::future::ready(Err(io::Error::other("unused"))))
         }
 
+        fn create_folder(&self, _path: &std::path::Path) -> FileOperationFuture {
+            Box::pin(std::future::ready(Err(io::Error::other("unused"))))
+        }
+
         fn rename(&self, _from: &std::path::Path, _to: &std::path::Path) -> FileOperationFuture {
             Box::pin(std::future::ready(Err(io::Error::other("unused"))))
         }

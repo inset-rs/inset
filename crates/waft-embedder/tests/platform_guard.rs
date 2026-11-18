@@ -2,24 +2,13 @@
 //! phone, a desktop and a browser is the platform's, which answers at run time; a `cfg` on the
 //! target in framework code is a platform check in the wrong layer.
 //!
-//! The crates this scans are the framework's, every `crates/waft-*` but `waft-embedder-*` and the
-//! host, tool and macro crates; test code is read out, since a test may be about one target. The
-//! few Flutter-shaped exceptions are named below with why they are not a platform in framework
-//! code.
+//! The crates this scans are the framework's: every crate in `crates/` but those named in
+//! `platform-guard-exempt-crates.txt`, which CI's thread check reads too. Test code is read out,
+//! since a test may be about one target. The few Flutter-shaped exceptions are named below with
+//! why they are not a platform in framework code.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// Crates that are not the framework: the platforms themselves (`waft-embedder-*`), the app entry
-/// and tools (`waft`, `waft-cli`, `waft-single-instance`), a test fixture crate, and a proc macro
-/// that writes the per-target entry points.
-const HOST_AND_TOOL_CRATES: &[&str] = &[
-    "waft",
-    "waft-cli",
-    "waft-single-instance",
-    "waft-macros",
-    "waft-winui-test-support",
-];
 
 /// The lines where a target switch is Flutter's own, not a platform check in the framework: a
 /// file and the text its line holds. Each names one switch, so a new one in the same file is
@@ -56,6 +45,7 @@ fn no_framework_crate_switches_on_the_target() {
         .parent()
         .expect("the repository root")
         .to_owned();
+    let exempt = exempt_crates(&root);
     let mut hits = Vec::new();
     for crate_dir in crate_dirs(&root.join("crates")) {
         let name = crate_dir
@@ -63,7 +53,7 @@ fn no_framework_crate_switches_on_the_target() {
             .expect("a crate folder's name")
             .to_string_lossy()
             .into_owned();
-        if name.starts_with("waft-embedder-") || HOST_AND_TOOL_CRATES.contains(&name.as_str()) {
+        if exempt.contains(&name) {
             continue;
         }
         let src = crate_dir.join("src");
@@ -81,6 +71,17 @@ fn no_framework_crate_switches_on_the_target() {
         "framework crates switch on the target; move each to the platform that answers it:\n{}",
         hits.join("\n")
     );
+}
+
+/// The crates the guard leaves alone, one name a line, comments read out.
+fn exempt_crates(root: &Path) -> Vec<String> {
+    fs::read_to_string(root.join("platform-guard-exempt-crates.txt"))
+        .expect("the guard's list of exempt crates")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn crate_dirs(crates: &Path) -> Vec<PathBuf> {
