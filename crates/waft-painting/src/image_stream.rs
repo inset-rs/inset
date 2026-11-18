@@ -86,8 +86,8 @@ type ImageChunkCallback = dyn Fn(&mut App, &ImageChunkEvent);
 /// An immutable notification of image bytes that have been incrementally loaded. Flutter
 /// `ImageChunkEvent`.
 ///
-/// A provider that reads a body in pieces reports one after each piece: a network image's
-/// bytes over the wire, or a file's from disk. The expected total is what lets a listener show
+/// A provider that reads a body in pieces reports one after each piece, as a network image does
+/// for its bytes over the wire; a file image, as Flutter's, reports none. The expected total is what lets a listener show
 /// how far along the load is; it is not the decoded image's size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageChunkEvent {
