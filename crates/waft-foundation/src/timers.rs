@@ -53,7 +53,8 @@ impl Timer {
 
     /// Dart's `Timer.tick`: the periods that elapsed before the timer's most recent fire, 1 in
     /// the first callback of a [`periodic`](Self::periodic) timer and 0 before one fires. A
-    /// cancelled timer reads 0 here, where Dart keeps the count it last had.
+    /// cancelled timer, or a one-shot that has fired, reads 0 here, where Dart keeps the count it
+    /// last had.
     pub fn tick(self, app: &App) -> u64 {
         app.timer_tick(self)
     }
