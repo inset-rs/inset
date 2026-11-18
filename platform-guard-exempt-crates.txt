@@ -1,0 +1,19 @@
+# Crates the layering guard leaves alone, read by CI's thread check and by
+# crates/waft-embedder/tests/platform_guard.rs.
+#
+# The platforms themselves: these are where the target's threads and its system APIs live.
+waft-embedder-android
+waft-embedder-apple
+waft-embedder-default
+waft-embedder-ios
+waft-embedder-web
+waft-embedder-winit
+# The application entry and its tools, which choose a host or run outside one.
+waft
+waft-cli
+# A system service of its own: the single-instance listener.
+waft-single-instance
+# A proc macro that writes each target's entry point.
+waft-macros
+# A fixture crate for the WinUI tests, not the framework.
+waft-winui-test-support

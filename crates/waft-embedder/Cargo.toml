@@ -18,6 +18,9 @@ test-support = ["dep:pollster"]
 serde = ["dep:serde"]
 
 [dependencies]
+# The request and response values of HTTP: methods, URIs, statuses and headers, whose shapes
+# every platform's client and the framework's own users share.
+http.workspace = true
 indexmap.workspace = true
 raw-window-handle.workspace = true
 pollster = { workspace = true, optional = true }

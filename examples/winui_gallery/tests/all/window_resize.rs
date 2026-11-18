@@ -67,7 +67,9 @@ fn host(view: &Rc<CaptureView>) -> TestPlatform {
     TestPlatform::new()
         .on(TargetPlatform::MacOS)
         .with_view(view.clone())
-        .with_font_source(|| Box::new(SystemFontSource::platform()))
+        .with_font_source(|| {
+            Box::new(SystemFontSource::new(valo_system_fonts::fontmgr::platform()))
+        })
 }
 
 #[test]

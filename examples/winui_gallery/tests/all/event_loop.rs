@@ -100,7 +100,9 @@ impl Platform for LoopPlatform {
         (id == ViewId(0)).then(|| self.view.clone() as ViewRef)
     }
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
-        Some(Box::new(SystemFontSource::platform()))
+        Some(Box::new(SystemFontSource::new(
+            valo_system_fonts::fontmgr::platform(),
+        )))
     }
 }
 

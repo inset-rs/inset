@@ -11,6 +11,8 @@ categories.workspace = true
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]
+# The request and response values a mock HTTP client answers with.
+http.workspace = true
 waft-embedder = { workspace = true, features = ["test-support"] }
 # The arena a leak snapshot reads.
 waft-foundation.workspace = true

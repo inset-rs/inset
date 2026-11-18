@@ -119,6 +119,10 @@ impl TargetPlatformVariant {
 }
 
 /// Runs `body` on a thread with [`MAIN_THREAD_STACK_SIZE`] of stack, re-raising its panic.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test case runs on a thread with a main thread's stack"
+)]
 fn on_main_thread_stack(body: impl FnOnce() + Send) {
     std::thread::scope(|scope| {
         let joined = std::thread::Builder::new()

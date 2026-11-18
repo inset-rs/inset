@@ -48,7 +48,9 @@ impl Fixture {
             .on(TargetPlatform::MacOS)
             .with_view(view.clone())
             .with_clipboard(Rc::new(clipboard.clone()))
-            .with_font_source(|| Box::new(SystemFontSource::platform()))
+            .with_font_source(|| {
+                Box::new(SystemFontSource::new(valo_system_fonts::fontmgr::platform()))
+            })
             .with_pixel_import(move |pixels| {
                 let renderer = renderer.renderer.borrow();
                 renderer.image_context().upload_pixels(pixels, false).ok()
@@ -57,7 +59,7 @@ impl Fixture {
         {
             let mut app = cell.borrow_mut();
             waft_painting::PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {
-                fonts.add_source(SystemFontSource::platform());
+                fonts.add_source(SystemFontSource::new(valo_system_fonts::fontmgr::platform()));
             });
             run(&mut app);
         }

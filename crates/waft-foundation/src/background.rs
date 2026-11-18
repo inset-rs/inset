@@ -73,6 +73,9 @@ fn lock<T>(handoff: &Mutex<Handoff<T>>) -> MutexGuard<'_, Handoff<T>> {
 
 #[cfg(test)]
 mod tests {
+    // A test starts the worker the host would, to cross a thread boundary for real.
+    #![allow(clippy::disallowed_methods)]
+
     use std::sync::mpsc;
     use std::task::Wake;
     use std::time::Duration;

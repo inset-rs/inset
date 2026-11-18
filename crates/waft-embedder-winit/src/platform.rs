@@ -36,9 +36,9 @@ use crate::windows_os::Windows;
 use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
     AppExit, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor,
-    Dispatcher, DockMenu, FileDialogs, FontSource, HardwareBuffer, HardwareBufferAllocator,
-    ImageCodecFuture, Locale, MediaAssets, MenuBar, Notifications, Opener, Platform, Players,
-    PointerReport, PopupMenus, RequestId, Screens, SignedDuration, SystemFontSource,
+    Dispatcher, DockMenu, FileDialogs, Files, FontSource, HardwareBuffer, HardwareBufferAllocator,
+    HttpClient, ImageCodecFuture, Locale, MediaAssets, MenuBar, Notifications, Opener, Platform,
+    Players, PointerReport, PopupMenus, RequestId, Screens, SignedDuration, SystemFontSource,
     TargetPlatform, TrayIcons, VideoFrame, VideoFrameReaders, ViewEmbedder, ViewError,
     ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
 };
@@ -81,6 +81,13 @@ pub struct WinitPlatform {
     tray_icons: Option<Rc<dyn TrayIcons>>,
     /// The system's file dialogs, where it has them (`file_dialogs.rs`).
     file_dialogs: Option<Rc<dyn FileDialogs>>,
+    /// `NSURLSession` on macOS (`waft-embedder-apple`'s `http`), and nothing elsewhere yet.
+    #[cfg(target_os = "macos")]
+    http: waft_embedder_apple::http::AppleHttpClient,
+    /// `std`'s file system on the embedder's threads on macOS (`waft-embedder-apple`'s `files`),
+    /// and nothing elsewhere yet.
+    #[cfg(target_os = "macos")]
+    files: waft_embedder_apple::files::AppleFiles,
     /// The system's opener, where it has one.
     opener: Option<Rc<dyn Opener>>,
     /// The system's notifications, where the app has them (`os/*/notifications`).
@@ -118,6 +125,12 @@ impl WinitPlatform {
                 .then(|| Windows::new(Rc::clone(&state), proxy.clone())),
             linux: cfg!(target_os = "linux").then(|| Linux::new(Rc::clone(&state))),
             file_dialogs: System::file_dialogs(ParentWindows::new(Rc::clone(&state))),
+            #[cfg(target_os = "macos")]
+            http: waft_embedder_apple::http::AppleHttpClient::new(),
+            #[cfg(target_os = "macos")]
+            files: waft_embedder_apple::files::AppleFiles::new(Arc::new(WinitDispatcher(
+                proxy.clone(),
+            ))),
             opener: System::opener(ParentWindows::new(Rc::clone(&state))),
             notifications: System::notifications(NotificationActivations::new(proxy.clone())),
             players: System::players(),
@@ -272,7 +285,15 @@ impl Platform for WinitPlatform {
 
     /// The OS font database, scanned on request; the shell asks once at start-up.
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
-        Some(Box::new(SystemFontSource::platform()))
+        Some(Box::new(SystemFontSource::new(
+            valo_system_fonts::fontmgr::platform(),
+        )))
+    }
+
+    /// The engine's default families on this OS (`txt/platform_mac.mm`, `platform_windows.cc`,
+    /// `platform_linux.cc`).
+    fn default_font_families(&self) -> Vec<String> {
+        waft_embedder::default_font_families(System::TARGET_PLATFORM)
     }
 
     fn compositor(&self) -> Option<Arc<dyn Compositor>> {
@@ -383,6 +404,30 @@ impl Platform for WinitPlatform {
 
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         self.file_dialogs.as_deref()
+    }
+
+    /// `NSURLSession` on macOS; none elsewhere until that host's client is written.
+    fn http(&self) -> Option<&dyn HttpClient> {
+        #[cfg(target_os = "macos")]
+        {
+            Some(&self.http)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    /// `std`'s file system on macOS; none elsewhere until that host's file system is written.
+    fn files(&self) -> Option<&dyn Files> {
+        #[cfg(target_os = "macos")]
+        {
+            Some(&self.files)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
     }
 
     fn players(&self) -> Option<&dyn Players> {

@@ -1,2 +1,9 @@
 # `Retained` hashes and compares by the object's id alone; its count's interior mutability never reaches a key.
 ignore-interior-mutability = ["waft_foundation::Retained", "waft_foundation::handle_map::Retained"]
+
+# A framework crate starts no thread of its own: a host's threads are its platform's, reached
+# through `Dispatcher`. `waft-embedder-*` crates are the platforms, and start the threads.
+disallowed-methods = [
+  { path = "std::thread::spawn", reason = "a framework crate starts no thread; ask the platform's Dispatcher" },
+  { path = "std::thread::Builder::spawn", reason = "a framework crate starts no thread; ask the platform's Dispatcher" },
+]

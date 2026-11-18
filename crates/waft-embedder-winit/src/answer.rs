@@ -12,6 +12,9 @@ use std::task::{Context, Poll, Waker};
 struct Shared<T> {
     answered: Option<T>,
     waiter: Option<Waker>,
+    /// Whether an answer was given, which tells a giver that gave one from one that gave none,
+    /// even after the app polled the answer away.
+    settled: bool,
 }
 
 /// The system's side: given once, from any thread, or the dropped answer if dropped unused.
@@ -29,6 +32,7 @@ pub(crate) fn answer<T>(if_dropped: T) -> (Answer<T>, Answered<T>) {
     let shared = Arc::new(Mutex::new(Shared {
         answered: None,
         waiter: None,
+        settled: false,
     }));
     (
         Answer {
@@ -58,14 +62,23 @@ impl<T> Drop for Answer<T> {
 fn give<T>(shared: &Mutex<Shared<T>>, answer: T) {
     let waiter = {
         let mut shared = locked(shared);
-        if shared.answered.is_some() {
+        if shared.settled {
             return;
         }
         shared.answered = Some(answer);
+        shared.settled = true;
         shared.waiter.take()
     };
     if let Some(waiter) = waiter {
         waiter.wake();
+    }
+}
+
+impl<T> Answered<T> {
+    /// Whether the system gave an answer, or the answer was dropped unused; the app may already
+    /// have polled it away.
+    pub(crate) fn settled(&self) -> bool {
+        locked(&self.0).settled
     }
 }
 

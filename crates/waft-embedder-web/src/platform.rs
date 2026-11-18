@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use waft_embedder::{
-    Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4,
+    Brightness, Clipboard, Dispatcher, FileDialogs, HttpClient, ImageCodecFuture, Matrix4,
     NotificationActivation, Notifications, Offset, Opener, Platform, Rect, Screen, Screens,
     SignedDuration, Size, SnapshotDelegate, SystemMouseCursorKind, TargetPlatform,
     TextEditingValue, TextInputConfiguration, TextInputHost, View, ViewFocusDirection,
@@ -20,6 +20,7 @@ use crate::dispatcher;
 use crate::file_dialogs::BrowserFileDialogs;
 use crate::font_fallback::ROBOTO;
 use crate::gpu::Gpu;
+use crate::http::BrowserHttpClient;
 use crate::notifications::BrowserNotifications;
 use crate::opener::BrowserOpener;
 use crate::text_input::{TextInputListener, WebTextInput};
@@ -50,6 +51,8 @@ pub struct WebPlatform {
     snapshots: RefCell<Option<SnapshotDelegate>>,
     /// The browser's notifications, where the page has them (`notifications.rs`).
     notifications: Option<BrowserNotifications>,
+    /// `fetch`, the page's HTTP (`http.rs`); there is no file system here.
+    http: BrowserHttpClient,
 }
 
 impl WebPlatform {
@@ -67,6 +70,7 @@ impl WebPlatform {
             images: RefCell::new(None),
             snapshots: RefCell::new(None),
             notifications: BrowserNotifications::new(),
+            http: BrowserHttpClient::new(),
         };
         dispatcher::install(
             Rc::clone(&platform.timer_wakeup),
@@ -220,6 +224,11 @@ impl Platform for WebPlatform {
     /// The browser's asynchronous clipboard (`clipboard.rs`).
     fn clipboard(&self) -> Option<&dyn Clipboard> {
         Some(&BrowserClipboard)
+    }
+
+    /// `fetch`, the page's HTTP (`http.rs`); the page has no file system for `files`.
+    fn http(&self) -> Option<&dyn HttpClient> {
+        Some(&self.http)
     }
 
     /// The browser's pickers (`file_dialogs.rs`).

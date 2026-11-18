@@ -138,7 +138,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — a desktop machine has no haptic engine and no status bar, and Flutter's own Linux and Windows embedders answer both with not-implemented.
   Affect: `HapticFeedback` calls are silent and the status-bar style a `CupertinoNavigationBar` asks for shows nowhere; the same calls work on a phone embedder.
 
-- Change: `Platform::font_source` is `SystemFontSource::platform()` over the OS font API.
+- Change: `Platform::font_source` is a `SystemFontSource` over the OS font API.
   Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
   Affect: text uses installed fonts, the Cupertino system-font names resolve to SF, and an uninstalled family falls back to whatever the OS picks for the character.
 

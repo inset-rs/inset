@@ -89,7 +89,7 @@ impl Wakes {
 }
 
 /// The host's threads as any thread reaches them: a wake goes through the main queue; work goes to
-/// a thread of its own.
+/// Grand Central Dispatch's worker pool (`waft-embedder-apple`'s `work_queue`), as on macOS.
 pub(crate) struct IosDispatcher(pub(crate) std::sync::Arc<Wakes>);
 
 impl Dispatcher for IosDispatcher {
@@ -102,9 +102,6 @@ impl Dispatcher for IosDispatcher {
     }
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
-        std::thread::Builder::new()
-            .name("waft-worker".into())
-            .spawn(work)
-            .expect("a thread for work off the main thread");
+        waft_embedder_apple::work_queue::run_off_main(work);
     }
 }

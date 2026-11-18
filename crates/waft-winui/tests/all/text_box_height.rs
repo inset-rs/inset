@@ -38,7 +38,9 @@ impl Fixture {
         let platform = TestPlatform::new()
             .on(TargetPlatform::MacOS)
             .with_view(Rc::new(TestView::new(800.0, 600.0)))
-            .with_font_source(|| Box::new(SystemFontSource::platform()));
+            .with_font_source(|| {
+                Box::new(SystemFontSource::new(valo_system_fonts::fontmgr::platform()))
+            });
         let cell = AppCell::with_platform(Rc::new(platform));
         {
             let mut app = cell.borrow_mut();

@@ -13,7 +13,7 @@ use waft_embedder::{OpenError, OpenFuture, Opener};
 use zbus::zvariant::{Fd, OwnedValue};
 
 use super::Linux;
-use super::portal::{self, Response, owned};
+use super::portal::{self, Closer, Response, owned};
 use crate::answer::answer;
 use crate::file_dialogs::ParentWindows;
 use crate::os::capabilities::SystemOpener;
@@ -33,9 +33,13 @@ impl Opener for PortalOpener {
     fn open_link(&self, link: &str) -> OpenFuture {
         let link = link.to_owned();
         on_a_thread(move || {
-            portal::request(OPEN_URI, "OpenURI", HashMap::new(), |options| {
-                ("", link.as_str(), options)
-            })
+            portal::request(
+                OPEN_URI,
+                "OpenURI",
+                HashMap::new(),
+                |options| ("", link.as_str(), options),
+                &Closer::new(),
+            )
         })
     }
 
@@ -68,9 +72,13 @@ fn with_file(path: &Path, method: &'static str) -> OpenFuture {
         if method == "OpenFile" {
             options.insert("ask", owned(false));
         }
-        portal::request(OPEN_URI, method, options, |options| {
-            ("", Fd::from(&file), options)
-        })
+        portal::request(
+            OPEN_URI,
+            method,
+            options,
+            |options| ("", Fd::from(&file), options),
+            &Closer::new(),
+        )
     })
 }
 
