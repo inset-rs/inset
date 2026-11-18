@@ -116,8 +116,8 @@ macro_rules! state_accessors {
 /// [`AnimationController`](crate::AnimationController) it drives. The app's own data is not
 /// state: it lives in an [`Entity`](waft_foundation::Entity), which a
 /// [`StatelessWidget`](crate::StatelessWidget) reads in `build` and is rebuilt by when it
-/// notifies. A stateful widget
-/// whose only job is to hold a counter or a fetched list is app data in the wrong place.
+/// notifies. A stateful widget whose only job is to hold a counter or a fetched list is app data
+/// in the wrong place.
 pub trait State: Sized + 'static {
     /// The widget this state belongs to; Dart's `State<T>` type argument.
     type Widget: StatefulWidget<State = Self>;
