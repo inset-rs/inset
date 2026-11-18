@@ -336,6 +336,7 @@ fn a_multiline_box_fills_the_height_its_pane_gives_it() {
     let elements = f.elements();
     let app = f.cell.borrow();
     let mut content_height = None;
+    let mut scroll_height = None;
     let mut scroll_extents = Vec::new();
     for element in &elements {
         let widget = element.widget(&app);
@@ -346,6 +347,13 @@ fn a_multiline_box_fills_the_height_its_pane_gives_it() {
                 .find_render_object(&app)
                 .and_then(|object| object.as_box())
                 .map(|object| object.size(&app).height());
+            if let Some(scrollable) = element.find_ancestor_state_of_type::<ScrollableState>(&app) {
+                let context = waft_widgets::State::context(scrollable, &app);
+                scroll_height = context
+                    .find_render_object(&app)
+                    .and_then(|object| object.as_box())
+                    .map(|object| object.size(&app).height());
+            }
         }
         if let Some(scrollable) = element.state_handle::<ScrollableState>(&app) {
             let position = scrollable.position(&app);
@@ -359,7 +367,11 @@ fn a_multiline_box_fills_the_height_its_pane_gives_it() {
     }
     assert!(
         content_height.is_some_and(|height| height > 200.0),
-        "the text area fills the pane, got {content_height:?}"
+        "the text area fills the pane, got {content_height:?} scroll {scroll_height:?}"
+    );
+    assert!(
+        scroll_height.is_some_and(|height| height > 200.0),
+        "the scrolling editor fills the pane, got {scroll_height:?}"
     );
     assert!(
         scroll_extents.iter().any(|extent| *extent > 0.0),
