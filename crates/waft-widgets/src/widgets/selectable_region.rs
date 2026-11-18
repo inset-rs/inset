@@ -5266,6 +5266,371 @@ mod tests {
         });
     }
 
+    /// `selectable_region_test.dart`'s `SelectionSpy`.
+    #[derive(Debug)]
+    struct SelectionSpy;
+
+    impl crate::framework::RenderObjectWidget for SelectionSpy {
+        type RenderObject = RenderSelectionSpy;
+
+        fn create_render_object(
+            &self,
+            app: &mut App,
+            context: BuildContext,
+        ) -> waft_rendering::AnyRenderObject {
+            let registrar = SelectionContainer::maybe_of(app, context);
+            let spy = RenderHandle::new_box(
+                app,
+                RenderSelectionSpy {
+                    render_object: waft_rendering::RenderObjectData::new(),
+                    render_box: waft_rendering::RenderBoxData::new(),
+                    selection_registrant: waft_rendering::SelectionRegistrantData::new(),
+                    listeners: Vec::new(),
+                    events: Vec::new(),
+                },
+            );
+            waft_rendering::SelectionRegistrant::set_registrar(spy.handle(), app, registrar);
+            spy.as_object()
+        }
+    }
+
+    impl crate::framework::LeafRenderObjectWidget for SelectionSpy {}
+
+    /// `selectable_region_test.dart`'s `RenderSelectionSpy`: records the events it is sent and
+    /// answers that the selection ends at it.
+    struct RenderSelectionSpy {
+        render_object: waft_rendering::RenderObjectData,
+        render_box: waft_rendering::RenderBoxData,
+        selection_registrant: waft_rendering::SelectionRegistrantData,
+        listeners: Vec<Listener>,
+        events: Vec<SelectionEvent>,
+    }
+
+    impl waft_rendering::RenderObject for RenderSelectionSpy {
+        waft_rendering::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let size = self.constraints(app).biggest();
+            self.set_size(app, size);
+        }
+
+        fn dispose(self: RenderHandle<Self>, app: &mut App) {
+            waft_rendering::SelectionRegistrant::dispose_selection_registrant(self.handle(), app);
+            waft_rendering::RenderObjectBase::dispose(self, app);
+        }
+    }
+
+    impl RenderBox for RenderSelectionSpy {
+        waft_rendering::render_box_accessors!();
+    }
+
+    impl waft_foundation::ListenableObject for RenderSelectionSpy {
+        fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
+            app.get_mut(self).listeners.push(listener);
+        }
+
+        fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
+            app.get_mut(self).listeners.retain(|held| held != listener);
+        }
+    }
+
+    impl SelectionHandler for RenderSelectionSpy {
+        fn value(self: Handle<Self>, _app: &App) -> SelectionGeometry {
+            let point = SelectionPoint::new(Offset::ZERO, 0.0, TextSelectionHandleType::Left);
+            SelectionGeometry::new(SelectionStatus::Uncollapsed, true)
+                .start_selection_point(Some(point))
+                .end_selection_point(Some(point))
+        }
+
+        fn push_handle_layers(
+            self: Handle<Self>,
+            _app: &mut App,
+            _start_handle: Option<Ref<LayerLink>>,
+            _end_handle: Option<Ref<LayerLink>>,
+        ) {
+        }
+
+        fn selected_content(self: Handle<Self>, _app: &App) -> Option<SelectedContent> {
+            Some(SelectedContent::new("content"))
+        }
+
+        fn selection(self: Handle<Self>, _app: &App) -> Option<SelectedContentRange> {
+            None
+        }
+
+        fn dispatch_selection_event(
+            self: Handle<Self>,
+            app: &mut App,
+            event: &SelectionEvent,
+        ) -> SelectionResult {
+            app.get_mut(self).events.push(event.clone());
+            SelectionResult::End
+        }
+
+        fn content_length(self: Handle<Self>, _app: &App) -> usize {
+            1
+        }
+    }
+
+    impl waft_rendering::Selectable for RenderSelectionSpy {
+        fn get_transform_to(
+            self: Handle<Self>,
+            app: &App,
+            ancestor: Option<waft_rendering::AnyRenderObject>,
+        ) -> waft_embedder::Matrix4 {
+            RenderHandle::from_handle(self)
+                .as_object()
+                .get_transform_to(app, ancestor)
+        }
+
+        fn size(self: Handle<Self>, app: &mut App) -> Size {
+            RenderBox::size(RenderHandle::from_handle(self), app)
+        }
+
+        fn bounding_boxes(self: Handle<Self>, app: &mut App) -> Vec<Rect> {
+            vec![
+                RenderHandle::from_handle(self)
+                    .as_object()
+                    .paint_bounds(app),
+            ]
+        }
+
+        fn dispose_selectable(self: Handle<Self>, _app: &mut App) {}
+    }
+
+    impl waft_rendering::SelectionRegistrant for RenderSelectionSpy {
+        fn selection_registrant_data(
+            self: Handle<Self>,
+            app: &App,
+        ) -> &waft_rendering::SelectionRegistrantData {
+            &app.get(self).selection_registrant
+        }
+
+        fn selection_registrant_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut waft_rendering::SelectionRegistrantData {
+            &mut app.get_mut(self).selection_registrant
+        }
+    }
+
+    /// The spy under the region, and the events it has recorded.
+    fn spy_events(tester: &WidgetTester) -> Vec<SelectionEvent> {
+        let spy = tester.all::<RenderSelectionSpy>()[0];
+        tester.update(|app| spy.get(app).events.clone())
+    }
+
+    fn clear_spy_events(tester: &WidgetTester) {
+        let spy = tester.all::<RenderSelectionSpy>()[0];
+        tester.update(|app| spy.get_mut(app).events.clear());
+    }
+
+    /// The type and global position of an edge update, as Dart's tests read a
+    /// `SelectionEdgeUpdateEvent`.
+    fn edge_update(event: &SelectionEvent) -> (SelectionEventType, Offset, TextGranularity) {
+        match event {
+            SelectionEvent::StartEdgeUpdate {
+                global_position,
+                granularity,
+            } => (
+                SelectionEventType::StartEdgeUpdate,
+                *global_position,
+                *granularity,
+            ),
+            SelectionEvent::EndEdgeUpdate {
+                global_position,
+                granularity,
+            } => (
+                SelectionEventType::EndEdgeUpdate,
+                *global_position,
+                *granularity,
+            ),
+            other => panic!("not an edge update: {other:?}"),
+        }
+    }
+
+    /// The global position of a `SelectWordSelectionEvent`.
+    fn select_word_position(event: &SelectionEvent) -> Offset {
+        match event {
+            SelectionEvent::SelectWord { global_position } => *global_position,
+            other => panic!("not a select-word event: {other:?}"),
+        }
+    }
+
+    // selectable_region_test.dart 'mouse selection single click sends correct events'.
+    #[test]
+    fn mouse_selection_single_click_sends_correct_events() {
+        test_widgets(|tester| {
+            pump_region(tester, SelectionSpy);
+            tester.pump_and_settle();
+
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.pump_and_settle();
+            clear_spy_events(tester);
+
+            tester.move_to(&mut gesture, Offset::new(200.0, 100.0), true);
+            let events = spy_events(tester);
+            assert_eq!(events.len(), 2);
+            let (ty, position, _) = edge_update(&events[0]);
+            assert_eq!(ty, SelectionEventType::StartEdgeUpdate);
+            assert_eq!(position, Offset::new(200.0, 200.0));
+            let (ty, position, _) = edge_update(&events[1]);
+            assert_eq!(ty, SelectionEventType::EndEdgeUpdate);
+            assert_eq!(position, Offset::new(200.0, 100.0));
+            clear_spy_events(tester);
+
+            tester.move_to(&mut gesture, Offset::new(100.0, 100.0), true);
+            let events = spy_events(tester);
+            assert_eq!(events.len(), 1);
+            let (ty, position, _) = edge_update(&events[0]);
+            assert_eq!(ty, SelectionEventType::EndEdgeUpdate);
+            assert_eq!(position, Offset::new(100.0, 100.0));
+
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    /// Dart's double-click spy cases: a tap, then a second down and up at the same place.
+    fn double_click_spy(tester: &mut WidgetTester, mut gesture: TestPointer) {
+        pump_region(tester, SelectionSpy);
+        tester.down(&mut gesture, Offset::new(200.0, 200.0));
+        tester.pump();
+        tester.up(&gesture);
+        tester.pump();
+        clear_spy_events(tester);
+        tester.down(&mut gesture, Offset::new(200.0, 200.0));
+        tester.pump();
+        tester.up(&gesture);
+        let events = spy_events(tester);
+        assert_eq!(events.len(), 1);
+        assert_eq!(select_word_position(&events[0]), Offset::new(200.0, 200.0));
+        tester.remove_pointer(&gesture);
+    }
+
+    // selectable_region_test.dart 'mouse double click sends select-word event'.
+    #[test]
+    fn mouse_double_click_sends_select_word_event() {
+        test_widgets(|tester| {
+            let gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            double_click_spy(tester, gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'touch double click sends select-word event'.
+    #[test]
+    fn touch_double_click_sends_select_word_event() {
+        test_widgets(|tester| {
+            let gesture = TestPointer::touch(tester.next_pointer());
+            double_click_spy(tester, gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'touch does not accept drag'.
+    #[test]
+    fn touch_does_not_accept_drag() {
+        test_widgets(|tester| {
+            pump_region(tester, SelectionSpy);
+            let mut gesture = TestPointer::touch(tester.next_pointer());
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.move_to(&mut gesture, Offset::new(200.0, 100.0), true);
+            tester.up(&gesture);
+            assert!(
+                spy_events(tester)
+                    .iter()
+                    .all(|event| matches!(event, SelectionEvent::Clear))
+            );
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'mouse single-click selection collapses the selection'.
+    #[test]
+    fn mouse_single_click_selection_collapses_the_selection() {
+        test_widgets(|tester| {
+            pump_region(tester, SelectionSpy);
+            tester.pump_and_settle();
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump_and_settle();
+            let events = spy_events(tester);
+            assert_eq!(events.len(), 2);
+            assert_eq!(
+                edge_update(&events[0]).0,
+                SelectionEventType::StartEdgeUpdate
+            );
+            assert_eq!(edge_update(&events[1]).0, SelectionEventType::EndEdgeUpdate);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'touch long press sends select-word event'.
+    #[test]
+    fn touch_long_press_sends_select_word_event() {
+        test_widgets(|tester| {
+            pump_region(tester, SelectionSpy);
+            tester.pump_and_settle();
+            clear_spy_events(tester);
+            let mut gesture = TestPointer::touch(tester.next_pointer());
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.pump_by(Duration::from_millis(500));
+            tester.up(&gesture);
+            let events = spy_events(tester);
+            assert_eq!(events.len(), 1);
+            assert_eq!(select_word_position(&events[0]), Offset::new(200.0, 200.0));
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'touch long press and drag sends correct events'.
+    #[test]
+    fn touch_long_press_and_drag_sends_correct_events() {
+        test_widgets(|tester| {
+            pump_region(tester, SelectionSpy);
+            tester.pump_and_settle();
+            clear_spy_events(tester);
+            let mut gesture = TestPointer::touch(tester.next_pointer());
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.pump_by(Duration::from_millis(500));
+            let events = spy_events(tester);
+            assert_eq!(events.len(), 1);
+            assert_eq!(select_word_position(&events[0]), Offset::new(200.0, 200.0));
+
+            clear_spy_events(tester);
+            tester.move_to(&mut gesture, Offset::new(200.0, 50.0), true);
+            tester.up(&gesture);
+            let events = spy_events(tester);
+            assert_eq!(events.len(), 1);
+            let (ty, position, granularity) = edge_update(&events[0]);
+            assert_eq!(ty, SelectionEventType::EndEdgeUpdate);
+            assert_eq!(position, Offset::new(200.0, 50.0));
+            assert_eq!(granularity, TextGranularity::Word);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'mouse long press does not send select-word event'.
+    #[test]
+    fn mouse_long_press_does_not_send_select_word_event() {
+        test_widgets(|tester| {
+            pump_region(tester, SelectionSpy);
+            tester.pump_and_settle();
+            clear_spy_events(tester);
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            tester.down(&mut gesture, Offset::new(200.0, 200.0));
+            tester.pump_by(Duration::from_millis(500));
+            tester.up(&gesture);
+            assert!(spy_events(tester).iter().all(|event| matches!(
+                event,
+                SelectionEvent::StartEdgeUpdate { .. } | SelectionEvent::EndEdgeUpdate { .. }
+            )));
+            tester.remove_pointer(&gesture);
+        });
+    }
+
     /// The three texts most of `selectable_region_test.dart`'s cases select across.
     fn three_texts() -> Column {
         Column::new().children([
