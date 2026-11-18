@@ -17,3 +17,5 @@ waft-single-instance
 waft-macros
 # A fixture crate for the WinUI tests, not the framework.
 waft-winui-test-support
+# A check that globs the facade beside each kit, built over the whole of `waft` as an app is.
+waft-glob-check
