@@ -48,7 +48,10 @@ impl BrowserContextMenu {
     ///
     /// By default, when the app starts, the browser's context menu is already enabled.
     pub fn disable_context_menu(app: &mut App) -> Task<()> {
-        debug_assert!(K_IS_WEB, "This has no effect on platforms other than web.");
+        #[allow(clippy::assertions_on_constants)]
+        {
+            debug_assert!(K_IS_WEB, "This has no effect on platforms other than web.");
+        }
         let instance = Self::instance(app);
         app.get_mut(instance).enabled = false;
         Task::ready(())
@@ -60,7 +63,10 @@ impl BrowserContextMenu {
     /// Typically this method would be called after first calling
     /// [`disable_context_menu`](Self::disable_context_menu).
     pub fn enable_context_menu(app: &mut App) -> Task<()> {
-        debug_assert!(K_IS_WEB, "This has no effect on platforms other than web.");
+        #[allow(clippy::assertions_on_constants)]
+        {
+            debug_assert!(K_IS_WEB, "This has no effect on platforms other than web.");
+        }
         let instance = Self::instance(app);
         app.get_mut(instance).enabled = true;
         Task::ready(())
