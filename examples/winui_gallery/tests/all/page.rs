@@ -80,7 +80,7 @@ fn mount_page(
 }
 
 fn page(content: WidgetRef) -> WidgetRef {
-    waft_winui::Page::new()
+    waft_winui::FluentPage::new()
         .background(Brush::Solid(BACKGROUND))
         .content(content)
         .into_widget()
@@ -153,7 +153,7 @@ fn extending_into_the_bars_hands_them_to_the_content() {
     let (_, seen) = mount_page(
         phone(EdgeInsets::from_ltrb(0.0, 24.0, 0.0, 16.0), 0.0),
         |content| {
-            waft_winui::Page::new()
+            waft_winui::FluentPage::new()
                 .background(Brush::Solid(BACKGROUND))
                 .extends_content_into_system_bars(true)
                 .content(content)
@@ -191,7 +191,7 @@ fn navigation_under_bars(width: u32, bars: EdgeInsets) -> Fixture {
                         ThemeScope::new(
                             Theme::Light,
                             Overlay::wrap(
-                                Page::new()
+                                FluentPage::new()
                                     .background(Brush::Solid(BACKGROUND))
                                     .extends_content_into_system_bars(true)
                                     .content(navigation),

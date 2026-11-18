@@ -5068,15 +5068,18 @@ dependencies = [
 name = "waft"
 version = "0.7.0"
 dependencies = [
+ "waft-cupertino",
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
  "waft-gestures",
  "waft-macros",
+ "waft-material",
  "waft-painting",
  "waft-scheduler",
  "waft-shell",
  "waft-widgets",
+ "waft-winui",
 ]
 
 [[package]]

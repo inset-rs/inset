@@ -29,11 +29,11 @@ use crate::{
     Brush, COLOR_PICKER_BORDER_THICKNESS, ColorChangedEventArgs, ColorPickerHsvChannel,
     ColorPickerSlider, ColorSpectrum, ColorSpectrumColorChangedEventArgs, ColorSpectrumComponents,
     ColorSpectrumShape, ColumnDefinition, ComboBox, ComboBoxItem, CommonState, FluentSymbol,
-    FontIcon, Grid, GridCell, GridLength, Hsv, HsvColor, Margin, Orientation, Rgb, RowDefinition,
-    SizeObserver, TextBox, ThemeResources, ToggleButton, ToggleButtonBrushes, argb,
-    checkered_background_pixels, color_from_rgba, control_text_style, hex_to_rgb, hex_to_rgba,
-    hsv_to_rgb, image_from_pixel_data, rgb_from_color, rgb_to_hex, rgb_to_hsv, rgba_to_hex,
-    same_color, try_parse_int, wtoi,
+    FontIcon, Grid, GridCell, GridLength, Hsv, HsvColor, Margin, Rgb, RowDefinition, SizeObserver,
+    TextBox, ThemeResources, ToggleButton, ToggleButtonBrushes, argb, checkered_background_pixels,
+    color_from_rgba, control_text_style, hex_to_rgb, hex_to_rgba, hsv_to_rgb,
+    image_from_pixel_data, rgb_from_color, rgb_to_hex, rgb_to_hsv, rgba_to_hex, same_color,
+    try_parse_int, wtoi,
 };
 use std::{fmt, rc::Rc};
 use waft_embedder::valo::{
@@ -129,8 +129,8 @@ pub struct ColorPicker {
     /// `ColorSpectrumComponents`.
     pub color_spectrum_components: ColorSpectrumComponents,
 
-    /// `Orientation`: `Vertical` by default.
-    pub orientation: Orientation,
+    /// `Orientation`: [`Axis::Vertical`] by default, or [`Axis::Horizontal`].
+    pub orientation: Axis,
 
     /// `CornerRadius` of the spectrum, the preview and the opacity slider's background;
     /// `ControlCornerRadius` by default; the theme's `ControlCornerRadius` when `None`.
@@ -178,7 +178,7 @@ impl ColorPicker {
             max_value: 100,
             color_spectrum_shape: ColorSpectrumShape::Box,
             color_spectrum_components: ColorSpectrumComponents::HueSaturation,
-            orientation: Orientation::Vertical,
+            orientation: Axis::Vertical,
             corner_radius: None,
             is_enabled: true,
             key: None,
@@ -299,8 +299,8 @@ impl ColorPicker {
         self
     }
 
-    /// Sets Orientation.
-    pub fn orientation(mut self, value: Orientation) -> Self {
+    /// Sets `Orientation`: [`Axis::Vertical`] by default, or [`Axis::Horizontal`].
+    pub fn orientation(mut self, value: Axis) -> Self {
         self.orientation = value;
         self
     }
@@ -484,8 +484,8 @@ struct VisualStates {
     hex_input_visible: bool,
     /// `AlphaEnabledState`: `AlphaEnabled` lets the hex box take 9 characters.
     alpha_enabled: bool,
-    /// `Orientation`.
-    orientation: Orientation,
+    /// `Orientation`: [`Axis::Vertical`] or [`Axis::Horizontal`].
+    orientation: Axis,
 }
 
 /// `PreviousColorVisibility`: with the spectrum (`Vertical`) the previous colour is the lower
@@ -1016,7 +1016,7 @@ impl ColorPickerState {
     fn visual_states(self: Handle<Self>, app: &App) -> VisualStates {
         let widget = self.widget(app);
         let state = app.get(self);
-        let vertical = widget.orientation == Orientation::Vertical;
+        let vertical = widget.orientation == Axis::Vertical;
         let previous = widget.previous_color.is_some();
         let previous_color = match (widget.is_color_spectrum_visible, previous) {
             (true, true) => PreviousColorVisibility::PreviousColorVisibleVertical,
@@ -1151,7 +1151,7 @@ impl State for ColorPickerState {
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
         let states = self.visual_states(app);
-        let vertical = states.orientation == Orientation::Vertical;
+        let vertical = states.orientation == Axis::Vertical;
         let mut cells = Vec::new();
         // `ColorSpectrumGrid`.
         cells.push(
@@ -1271,7 +1271,7 @@ impl ColorPickerState {
             cells.push(GridCell::new(self.color_spectrum(resources, app)).into_widget());
         }
         if states.color_preview_visible {
-            let vertical = states.orientation == Orientation::Vertical;
+            let vertical = states.orientation == Axis::Vertical;
             let preview = self.color_preview_rectangle_grid(app, resources, states);
             let cell = if states.color_spectrum_visible {
                 // 44 wide, after the spectrum.
@@ -1409,7 +1409,7 @@ impl ColorPickerState {
         states: VisualStates,
     ) -> WidgetRef {
         let widget = self.widget(app).clone();
-        let vertical_slider = states.orientation == Orientation::Horizontal;
+        let vertical_slider = states.orientation == Axis::Horizontal;
         let (minimum, maximum) = widget.third_dimension_range();
         let background = CustomPaint::new()
             .painter(
@@ -1497,7 +1497,7 @@ impl ColorPickerState {
     ) -> WidgetRef {
         let widget = self.widget(app).clone();
         let state = app.get(self);
-        let vertical_slider = states.orientation == Orientation::Horizontal;
+        let vertical_slider = states.orientation == Axis::Horizontal;
         let size = slider_background_size(vertical_slider);
         let checkers = CustomPaint::new()
             .painter(
@@ -1636,7 +1636,7 @@ impl ColorPickerState {
         resources: &ThemeResources,
         states: VisualStates,
     ) -> WidgetRef {
-        let vertical = states.orientation == Orientation::Vertical;
+        let vertical = states.orientation == Axis::Vertical;
         let mut cells = Vec::new();
         if states.color_channel_text_input_visible {
             // `ColorRepresentationComboBox`: `ComboBox` is left-aligned by its style.
@@ -1714,7 +1714,7 @@ impl ColorPickerState {
         alignment: AlignmentGeometry,
     ) -> WidgetRef {
         let max_length = HEX_MAX_LENGTH[usize::from(states.alpha_enabled)];
-        let tab_index = if states.orientation == Orientation::Vertical {
+        let tab_index = if states.orientation == Axis::Vertical {
             DEFAULT_TAB_INDEX
         } else {
             3
@@ -1871,7 +1871,7 @@ fn channel_panel<const N: usize>(
     rows: [RowDefinition; N],
     children: Vec<WidgetRef>,
 ) -> WidgetRef {
-    let label_column = if states.orientation == Orientation::Vertical {
+    let label_column = if states.orientation == Axis::Vertical {
         GridLength::STAR
     } else {
         GridLength::pixel(r.color_picker_text_input_horizontal_orientation_margin)
@@ -1898,11 +1898,11 @@ fn stack_panel(cells: Vec<WidgetRef>) -> WidgetRef {
 }
 
 /// The orientation of the sliders: vertical in the picker's `Horizontal` orientation.
-fn slider_orientation(vertical: bool) -> Orientation {
+fn slider_orientation(vertical: bool) -> Axis {
     if vertical {
-        Orientation::Vertical
+        Axis::Vertical
     } else {
-        Orientation::Horizontal
+        Axis::Horizontal
     }
 }
 

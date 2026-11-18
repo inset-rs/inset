@@ -22,13 +22,13 @@ Run the gallery from the [Waft repository](https://github.com/waos-dev/waft), wh
 waft-winui = "0.5.0"
 ```
 
-Build the app with `FluentApp`, the kit's `MaterialApp`: it shows the light or dark theme and the accent, gives text WinUI's body style, selection the accent and scrollables WinUI's thin bar and clamped edge, installs the Fluent icon font, and gives each page WinUI's `Frame` entrance. Controls that show popups need an `Overlay` ancestor. An app's content goes in a `Page`, whose background reaches under a phone's system bars while its content stays clear of them and of the keyboard.
+Build the app with `FluentApp`, the kit's `MaterialApp`: it shows the light or dark theme and the accent, gives text WinUI's body style, selection the accent and scrollables WinUI's thin bar and clamped edge, installs the Fluent icon font, and gives each page WinUI's `Frame` entrance. Controls that show popups need an `Overlay` ancestor. An app's content goes in a `FluentPage`, whose background reaches under a phone's system bars while its content stays clear of them and of the keyboard.
 
 ```rust
 FluentApp::new()
     .theme(FluentTheme::light())
     .dark_theme(FluentTheme::dark())
-    .home(Page::new().content(Button::text("Save", Listener::new(|_| {}))))
+    .home(FluentPage::new().content(Button::text("Save", Listener::new(|_| {}))))
     .into_widget()
 ```
 

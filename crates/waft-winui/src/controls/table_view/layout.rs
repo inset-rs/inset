@@ -143,7 +143,7 @@ impl<T: 'static> TableViewState<T> {
                 min_width: column.min_width(app),
                 min_width_set: column.min_width_set(app),
                 max_width: column.max_width(app),
-                visible: column.visibility(app) == Visibility::Visible,
+                visible: column.visible(app),
                 actual_width: column.actual_width(app),
                 measured: measurements.measured(column.id()),
             })

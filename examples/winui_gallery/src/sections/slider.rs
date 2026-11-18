@@ -2,8 +2,6 @@
 use crate::{column, example, example_row, label, row, section};
 use waft_foundation::{App, Handle, Listener};
 use waft_widgets::*;
-// `Orientation` is also a `waft_widgets` name (the media query's); the slider's is XAML's.
-use waft_winui::Orientation;
 use waft_winui::*;
 
 /// The track height for the vertical orientation example.
@@ -140,7 +138,7 @@ impl State for SliderDemoState {
                             self.set_state(app, |s| s.vertical = value)
                         })
                         .header(Text::new("Vertical"))
-                        .orientation(Orientation::Vertical),
+                        .orientation(Axis::Vertical),
                     )
                     .into_widget(),
                 value_label(vertical),

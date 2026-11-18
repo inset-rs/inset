@@ -18,8 +18,8 @@
 
 use crate::{
     Brush, ColorPickerHsvChannel, ColorPickerState, ColumnDefinition, CommonState, ControlBorder,
-    FocusVisual, Grid, GridCell, GridLength, Hsv, IncrementAmount, IncrementDirection, Orientation,
-    RangeBase, RowDefinition, SLIDER_DEFAULT_MAXIMUM, SLIDER_DEFAULT_STEP_FREQUENCY,
+    FocusVisual, Grid, GridCell, GridLength, Hsv, IncrementAmount, IncrementDirection, RangeBase,
+    RowDefinition, SLIDER_DEFAULT_MAXIMUM, SLIDER_DEFAULT_STEP_FREQUENCY,
     SLIDER_FOCUS_VISUAL_MARGIN, Slider, SliderTemplate, SliderTemplateParts, SliderTemplateStates,
     ThemeResources, ToolTip, ToolTipService, ValueChangedHandler, color_display_name,
     color_from_rgba, control_text_style, decrease_definitions, fill_bounded, hsv_to_rgb,
@@ -55,8 +55,8 @@ pub struct ColorPickerSlider {
     pub maximum: f64,
     /// `StepFrequency`.
     pub step_frequency: f64,
-    /// `Orientation`.
-    pub orientation: Orientation,
+    /// XAML `Orientation`: [`Axis::Horizontal`] or [`Axis::Vertical`].
+    pub orientation: Axis,
     /// `IsDirectionReversed`.
     pub is_direction_reversed: bool,
     /// `Header`.
@@ -84,7 +84,7 @@ impl ColorPickerSlider {
             minimum: 0.0,
             maximum: SLIDER_DEFAULT_MAXIMUM,
             step_frequency: SLIDER_DEFAULT_STEP_FREQUENCY,
-            orientation: Orientation::Horizontal,
+            orientation: Axis::Horizontal,
             is_direction_reversed: false,
             header: None,
             is_thumb_tool_tip_enabled: true,
@@ -118,8 +118,8 @@ impl ColorPickerSlider {
         self
     }
 
-    /// Sets Orientation.
-    pub fn orientation(mut self, value: Orientation) -> Self {
+    /// Sets `Orientation`: [`Axis::Horizontal`] or [`Axis::Vertical`].
+    pub fn orientation(mut self, value: Axis) -> Self {
         self.orientation = value;
         self
     }
@@ -400,8 +400,8 @@ impl ColorPickerSliderState {
         let widget = self.widget(app).clone();
         let thumbs = ThumbVisuals::of(r, states.slider);
         let content = match slider.orientation {
-            Orientation::Horizontal => self.horizontal_template(app, r, slider, states, thumbs),
-            Orientation::Vertical => vertical_template(r, slider, states, thumbs),
+            Axis::Horizontal => self.horizontal_template(app, r, slider, states, thumbs),
+            Axis::Vertical => vertical_template(r, slider, states, thumbs),
         };
         // `SliderContainer`: transparent, and the target of the focus visual.
         let container =
@@ -467,7 +467,7 @@ impl ColorPickerSliderState {
         }
         // `HorizontalTrackRect` and `HorizontalDecreaseRect` are transparent at opacity 0; the
         // track only stretches the slider to its bounded width, as `Slider`'s does.
-        let track = GridCell::new(fill_bounded(Orientation::Horizontal, SizedBox::shrink()))
+        let track = GridCell::new(fill_bounded(Axis::Horizontal, SizedBox::shrink()))
             .row(1)
             .column_span(3)
             .into_widget();
@@ -520,7 +520,7 @@ fn vertical_template(
         tool_tip = tool_tip.is_open(true);
     }
     // `VerticalTrackRect`, transparent: it only stretches the slider to its bounded height.
-    let track = GridCell::new(fill_bounded(Orientation::Vertical, SizedBox::shrink()))
+    let track = GridCell::new(fill_bounded(Axis::Vertical, SizedBox::shrink()))
         .column(1)
         .row_span(3)
         .into_widget();

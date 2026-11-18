@@ -167,7 +167,7 @@ fn a_vertical_slider_fills_the_height_it_is_given() {
     ] {
         let size = crate::common::size_under_center([300, 300], move |_| {
             Slider::new(10.0, |_, _| {})
-                .orientation(waft_winui::Orientation::Vertical)
+                .orientation(Axis::Vertical)
                 .tick_frequency(10.0)
                 .tick_placement(ticks)
                 .into_widget()

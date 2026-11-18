@@ -5,8 +5,6 @@ use crate::{column, example, example_row, label, section};
 use waft_embedder::Color;
 use waft_foundation::{App, Handle, Listener};
 use waft_widgets::*;
-// `Orientation` is also an `waft_widgets` name (the media query's); the picker's is XAML's.
-use waft_winui::Orientation;
 use waft_winui::*;
 
 /// Builds the ColorPicker feature page.
@@ -125,9 +123,9 @@ impl State for ColorPickerDemoState {
         .is_alpha_enabled(alpha)
         .is_more_button_visible(more_button)
         .orientation(if horizontal {
-            Orientation::Horizontal
+            Axis::Horizontal
         } else {
-            Orientation::Vertical
+            Axis::Vertical
         });
         if let Some(previous) = previous {
             picker = picker.previous_color(previous);

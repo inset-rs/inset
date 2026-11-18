@@ -1,6 +1,6 @@
 //! XAML `TickBar` (`dxaml/xcp/dxaml/lib/TickBar_Partial.cpp`): the tick marks of a `Slider`, one physical pixel each, laid out by `ArrangeOverride` from the slider's `TickFrequency`, its range, its thumb length and its direction.
 
-use crate::{Orientation, less_than, less_than_or_close};
+use crate::{less_than, less_than_or_close};
 use waft_embedder::{Canvas, Color, Rect, Size};
 use waft_foundation::App;
 use waft_rendering::CustomPainter;
@@ -41,7 +41,8 @@ impl TickPlacement {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TickBar {
     pub fill: Color,
-    pub orientation: Orientation,
+    /// The slider's `Orientation`: the ticks step along this axis.
+    pub orientation: Axis,
     /// The slider's `TickFrequency`; nothing is drawn when it is not positive.
     pub tick_frequency: f64,
     pub minimum: f64,
@@ -54,7 +55,7 @@ pub struct TickBar {
 }
 
 impl TickBar {
-    pub fn new(fill: Color, orientation: Orientation) -> TickBar {
+    pub fn new(fill: Color, orientation: Axis) -> TickBar {
         TickBar {
             fill,
             orientation,
@@ -119,7 +120,7 @@ impl TickBar {
         tick_mark_number += 1;
         // The first tick mark sits in the middle of the thumb at its starting position.
         let thumb_offset = ((self.thumb_length - single_pixel) / 2.0).max(0.0);
-        let vertical = self.orientation == Orientation::Vertical;
+        let vertical = self.orientation == Axis::Vertical;
         (0..tick_mark_number)
             .map(|j| {
                 let travelled = j as f64 * tick_mark_interval;
@@ -156,10 +157,10 @@ impl CustomPainter for TickBarPainter {
         let bar = &self.tick_bar;
         let thickness = bar.tick_thickness();
         let (final_length, tick_rect): (f64, fn(f64, f64, Size) -> Rect) = match bar.orientation {
-            Orientation::Horizontal => (size.width(), |offset, thickness, size| {
+            Axis::Horizontal => (size.width(), |offset, thickness, size| {
                 Rect::from_ltwh(offset, 0.0, thickness, size.height())
             }),
-            Orientation::Vertical => (size.height(), |offset, thickness, size| {
+            Axis::Vertical => (size.height(), |offset, thickness, size| {
                 Rect::from_ltwh(0.0, offset, size.width(), thickness)
             }),
         };
