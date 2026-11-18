@@ -263,98 +263,76 @@ pub(crate) mod tests {
 
     // selection_area_test.dart 'SelectionArea uses correct selection controls'.
     #[test]
-    fn the_area_uses_the_platforms_selection_controls() {
-        for (platform, expected_handle_controls) in [
-            (TargetPlatform::Android, "material"),
-            (TargetPlatform::Fuchsia, "material"),
-            (TargetPlatform::Linux, "desktop"),
-            (TargetPlatform::Windows, "desktop"),
-            (TargetPlatform::IOS, "cupertino"),
-            (TargetPlatform::MacOS, "cupertino_desktop"),
-        ] {
-            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
-                tester.pump_widget(MaterialApp::new().home(SelectionArea::new(Text::new("abc"))));
-                tester.pump_and_settle();
-                let region = tester.widget(
-                    tester.element(find::by_type::<SelectableRegion>()),
-                    |region: &SelectableRegion| region.selection_controls.clone(),
-                );
-                let expected: Rc<dyn TextSelectionControls> = match expected_handle_controls {
-                    "material" => material_text_selection_handle_controls(),
-                    "desktop" => desktop_text_selection_handle_controls(),
-                    "cupertino" => cupertino_text_selection_handle_controls(),
-                    "cupertino_desktop" => cupertino_desktop_text_selection_handle_controls(),
-                    _ => unreachable!(),
-                };
-                assert!(
-                    Rc::ptr_eq(&region, &expected),
-                    "the area gives the region this platform's controls"
-                );
-            });
-        }
+    fn selection_area_uses_correct_selection_controls() {
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            tester.pump_widget(MaterialApp::new().home(SelectionArea::new(Text::new("abc"))));
+            let region = tester.widget(
+                tester.element(find::by_type::<SelectableRegion>()),
+                |region: &SelectableRegion| region.selection_controls.clone(),
+            );
+            let expected: Rc<dyn TextSelectionControls> = match tester.target_platform() {
+                TargetPlatform::Android | TargetPlatform::Fuchsia => {
+                    material_text_selection_handle_controls()
+                }
+                TargetPlatform::IOS => cupertino_text_selection_handle_controls(),
+                TargetPlatform::Linux | TargetPlatform::Windows => {
+                    desktop_text_selection_handle_controls()
+                }
+                TargetPlatform::MacOS => cupertino_desktop_text_selection_handle_controls(),
+            };
+            assert!(Rc::ptr_eq(&region, &expected));
+        });
     }
 
     // selection_area_test.dart 'onSelectionChange is called when the selection changes'.
     #[test]
-    fn a_mouse_drag_reports_the_selected_content() {
+    fn on_selection_change_is_called_when_the_selection_changes() {
         test_widgets(|tester| {
-            let content = Rc::new(std::cell::RefCell::new(Vec::new()));
+            let content: Rc<std::cell::RefCell<Option<SelectedContent>>> =
+                Rc::new(std::cell::RefCell::new(None));
             let log = Rc::clone(&content);
             tester.pump_widget(MaterialApp::new().home(
                 SelectionArea::new(Text::new("How are you")).on_selection_changed(Rc::new(
-                    move |_app, selected| {
-                        log.borrow_mut()
-                            .push(selected.map(|content| content.plain_text));
-                    },
+                    move |_app, selected_content| *log.borrow_mut() = selected_content,
                 )),
             ));
-            tester.pump_and_settle();
-
+            let plain_text = || content.borrow().as_ref().map(|c| c.plain_text.clone());
             let paragraph = paragraph_showing(tester, "How are you");
-            let mut pointer = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
-            let start = text_offset_to_position(tester, paragraph, 4);
-            tester.down(&mut pointer, start);
-            tester.pump_by(std::time::Duration::from_millis(200));
-            assert_eq!(content.borrow().last().cloned().flatten(), None);
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph, 4);
+            tester.down(&mut gesture, at);
+            assert!(content.borrow().is_none());
+            tester.pump();
 
-            let end = text_offset_to_position(tester, paragraph, 7);
-            tester.move_to(&mut pointer, end, true);
-            tester.up(&pointer);
-            tester.pump_and_settle();
-            assert_eq!(
-                content.borrow().last().cloned().flatten(),
-                Some("are".to_string())
-            );
+            let at = text_offset_to_position(tester, paragraph, 7);
+            tester.move_to(&mut gesture, at, true);
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(plain_text(), Some("are".to_string()));
 
-            // A click collapses the selection, which reports no content.
-            let point = text_offset_to_position(tester, paragraph, 3);
-            tester.down(&mut pointer, point);
-            tester.pump_by(std::time::Duration::from_millis(200));
-            tester.up(&pointer);
-            tester.pump_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
-            tester.pump_and_settle();
-            assert_eq!(
-                content.borrow().last().cloned().flatten(),
-                Some(String::new())
-            );
+            // Backwards selection.
+            let at = text_offset_to_position(tester, paragraph, 3);
+            tester.down(&mut gesture, at);
+            tester.pump();
+            tester.up(&gesture);
+            tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
+            assert_eq!(plain_text(), Some(String::new()));
 
-            // A backwards selection.
-            tester.down(&mut pointer, point);
-            tester.pump_by(std::time::Duration::from_millis(200));
-            let start = text_offset_to_position(tester, paragraph, 0);
-            tester.move_to(&mut pointer, start, true);
-            tester.up(&pointer);
-            tester.pump_and_settle();
-            assert_eq!(
-                content.borrow().last().cloned().flatten(),
-                Some("How".to_string())
-            );
+            let at = text_offset_to_position(tester, paragraph, 3);
+            tester.down(&mut gesture, at);
+            tester.pump();
+            let at = text_offset_to_position(tester, paragraph, 0);
+            tester.move_to(&mut gesture, at, true);
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(plain_text(), Some("How".to_string()));
+            tester.remove_pointer(&gesture);
         });
     }
 
     // selection_area_test.dart 'SelectionArea does not crash at zero area'.
     #[test]
-    fn the_area_does_not_crash_at_zero_area() {
+    fn selection_area_does_not_crash_at_zero_area() {
         test_widgets(|tester| {
             tester.pump_widget(MaterialApp::new().home(waft_widgets::Center::new().child(
                 waft_widgets::SizedBox::shrink().child(SelectionArea::new(Text::new("X"))),
