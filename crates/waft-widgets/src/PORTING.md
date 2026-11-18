@@ -580,6 +580,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## widgets/editable_text.rs → editable_text.dart
 
+- Change: `EditableText` keeps the constructor's strut in a private `strut_style` field and answers Dart's `strutStyle` getter as `effective_strut_style()`; `strut_style(...)` is Dart's constructor argument.
+  Reason: language — Rust has no getter and setter sharing one name on a type.
+  Affect: code that reads the strut the editable lays out with calls `effective_strut_style()`, not `strut_style()`.
+
 - Change: `EditableText.debugDeterministicCursor` is kept per `App`, read with `EditableText::debug_deterministic_cursor(app)` and set with `set_debug_deterministic_cursor(app, value)`, not in a static.
   Reason: language — Dart's statics are isolate-global, and an `App` is Waft's isolate.
   Affect: setting it changes only the app it is passed to, so a test that sets it needs no reset.
@@ -775,9 +779,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - Change: `RawAutocomplete` compares a newly selected option with the current selection by the option type's equality.
   Reason: language — a Rust value has no identity, which Dart's default equality compares.
   Affect: selecting an option equal to the current one does nothing, where Dart selects a distinct object with equal fields again.
-- Change: `RawAutocomplete` adds one focus listener to the caller's focus node and removes another, as Dart's source does, and the listener left behind does nothing once the state is freed.
-  Reason: language — a listener bound to a state's handle is skipped once the arena has freed the state, where Dart's closure keeps the disposed state and runs.
-  Affect: a caller's focus node that outlives the autocomplete keeps one inert listener, where Dart's runs on a disposed state.
 
 ## heroes.rs → heroes.dart
 
@@ -819,7 +820,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - form.rs, page_storage.rs, tap_region.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
 - `debugCheckHasDirectionality` in the widgets that resolve a directional value (the check is in debug.rs). Trigger: each such widget's next edit.
 - selectable_region.rs: `SelectionListener`, `SelectionDetails`, `SelectionListenerNotifier`, the deprecated `TextSelectionDelegate` members and the iOS-web double-tap quirks. Trigger: the first caller of a selection listener; a web host.
-- text.rs: `locale`, `strutStyle`, `hyphens`, and the deprecated `textScaleFactor`; `Text`'s selection container and `_RichText` carry none of them either. Trigger: `Locale` (the embedder's exists); `StrutStyle`; `Hyphens`.
+- text.rs: `locale`, `hyphens`, and the deprecated `textScaleFactor`; `Text`'s selection container and `_RichText` carry none of them either. Trigger: `Locale` (the embedder's exists); `Hyphens`.
 - basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
 - basic.rs: `RepaintBoundary.wrap` and `wrapAll`, `DefaultAssetBundle`. Trigger: the sliver child delegates that call them; asset bundles.
@@ -842,7 +843,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - app.rs: the state's route-push handlers. Trigger: the binding's pushed-route events.
 - app.rs: the performance overlay, semantics debugger and widget inspector the three carried debug flags would show. Trigger: `performance_overlay.dart`; the semantics tree; `widget_inspector.dart`.
 - default_text_editing_shortcuts.rs: the Control-key editing bindings macOS supplies from its own key tables (Control-A, Control-E, Control-K, Control-D), which Dart's macOS map leaves to the host. Trigger: nothing else supplies them over a host that reports plain key presses.
-- editable_text.rs: scribble and stylus support but the selection rects (`_ScribbleFocusable`, `_ScribblePlaceholder`, and `_ScribbleCacheKey`'s strut style and placeholder), the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor and `insertContent`; the scroll notification's `_handleContextMenuOnScroll`. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; Scribble on the iOS host.
+- editable_text.rs: scribble and stylus support but the selection rects (`_ScribbleFocusable`, `_ScribblePlaceholder`, and `_ScribbleCacheKey`'s strut style and placeholder), the spell-check fetch, the magnifier overlay, the floating cursor and `insertContent`; the scroll notification's `_handleContextMenuOnScroll`. Trigger: `UndoManagerClient`; `RenderEditable.setFloatingCursor`; Scribble on the iOS host.
 - editable_text.rs: `Semantics(inputType:, onCopy:, onCut:, onPaste:)`. Trigger: the next edit of editable_text.rs.
 - app_lifecycle_listener.rs: diagnostics. Trigger: diagnostics.
 - text_selection.rs: `EmptyTextSelectionControls`. Trigger: its first caller.

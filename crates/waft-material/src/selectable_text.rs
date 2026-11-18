@@ -15,7 +15,7 @@ use waft_foundation::{
     OptionRetained, Ref,
 };
 use waft_gestures::{DragStartBehavior, GestureTapCallback, TapDragUpDetails};
-use waft_painting::{InlineSpan, TextScaler, TextSpan, TextStyle, TextWidthBasis};
+use waft_painting::{InlineSpan, StrutStyle, TextScaler, TextSpan, TextStyle, TextWidthBasis};
 use waft_rendering::HitTestBehavior;
 use waft_scheduler::SchedulerBinding;
 use waft_services::SelectionChangedCause;
@@ -192,6 +192,9 @@ pub struct SelectableText {
     /// If null, defaults to [`DefaultTextStyle`] of context.
     pub style: Option<TextStyle>,
 
+    /// {@macro flutter.widgets.editableText.strutStyle}
+    pub strut_style: Option<StrutStyle>,
+
     /// {@macro flutter.widgets.editableText.textAlign}
     pub text_align: Option<TextAlign>,
 
@@ -343,6 +346,7 @@ impl SelectableText {
             text_span,
             focus_node: None,
             style: None,
+            strut_style: None,
             text_align: None,
             text_direction: None,
             text_scale_factor: None,
@@ -389,6 +393,12 @@ impl SelectableText {
     /// Dart `SelectableText(style:)`.
     pub fn style(mut self, style: TextStyle) -> SelectableText {
         self.style = Some(style);
+        self
+    }
+
+    /// Dart `SelectableText(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> SelectableText {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -1107,6 +1117,9 @@ impl State for SelectableTextState {
         }
         if let Some(min_lines) = widget.min_lines {
             editable = editable.min_lines(min_lines);
+        }
+        if let Some(strut_style) = widget.strut_style.clone() {
+            editable = editable.strut_style(strut_style);
         }
         if widget.selection_enabled()
             && let Some(text_selection_controls) = text_selection_controls
@@ -3738,6 +3751,178 @@ mod tests {
                 assert_eq!(seen.borrow_mut().take(), Some(TextSelection::new(0, 1)));
             });
         }
+    }
+
+    /// Pumps `widget` centred on a `Material` in a Material 2 app, as the selectable
+    /// text tests do.
+    fn pump_selectable(tester: &mut WidgetTester, widget: SelectableText) {
+        let root = material_app(
+            crate::theme_data::ThemeData::builder()
+                .use_material3(false)
+                .build(&tester.cell.borrow()),
+            Center::new()
+                .child(Material::new().child(widget))
+                .into_widget(),
+        );
+        tester.pump_widget(root);
+    }
+
+    fn selectable_size(tester: &WidgetTester) -> Size {
+        tester.get_size(find::by_type::<SelectableText>().evaluate(tester)[0])
+    }
+
+    #[test]
+    fn selectable_text_baseline_alignment_no_strut() {
+        test_widgets(|tester| {
+            let key_a: KeyRef = UniqueKey::new().into();
+            let key_b: KeyRef = UniqueKey::new().into();
+            let root = material_app(
+                crate::theme_data::ThemeData::builder()
+                    .use_material3(false)
+                    .build(&tester.cell.borrow()),
+                Center::new()
+                    .child(
+                        Material::new().child(
+                            waft_widgets::Row::new()
+                                .cross_axis_alignment(waft_widgets::CrossAxisAlignment::Baseline)
+                                .text_baseline(waft_embedder::TextBaseline::Alphabetic)
+                                .children([
+                                    waft_widgets::Expanded::new(
+                                        SelectableText::new("A")
+                                            .key(key_a.clone())
+                                            .strut_style(StrutStyle::DISABLED)
+                                            .style(
+                                                TextStyle::new()
+                                                    .font_family("FlutterTest")
+                                                    .font_size(10.0),
+                                            ),
+                                    )
+                                    .into_widget(),
+                                    Text::new("abc")
+                                        .style(
+                                            TextStyle::new()
+                                                .font_family("FlutterTest")
+                                                .font_size(20.0),
+                                        )
+                                        .into_widget(),
+                                    waft_widgets::Expanded::new(
+                                        SelectableText::new("B")
+                                            .key(key_b.clone())
+                                            .strut_style(StrutStyle::DISABLED)
+                                            .style(
+                                                TextStyle::new()
+                                                    .font_family("FlutterTest")
+                                                    .font_size(30.0),
+                                            ),
+                                    )
+                                    .into_widget(),
+                                ]),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(root);
+            let row_bottom = tester
+                .get_bottom_left(find::by_type::<waft_widgets::Row>())
+                .dy();
+            assert_eq!(
+                tester.get_bottom_left(find::by_key(key_a)).dy(),
+                row_bottom - 5.0
+            );
+            assert_eq!(
+                tester.get_bottom_left(find::text("abc")).dy(),
+                row_bottom - 2.5
+            );
+            assert_eq!(tester.get_bottom_left(find::by_key(key_b)).dy(), row_bottom);
+        });
+    }
+
+    #[test]
+    fn strut_basic_single_line() {
+        test_widgets(|tester| {
+            pump_selectable(tester, SelectableText::new("something"));
+            assert_eq!(selectable_size(tester), Size::new(129.0, 14.0));
+        });
+    }
+
+    #[test]
+    fn strut_text_style_increases_height() {
+        test_widgets(|tester| {
+            pump_selectable(
+                tester,
+                SelectableText::new("something").style(TextStyle::new().font_size(20.0)),
+            );
+            assert_eq!(selectable_size(tester), Size::new(183.0, 20.0));
+
+            pump_selectable(
+                tester,
+                SelectableText::new("something")
+                    .style(TextStyle::new().font_size(20.0))
+                    .strut_style(StrutStyle::DISABLED),
+            );
+            assert_eq!(selectable_size(tester), Size::new(183.0, 20.0));
+        });
+    }
+
+    #[test]
+    fn strut_basic_multi_line() {
+        test_widgets(|tester| {
+            pump_selectable(tester, SelectableText::new("something").max_lines(Some(6)));
+            assert_eq!(selectable_size(tester), Size::new(129.0, 84.0));
+        });
+    }
+
+    #[test]
+    fn strut_no_force_small_strut() {
+        test_widgets(|tester| {
+            pump_selectable(
+                tester,
+                SelectableText::new("something")
+                    .max_lines(Some(6))
+                    .strut_style(StrutStyle::new().font_size(5.0)),
+            );
+            assert_eq!(selectable_size(tester), Size::new(129.0, 84.0));
+        });
+    }
+
+    #[test]
+    fn strut_no_force_large_strut() {
+        test_widgets(|tester| {
+            pump_selectable(
+                tester,
+                SelectableText::new("something")
+                    .max_lines(Some(6))
+                    .strut_style(StrutStyle::new().font_size(25.0)),
+            );
+            assert_eq!(selectable_size(tester), Size::new(129.0, 150.0));
+        });
+    }
+
+    #[test]
+    fn strut_height_override() {
+        test_widgets(|tester| {
+            pump_selectable(
+                tester,
+                SelectableText::new("something")
+                    .max_lines(Some(3))
+                    .strut_style(StrutStyle::new().font_size(8.0).force_strut_height(true)),
+            );
+            assert_eq!(selectable_size(tester), Size::new(129.0, 24.0));
+        });
+    }
+
+    #[test]
+    fn strut_forces_field_taller() {
+        test_widgets(|tester| {
+            pump_selectable(
+                tester,
+                SelectableText::new("something")
+                    .max_lines(Some(3))
+                    .style(TextStyle::new().font_size(10.0))
+                    .strut_style(StrutStyle::new().font_size(18.0).force_strut_height(true)),
+            );
+            assert_eq!(selectable_size(tester), Size::new(93.0, 54.0));
+        });
     }
 
     #[test]

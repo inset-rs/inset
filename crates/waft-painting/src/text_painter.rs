@@ -1,7 +1,7 @@
 //! Flutter counterpart: `painting/text_painter.dart`.
 //!
 //! `wordBoundaries` sits with `RenderEditable` in rendering, which owns the laid-out
-//! paragraph it reads; `strutStyle` and `locale` wait. See `PORTING.md`.
+//! paragraph it reads; `locale` waits. See `PORTING.md`.
 
 use std::cell::OnceCell;
 
@@ -15,6 +15,7 @@ use waft_foundation::PRECISION_ERROR_TOLERANCE;
 
 use crate::basic_types::RenderComparison;
 use crate::inline_span::{InlineSpanRef, utf16_len};
+use crate::strut_style::StrutStyle;
 use crate::text_scaler::TextScaler;
 use crate::text_style::TextStyle;
 
@@ -402,6 +403,7 @@ pub struct TextPainter {
     max_lines: Option<i32>,
     text_width_basis: TextWidthBasis,
     text_height_behavior: Option<TextHeightBehavior>,
+    strut_style: Option<StrutStyle>,
     placeholder_dimensions: Option<Vec<PlaceholderDimensions>>,
     layout_cache: Option<TextPainterLayoutCacheWithOffset>,
     layout_template: Option<Paragraph>,
@@ -442,6 +444,7 @@ impl TextPainter {
             max_lines: None,
             text_width_basis: TextWidthBasis::Parent,
             text_height_behavior: None,
+            strut_style: None,
             placeholder_dimensions: None,
             layout_cache: None,
             layout_template: None,
@@ -708,6 +711,27 @@ impl TextPainter {
         self.mark_needs_layout();
     }
 
+    /// The strut style to use. Strut style defines the strut, which sets minimum vertical
+    /// layout metrics.
+    ///
+    /// Omitting or providing `None` will disable strut.
+    ///
+    /// Omitting or providing `None` for any properties of [`StrutStyle`] will result in
+    /// default values being used. It is highly recommended to at least specify a
+    /// [`StrutStyle::font_size`].
+    pub fn strut_style(&self) -> Option<&StrutStyle> {
+        self.strut_style.as_ref()
+    }
+
+    /// Sets [`strut_style`](Self::strut_style).
+    pub fn set_strut_style(&mut self, value: Option<StrutStyle>) {
+        if self.strut_style == value {
+            return;
+        }
+        self.strut_style = value;
+        self.mark_needs_layout();
+    }
+
     /// Defines how to measure the width of the rendered text.
     pub fn text_width_basis(&self) -> TextWidthBasis {
         self.text_width_basis
@@ -818,6 +842,9 @@ impl TextPainter {
         }
         if let Some(ellipsis) = &self.ellipsis {
             paragraph_style = paragraph_style.ellipsis(ellipsis.clone());
+        }
+        if let Some(strut_style) = &self.strut_style {
+            paragraph_style = paragraph_style.strut_style(strut_style.clone());
         }
         paragraph_style.build()
     }
@@ -1165,10 +1192,22 @@ impl TextPainter {
         )
     }
 
+    /// The condition is derived from skparagraph's `TextLine.cpp` and the engine's
+    /// `paragraph_builder_skia.cc`: a strut is disabled when it is absent,
+    /// [`StrutStyle::DISABLED`], or has a font size of zero.
+    fn strut_disabled(&self) -> bool {
+        match &self.strut_style {
+            None => true,
+            Some(strut_style) => {
+                *strut_style == StrutStyle::DISABLED || strut_style.font_size == Some(0.0)
+            }
+        }
+    }
+
     /// Returns the strut bounded height of the glyph at the given `position`.
     ///
-    /// Valid only after [`layout`](Self::layout) has been called. Without strut support the
-    /// caret metrics decide; the layout template is the fallback.
+    /// Valid only after [`layout`](Self::layout) has been called. With no strut, or a disabled
+    /// one, the caret metrics decide; the layout template is the fallback.
     pub fn get_full_height_for_caret(
         &mut self,
         fonts: &mut FontCollection,
@@ -1176,7 +1215,9 @@ impl TextPainter {
         caret_prototype: Rect,
     ) -> f64 {
         let _ = caret_prototype;
-        if let Some(metrics) = self.compute_caret_metrics(fonts, position) {
+        if self.strut_disabled()
+            && let Some(metrics) = self.compute_caret_metrics(fonts, position)
+        {
             return metrics.height;
         }
         let preferred_line_height = self.preferred_line_height(fonts);
@@ -1492,6 +1533,8 @@ fn shift_text_box(text_box: TextBox, offset: Offset) -> TextBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waft_embedder::TextLeadingDistribution;
+
     use crate::text_span::TextSpan;
 
     fn fonts() -> FontCollection {
@@ -1805,5 +1848,231 @@ mod tests {
         painter.set_text_direction(Some(TextDirection::Ltr));
         painter.layout(&mut fonts, 0.0, f64::INFINITY);
         assert_eq!(width, painter.width());
+    }
+
+    /// FlutterTest's metrics, as `flutter_test` installs them: ascent 0.75 em, descent
+    /// 0.25 em, no line gap, every glyph an em wide.
+    fn flutter_test_fonts() -> FontCollection {
+        use waft_embedder::Platform as _;
+
+        let mut fonts = FontCollection::new();
+        waft_embedder::set_default_font_manager(
+            &mut fonts,
+            Box::new(waft_embedder::TestFontSource::new()),
+            &waft_embedder::InertPlatform.default_font_families(),
+        );
+        fonts
+    }
+
+    fn strut_painter(text: InlineSpanRef, strut: StrutStyle) -> TextPainter {
+        let mut painter = TextPainter::new();
+        painter.set_text(Some(text));
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.set_strut_style(Some(strut));
+        painter
+    }
+
+    #[test]
+    fn strut_style_applies_when_the_span_has_no_style() {
+        let mut fonts = flutter_test_fonts();
+        let empty = TextSpan::new().into_span();
+        let mut painter = strut_painter(empty, StrutStyle::new().height(10.0).font_size(10.0));
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        assert_eq!(painter.height(), 100.0);
+    }
+
+    #[test]
+    fn strut_style_leading_is_a_font_size_multiplier() {
+        let mut fonts = flutter_test_fonts();
+        let empty = TextSpan::new().into_span();
+        let mut painter = strut_painter(
+            empty,
+            StrutStyle::new().height(10.0).font_size(10.0).leading(2.0),
+        );
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        assert_eq!(painter.height(), 100.0 + 20.0);
+        // Top leading + scaled ascent.
+        assert_eq!(
+            painter.compute_distance_to_actual_baseline(TextBaseline::Alphabetic),
+            10.0 + 10.0 * 7.5
+        );
+    }
+
+    #[test]
+    fn strut_no_half_leading_plus_force_strut_height() {
+        let mut fonts = flutter_test_fonts();
+        let text = TextSpan::new()
+            .text("A")
+            .style(TextStyle::new().font_size(20.0))
+            .into_span();
+        let mut painter = strut_painter(
+            text,
+            StrutStyle::new()
+                .height(10.0)
+                .font_size(10.0)
+                .force_strut_height(true),
+        );
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        assert_eq!(painter.height(), 100.0);
+        let baseline = 75.0;
+        let boxes = painter.get_boxes_for_selection(
+            TextSelection::new(0, 1),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        assert_eq!(
+            boxes,
+            vec![TextBox::from_ltrbd(
+                0.0,
+                baseline - 15.0,
+                20.0,
+                baseline + 5.0,
+                TextDirection::Ltr
+            )]
+        );
+    }
+
+    #[test]
+    fn strut_half_leading_plus_force_strut_height() {
+        let mut fonts = flutter_test_fonts();
+        let text = TextSpan::new()
+            .text("A")
+            .style(TextStyle::new().font_size(20.0))
+            .into_span();
+        let mut painter = strut_painter(
+            text,
+            StrutStyle::new()
+                .height(10.0)
+                .font_size(10.0)
+                .force_strut_height(true)
+                .leading_distribution(TextLeadingDistribution::Even),
+        );
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        assert_eq!(painter.height(), 100.0);
+        let baseline = 45.0 + 7.5;
+        let boxes = painter.get_boxes_for_selection(
+            TextSelection::new(0, 1),
+            BoxHeightStyle::Tight,
+            BoxWidthStyle::Tight,
+        );
+        assert_eq!(
+            boxes,
+            vec![TextBox::from_ltrbd(
+                0.0,
+                baseline - 15.0,
+                20.0,
+                baseline + 5.0,
+                TextDirection::Ltr
+            )]
+        );
+    }
+
+    #[test]
+    fn text_height_behavior_with_strut_on_empty_paragraph() {
+        let mut fonts = flutter_test_fonts();
+        let style = TextStyle::new().height(11.0).font_size(7.0);
+        let simple = TextSpan::new().text("x").style(style.clone()).into_span();
+        let empty_string = TextSpan::new().text("").style(style.clone()).into_span();
+        let empty_paragraph = TextSpan::new().style(style.clone()).into_span();
+        let strut = StrutStyle::from_text_style(&style)
+            .force_strut_height(true)
+            .build();
+
+        let mut painter = strut_painter(simple.clone(), strut);
+        painter.set_text_height_behavior(Some(TextHeightBehavior {
+            apply_height_to_first_ascent: false,
+            apply_height_to_last_descent: false,
+            leading_distribution: TextLeadingDistribution::Proportional,
+        }));
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        let height = painter.height();
+        for span in [simple, empty_string, empty_paragraph] {
+            painter.set_text(Some(span));
+            painter.layout(&mut fonts, 0.0, f64::INFINITY);
+            assert_eq!(painter.height(), height);
+            assert_eq!(painter.preferred_line_height(&mut fonts), height);
+        }
+    }
+
+    #[test]
+    fn text_painter_caret_height_and_line_height() {
+        let mut fonts = flutter_test_fonts();
+        let mut painter = TextPainter::new();
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.set_strut_style(Some(StrutStyle::new().font_size(50.0)));
+        painter.set_text(Some(
+            TextSpan::new()
+                .text("A")
+                .style(TextStyle::new().height(1.0))
+                .into_span(),
+        ));
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+
+        let caret_height =
+            painter.get_full_height_for_caret(&mut fonts, TextPosition::new(0), Rect::ZERO);
+        assert_eq!(caret_height, 50.0);
+    }
+
+    #[test]
+    fn caret_height_reflects_run_height_if_strut_is_disabled() {
+        let mut fonts = flutter_test_fonts();
+        let span = TextSpan::new()
+            .text("M")
+            .style(TextStyle::new().font_size(128.0))
+            .children(vec![
+                TextSpan::new()
+                    .text("M")
+                    .style(TextStyle::new().font_size(32.0))
+                    .into_span(),
+                TextSpan::new()
+                    .text("M")
+                    .style(TextStyle::new().font_size(64.0))
+                    .into_span(),
+            ])
+            .into_span();
+        let mut painter = TextPainter::new();
+        painter.set_text(Some(span));
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+
+        let heights = [
+            (0, TextAffinity::Upstream, 128.0),
+            (0, TextAffinity::Downstream, 128.0),
+            (1, TextAffinity::Upstream, 128.0),
+            (1, TextAffinity::Downstream, 32.0),
+            (2, TextAffinity::Upstream, 32.0),
+            (2, TextAffinity::Downstream, 64.0),
+            (3, TextAffinity::Upstream, 64.0),
+            (3, TextAffinity::Downstream, 128.0),
+        ];
+        for (offset, affinity, expected) in heights {
+            assert_eq!(
+                painter.get_full_height_for_caret(
+                    &mut fonts,
+                    TextPosition::with_affinity(offset, affinity),
+                    Rect::ZERO
+                ),
+                expected,
+                "offset {offset} {affinity:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn get_full_height_for_caret_handles_degenerate_layout_without_crashing() {
+        let mut fonts = flutter_test_fonts();
+        let mut painter = TextPainter::new();
+        painter.set_text(Some(
+            TextSpan::new()
+                .text("")
+                .style(TextStyle::new().height(1.0).font_size(0.0))
+                .into_span(),
+        ));
+        painter.set_text_direction(Some(TextDirection::Ltr));
+        painter.layout(&mut fonts, 0.0, f64::INFINITY);
+        assert_eq!(
+            painter.get_full_height_for_caret(&mut fonts, TextPosition::new(0), Rect::ZERO),
+            painter.preferred_line_height(&mut fonts)
+        );
     }
 }

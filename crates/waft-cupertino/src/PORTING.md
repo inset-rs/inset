@@ -173,7 +173,6 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - text_field.rs: the placeholder and the editable sharing a `Stack` with baseline alignment. Trigger: the next edit of text_field.rs (widgets' `SlottedMultiChildRenderObjectWidget` exists).
 - text_field.rs: `CupertinoTextField.defaultSpellCheckSuggestionsToolbarBuilder` and its use as the spell-check configuration's fallback. Trigger: wiring spell_check_suggestions_toolbar.rs into text_field.rs.
 - spell_check_suggestions_toolbar.rs: nothing gives `EditableTextState` spell-check results, so `build_button_items` answers `None` and no field shows the toolbar. Trigger: widgets' spell-check fetch.
-- text_field.rs: `strutStyle`. Trigger: painting's `StrutStyle` (valo has no strut).
 - text_field.rs: `CupertinoTextFieldState` as `AutofillClient`; `EditableText` is the autofill client until then. Trigger: autofill.
 - adaptive_text_selection_toolbar.rs: `CupertinoAdaptiveTextSelectionToolbar.selectable`. Trigger: `SelectableRegion`.
 - nav_bar.rs: the large-title sliver delegate's `DiagnosticableTreeMixin`. Trigger: diagnostics.

@@ -17,7 +17,7 @@ The framework layer is a port of [Flutter](https://github.com/flutter/flutter). 
 
 The project is in alpha, while is ready to build apps on. Waft currently has two widget libraries ready to use:
 - Cupertino: for mobile apps
-- [WinUI](https://github.com/xtyxtyx/waft-ui/tree/main/crates/waft-winui): for desktop and web apps
+- [WinUI](https://github.com/waos-dev/waft/tree/main/crates/waft-winui): for desktop and web apps
 
 ## Apps built with Waft
 
@@ -56,11 +56,11 @@ The project is in alpha, while is ready to build apps on. Waft currently has two
     </td>
     <td align="center" valign="top">
       iOS-style widgets, from<br>
-      <a href="https://github.com/xtyxtyx/waft-ui/tree/main/crates/waft-cupertino">waft-cupertino</a>
+      <a href="https://github.com/waos-dev/waft/tree/main/crates/waft-cupertino">waft-cupertino</a>
     </td>
     <td align="center" valign="top">
       Desktop and web widgets, from<br>
-      <a href="https://github.com/xtyxtyx/waft-ui/tree/main/crates/waft-winui">waft-winui</a>
+      <a href="https://github.com/waos-dev/waft/tree/main/crates/waft-winui">waft-winui</a>
     </td>
   </tr>
 </table>

@@ -1137,3 +1137,17 @@ fn the_inline_navigation_drawer_keeps_its_width_and_indicator_placement() {
         assert_eq!(tester.get_rect(indicator_ink), row_rect);
     });
 }
+
+/// The expressive buttons page: a split button's trailing part toggles, and the caption counts.
+#[test]
+fn the_expressive_buttons_page_toggles_a_split_button() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::ExpressiveButtons);
+        fixture.expect_shown("Filled, tonal, elevated and outlined; the trailing part toggles.");
+
+        fixture.tap(find::by_icon(&waft_material::Icons::arrow_drop_down()).first());
+        fixture.expect_shown("Trailing toggled 1 times");
+
+        fixture.go_back();
+    });
+}

@@ -15,6 +15,7 @@ use waft_embedder::{ParagraphStyle, TextHeightBehavior, TextStyle as UiTextStyle
 
 use crate::basic_types::RenderComparison;
 use crate::colors::AnyColor;
+use crate::strut_style::StrutStyle;
 use crate::text_painter::{K_DEFAULT_FONT_SIZE, TextOverflow};
 use crate::text_scaler::TextScaler;
 
@@ -784,6 +785,7 @@ impl TextStyle {
             font_weight: None,
             font_style: None,
             height: None,
+            strut_style: None,
         }
     }
 
@@ -1231,6 +1233,7 @@ pub struct GetParagraphStyle<'a> {
     font_weight: Option<FontWeight>,
     font_style: Option<FontStyle>,
     height: Option<f64>,
+    strut_style: Option<StrutStyle>,
 }
 
 impl GetParagraphStyle<'_> {
@@ -1295,6 +1298,12 @@ impl GetParagraphStyle<'_> {
         self
     }
 
+    /// The strut to lay the paragraph out with.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> Self {
+        self.strut_style = Some(strut_style);
+        self
+    }
+
     /// Dart `getParagraphStyle` returns a `ui.ParagraphStyle`.
     pub fn build(self) -> ParagraphStyle {
         debug_assert!(
@@ -1322,6 +1331,9 @@ impl GetParagraphStyle<'_> {
             text_height_behavior: self.text_height_behavior,
             max_lines: self.max_lines,
             ellipsis: self.ellipsis,
+            strut_style: self
+                .strut_style
+                .map(|strut_style| strut_style.get_paragraph_strut_style(&self.text_scaler)),
         }
     }
 }

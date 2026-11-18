@@ -22,7 +22,7 @@ use waft_gestures::{
 };
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BorderSide, BorderStyle,
-    BoxDecoration, EdgeInsets, EdgeInsetsGeometry, TextAlignVertical, TextStyle,
+    BoxDecoration, EdgeInsets, EdgeInsetsGeometry, StrutStyle, TextAlignVertical, TextStyle,
 };
 use waft_rendering::{BoxHitTestResult, CrossAxisAlignment, HitTestBehavior};
 use waft_services::{
@@ -148,6 +148,8 @@ pub struct CupertinoTextField {
     pub text_capitalization: TextCapitalization,
     /// The style to use for the text being edited.
     pub style: Option<TextStyle>,
+    /// {@macro flutter.widgets.editableText.strutStyle}
+    pub strut_style: Option<StrutStyle>,
     /// {@macro flutter.widgets.editableText.textAlign}
     pub text_align: TextAlign,
     /// {@macro flutter.material.InputDecorator.textAlignVertical}
@@ -279,6 +281,7 @@ impl CupertinoTextField {
             text_input_action: None,
             text_capitalization: TextCapitalization::None,
             style: None,
+            strut_style: None,
             text_align: TextAlign::Start,
             text_align_vertical: None,
             text_direction: None,
@@ -471,6 +474,12 @@ impl CupertinoTextField {
     /// Dart `CupertinoTextField(style:)`.
     pub fn style(mut self, style: TextStyle) -> CupertinoTextField {
         self.style = Some(style);
+        self
+    }
+
+    /// Dart `CupertinoTextField(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> CupertinoTextField {
+        self.strut_style = Some(strut_style);
         self
     }
 
@@ -1660,6 +1669,9 @@ impl State for CupertinoTextFieldState {
         if let Some(min_lines) = min_lines {
             editable = editable.min_lines(min_lines);
         }
+        if let Some(strut_style) = self.widget(app).strut_style.clone() {
+            editable = editable.strut_style(strut_style);
+        }
         if has_focus {
             editable = editable.selection_color(selection_color);
         }
@@ -1939,7 +1951,7 @@ mod tests {
 
     use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
     use crate::app::CupertinoApp;
-    use waft_embedder::{TextAffinity, TextSelection};
+    use waft_embedder::{Size, TextAffinity, TextSelection};
     use waft_gestures::{K_PRIMARY_BUTTON, K_SECONDARY_BUTTON};
     use waft_rendering::HitTestBehavior;
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient};
@@ -1977,6 +1989,53 @@ mod tests {
                         .placeholder("Name")
                         .autofocus(true),
                 ),
+            );
+        });
+    }
+
+    /// `field` centred in a 200 by 200 loose box, as the strut cases pump it.
+    fn pump_in_loose_box(tester: &mut WidgetTester, field: CupertinoTextField) {
+        tester.pump_widget(
+            CupertinoApp::new().home(
+                waft_widgets::Center::new().child(
+                    waft_widgets::ConstrainedBox::new(waft_rendering::BoxConstraints::loose(
+                        Size::new(200.0, 200.0),
+                    ))
+                    .child(field),
+                ),
+            ),
+        );
+    }
+
+    #[test]
+    fn strut_height_override() {
+        test_widgets(|tester| {
+            pump_in_loose_box(
+                tester,
+                CupertinoTextField::new()
+                    .max_lines(Some(3))
+                    .strut_style(StrutStyle::new().font_size(8.0).force_strut_height(true)),
+            );
+            assert_eq!(
+                tester.get_size(find::by_type::<CupertinoTextField>().evaluate(tester)[0]),
+                Size::new(200.0, 38.0)
+            );
+        });
+    }
+
+    #[test]
+    fn strut_forces_field_taller() {
+        test_widgets(|tester| {
+            pump_in_loose_box(
+                tester,
+                CupertinoTextField::new()
+                    .max_lines(Some(3))
+                    .style(TextStyle::new().font_size(10.0))
+                    .strut_style(StrutStyle::new().font_size(18.0).force_strut_height(true)),
+            );
+            assert_eq!(
+                tester.get_size(find::by_type::<CupertinoTextField>().evaluate(tester)[0]),
+                Size::new(200.0, 68.0)
             );
         });
     }

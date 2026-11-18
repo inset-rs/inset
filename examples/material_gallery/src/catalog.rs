@@ -41,12 +41,13 @@ pub enum Entry {
     MaterialButton,
     ExpansionPanels,
     AccountHeader,
+    ExpressiveButtons,
     Selection,
 }
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 30] = [
+    pub const ALL: [Entry; 31] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
@@ -76,6 +77,7 @@ impl Entry {
         Entry::MaterialButton,
         Entry::ExpansionPanels,
         Entry::AccountHeader,
+        Entry::ExpressiveButtons,
         Entry::Selection,
     ];
 
@@ -119,6 +121,7 @@ impl Entry {
             Entry::MaterialButton => "Material Button",
             Entry::ExpansionPanels => "Expansion Panels",
             Entry::AccountHeader => "Account Header",
+            Entry::ExpressiveButtons => "Expressive Buttons",
             Entry::Selection => "Selection",
         }
     }
@@ -155,6 +158,7 @@ impl Entry {
             Entry::MaterialButton => Icons::touch_app(),
             Entry::ExpansionPanels => Icons::expand_more(),
             Entry::AccountHeader => Icons::account_circle(),
+            Entry::ExpressiveButtons => Icons::splitscreen(),
             Entry::Selection => Icons::content_copy(),
         }
     }
@@ -208,6 +212,7 @@ impl Entry {
             Entry::MaterialButton => pages::material_button::body(app, context),
             Entry::ExpansionPanels => pages::expansion_panels::body(app, context),
             Entry::AccountHeader => pages::account_header::body(app, context),
+            Entry::ExpressiveButtons => pages::expressive_buttons::body(app, context),
             Entry::Selection => pages::selection::body(app, context),
         }
     }

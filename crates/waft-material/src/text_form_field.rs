@@ -15,7 +15,9 @@ use waft_embedder::{
 };
 use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, ValueChanged};
 use waft_gestures::{DragStartBehavior, GestureTapCallback, PointerDownEvent, PointerUpEvent};
-use waft_painting::{AnyTextStyle, EdgeInsets, TextAlign, TextAlignVertical, TextDirection};
+use waft_painting::{
+    AnyTextStyle, EdgeInsets, StrutStyle, TextAlign, TextAlignVertical, TextDirection,
+};
 use waft_services::{
     MaxLengthEnforcement, MouseCursorRef, RestorationBucket, TextInputFormatterRef,
 };
@@ -162,6 +164,12 @@ impl TextFormField {
     /// Dart `TextFormField(style:)`.
     pub fn style(mut self, style: impl Into<AnyTextStyle>) -> TextFormField {
         self.text_field = self.text_field.style(style);
+        self
+    }
+
+    /// Dart `TextFormField(strutStyle:)`.
+    pub fn strut_style(mut self, strut_style: StrutStyle) -> TextFormField {
+        self.text_field = self.text_field.strut_style(strut_style);
         self
     }
 

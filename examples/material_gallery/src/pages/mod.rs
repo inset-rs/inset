@@ -13,6 +13,7 @@ pub mod data_tables;
 pub mod dialogs;
 pub mod drawers;
 pub mod expansion_panels;
+pub mod expressive_buttons;
 pub mod grid_tiles;
 pub mod home;
 pub mod lists;
