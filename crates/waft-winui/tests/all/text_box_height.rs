@@ -175,3 +175,18 @@ fn a_header_stays_inside_a_parent_cap() {
     assert_eq!(fixture.height(), CAP);
     fixture.assert_scrolled_to_caret();
 }
+
+/// A multiline box in a fixed-height pane fills the pane, and its text scrolls past it.
+#[test]
+fn a_multiline_box_fills_a_fixed_height_pane() {
+    let mut fixture = Fixture::new(|text_box| {
+        SizedBox::new()
+            .height(CAP * 2.0)
+            .child(text_box)
+            .into_widget()
+    });
+    assert_eq!(fixture.height(), CAP * 2.0);
+    fixture.type_text(&lines(20));
+    assert_eq!(fixture.height(), CAP * 2.0);
+    fixture.assert_scrolled_to_caret();
+}

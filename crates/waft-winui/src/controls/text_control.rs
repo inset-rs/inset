@@ -634,6 +634,11 @@ impl State for TextControlState {
         if multiline && config.max_lines.is_some() {
             editable = editable.min_lines(1);
         }
+        // XAML's default `VerticalAlignment` is `Stretch`: a multiline `TextBox` fills the
+        // height its parent offers, and Flutter's mechanism for that is `EditableText.expands`.
+        if multiline && config.max_lines.is_none() {
+            editable = editable.expands(true);
+        }
         if password.is_some() {
             editable = editable.toolbar_options(ToolbarOptions {
                 copy: false,
@@ -895,7 +900,7 @@ impl State for TextControlState {
                             self.set_state(app, |s| s.hovered = false)
                         }))
                         .child(
-                            Focus::new(template)
+                            Focus::new(template.into_widget())
                                 .can_request_focus(false)
                                 .skip_traversal(true)
                                 .on_key_event(Rc::new(move |app, _, event| {

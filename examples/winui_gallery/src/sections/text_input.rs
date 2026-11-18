@@ -79,9 +79,9 @@ impl State for TextExamplesState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let initial = if self.widget(app).password {
-            ["", "Saved password", "", ""]
+            ["", "Saved password", "", "", ""]
         } else {
-            ["", "This text is read-only.", "", MARKUP]
+            ["", "This text is read-only.", "", MARKUP, ""]
         };
         let controllers = initial
             .into_iter()
@@ -253,6 +253,20 @@ impl State for TextExamplesState {
                             .accepts_return(true)
                             .text_wrapping(TextWrapping::Wrap)
                             .max_lines(4)
+                            .into_widget(),
+                    ),
+                    example(
+                        "Fills its pane",
+                        "A multiline box in a 240-pixel pane fills its height; the text area grows with its lines and then scrolls.",
+                        &r,
+                        SizedBox::new()
+                            .height(240.0)
+                            .child(
+                                TextBox::new(controllers[4].erase())
+                                    .placeholder_text("Full-height editor")
+                                    .accepts_return(true)
+                                    .text_wrapping(TextWrapping::Wrap),
+                            )
                             .into_widget(),
                     ),
                     example(
