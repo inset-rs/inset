@@ -20,6 +20,7 @@ test-support = []
 [dependencies]
 waft-embedder.workspace = true
 valo.workspace = true
+valo-system-fonts.workspace = true
 valo-codec.workspace = true
 # The steps of a clip's path, handed to Core Animation as a mask.
 valo-geometry.workspace = true
@@ -98,6 +99,10 @@ harness = false
 
 [[test]]
 name = "an_app_goes_on_while_a_popup_menu_is_open"
+harness = false
+
+[[test]]
+name = "a_dropped_file_dialog_closes_its_panel"
 harness = false
 
 [[test]]

@@ -19,5 +19,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Formatting
         run: cargo fmt --all -- --check
+      - name: No thread of its own
+        run: |
+          exempt=$(grep -v '^#' platform-guard-exempt-crates.txt | sed '/^$/d')
+          for manifest in crates/*/Cargo.toml; do
+            name=$(basename "$(dirname "$manifest")")
+            if printf '%s\n' "$exempt" | grep -qx "$name"; then continue; fi
+            cargo clippy --manifest-path "$manifest" --all-targets -- -D clippy::disallowed_methods
+          done
       - name: Tests
         run: cargo test --workspace --no-fail-fast

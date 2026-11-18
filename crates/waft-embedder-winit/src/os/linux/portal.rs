@@ -3,12 +3,18 @@
 //! call made with a token and the `Response` the portal sends at the request's own path once the
 //! user is done, awaited on the asking thread. The response is listened for before the request is
 //! made, so it cannot come before the listening.
+//!
+//! A request the app stops waiting for is closed through [`Closer`], `org.freedesktop.portal.
+//! Request.Close` at the request's path, from whatever thread the app drops its future on.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use zbus::blocking::Connection;
 use zbus::blocking::Proxy;
 use zbus::export::serde::Serialize;
+use zbus::message::{Flags, Message};
 use zbus::proxy::CacheProperties;
 use zbus::zvariant::{DynamicType, OwnedValue, Value};
 
@@ -35,12 +41,14 @@ pub(super) struct Response {
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 /// Calls `method` of the portal's `interface` with the body `body` makes of `options`, the
-/// request's token added to them, and waits for the portal's response.
+/// request's token added to them, and waits for the portal's response. `close` closes the request
+/// while the portal waits for its user.
 pub(super) fn request<B>(
     interface: &str,
     method: &str,
     mut options: HashMap<&'static str, OwnedValue>,
     body: impl FnOnce(HashMap<&'static str, OwnedValue>) -> B,
+    close: &Closer,
 ) -> zbus::Result<Response>
 where
     B: Serialize + DynamicType,
@@ -52,9 +60,10 @@ where
         .unique_name()
         .map(|name| name.trim_start_matches(':').replace('.', "_"))
         .unwrap_or_default();
+    let path = format!("{PORTAL_PATH}/request/{sender}/{token}");
     let request: Proxy<'_> = zbus::blocking::proxy::Builder::new(&connection)
         .destination(PORTAL)?
-        .path(format!("{PORTAL_PATH}/request/{sender}/{token}"))?
+        .path(path.clone())?
         .interface(REQUEST)?
         .cache_properties(CacheProperties::No)
         .build()?;
@@ -67,11 +76,108 @@ where
         method,
         &body(options),
     )?;
-    let response = responses
-        .next()
+    close.made(&connection, &path);
+    let response = responses.next();
+    close.done();
+    let response = response
         .ok_or_else(|| zbus::Error::Failure("the portal closed without an answer".to_owned()))?;
     let (code, results) = response.body().deserialize()?;
     Ok(Response { code, results })
+}
+
+/// The way a request the app stops waiting for is closed: `close` ends it while the portal still
+/// waits, from any thread, once the request is made; one closed before it is made closes as soon
+/// as it is.
+#[derive(Clone)]
+pub(super) struct Closer(Arc<Mutex<Closing>>);
+
+/// What a [`Closer`] knows of its request.
+enum Closing {
+    /// Not made yet.
+    Waiting,
+    /// Not made yet, and closed as soon as it is.
+    CloseOnceMade,
+    /// Made, over the connection whose call closes it, at its path.
+    Made(Connection, String),
+    /// Answered, or never made: nothing left to close.
+    Done,
+}
+
+impl Closer {
+    /// A closer for a request not made yet.
+    pub(super) fn new() -> Closer {
+        Closer(Arc::new(Mutex::new(Closing::Waiting)))
+    }
+
+    /// Notes the request at `path` made over `connection`, closing it at once if the app asked
+    /// for that before it was made.
+    fn made(&self, connection: &Connection, path: &str) {
+        let close_early = {
+            let mut closing = locked(&self.0);
+            match &*closing {
+                Closing::Waiting => {
+                    *closing = Closing::Made(connection.clone(), path.to_owned());
+                    false
+                }
+                Closing::CloseOnceMade => {
+                    *closing = Closing::Done;
+                    true
+                }
+                Closing::Made(..) | Closing::Done => false,
+            }
+        };
+        if close_early {
+            close_request(connection.clone(), path);
+        }
+    }
+
+    /// Ends the request unless it has answered already, or as soon as it is made; from any
+    /// thread.
+    pub(super) fn close(&self) {
+        let made = {
+            let mut closing = locked(&self.0);
+            match &mut *closing {
+                Closing::Waiting => {
+                    *closing = Closing::CloseOnceMade;
+                    None
+                }
+                Closing::Made(connection, path) => {
+                    let made = (connection.clone(), std::mem::take(path));
+                    *closing = Closing::Done;
+                    Some(made)
+                }
+                Closing::CloseOnceMade | Closing::Done => None,
+            }
+        };
+        if let Some((connection, path)) = made {
+            close_request(connection, &path);
+        }
+    }
+
+    /// Notes the request answered: nothing is left to close.
+    fn done(&self) {
+        *locked(&self.0) = Closing::Done;
+    }
+}
+
+/// Asks the portal to close the request at `path`, as its Cancel button does, and closes the
+/// request's own connection. The portal sends no `Response` for a closed request, so the closed
+/// connection is what ends the asking thread's wait; and the call waits for no reply, as the app
+/// may drop its future on its own thread.
+fn close_request(connection: Connection, path: &str) {
+    let close = Message::method_call(path, "Close")
+        .and_then(|call| call.destination(PORTAL))
+        .and_then(|call| call.interface(REQUEST))
+        .and_then(|call| call.with_flags(Flags::NoReplyExpected))
+        .and_then(|call| call.build(&()));
+    if let Ok(close) = close {
+        let _ = connection.send(&close);
+    }
+    let _ = connection.close();
+}
+
+fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {
+    shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// `value` as an owned D-Bus value.

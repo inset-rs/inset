@@ -16,19 +16,30 @@
 //! The platform answers `None` where its system has no file dialogs, and a dialog the system
 //! could not show is answered as a [`FileDialogError`]. Every answer comes through a future, once
 //! the user has chosen or cancelled: a cancelled dialog answers `None`, or no files.
+//!
+//! A future is the dialog it shows. Dropping it before the dialog answers closes the dialog, so an
+//! app that stops waiting leaves no panel on screen behind it; dropping one the dialog has already
+//! answered closes nothing. Each system closes its own way: macOS cancels its panel, Windows closes
+//! its dialog, the desktop portal closes its request, iOS dismisses its picker, and Android
+//! finishes the activity it started. The web cannot close a browser dialog: it stays on screen,
+//! and its answer, when it comes, is ignored without error.
 
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
-use std::task::{Context, Poll, Waker};
 
 use crate::ViewId;
+use crate::files::ReadFileFuture;
 
 /// The system's file dialogs. `parent` is the view whose window a dialog belongs to, which the
 /// system shows it on, as a sheet where it has them (macOS); without one it stands alone.
+///
+/// Each future is the dialog it shows: dropping it before the dialog answers closes the dialog
+/// on the thread the system requires, and a future the dialog has answered closes nothing when it
+/// is dropped. The web cannot close a browser dialog, which stays on screen; its answer is
+/// ignored.
 pub trait FileDialogs {
     /// Asks for one file to open; `None` if the user cancelled.
     fn open_file(
@@ -259,24 +270,22 @@ impl PickedFile {
             PickedFile::Stream(stream) => stream.url(),
         }
     }
+}
 
-    /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path is read on a thread of
-    /// its own, a handle from its start to its end, and a stream through, which uses it up.
-    pub fn read_all(&mut self) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>> + '_>> {
-        match self {
-            PickedFile::Path(path) => Box::pin(read_path(path.clone())),
-            PickedFile::Handle(handle) => Box::pin(read_handle(&**handle)),
-            PickedFile::Stream(stream) => Box::pin(read_stream(&mut **stream)),
-        }
+impl dyn FileHandle {
+    /// The whole file, from its start to its end, as Flutter's `XFile.readAsBytes` reads a web
+    /// pick. A picked path is read by the platform's file service (`Platform::files`), not here:
+    /// a handle reads itself, a path is only a name.
+    pub fn read_all(self: Box<Self>) -> ReadFileFuture {
+        Box::pin(async move { read_handle(&*self).await })
     }
 }
 
-async fn read_path(path: PathBuf) -> io::Result<Vec<u8>> {
-    let (answer, read) = one_shot();
-    std::thread::Builder::new()
-        .name("waft-read-picked-file".to_owned())
-        .spawn(move || answer.give(std::fs::read(path)))?;
-    read.await
+impl dyn FileStream {
+    /// The whole stream, read through, which uses it up.
+    pub fn read_all(mut self: Box<Self>) -> ReadFileFuture {
+        Box::pin(async move { read_stream(&mut *self).await })
+    }
 }
 
 async fn read_handle(handle: &dyn FileHandle) -> io::Result<Vec<u8>> {
@@ -303,52 +312,10 @@ async fn read_stream(stream: &mut dyn FileStream) -> io::Result<Vec<u8>> {
     }
 }
 
-/// An answer given once, from any thread, and the future that waits for it.
-fn one_shot<T>() -> (Answer<T>, Answered<T>) {
-    let shared = Arc::new(Mutex::new((None, None)));
-    (Answer(Arc::clone(&shared)), Answered(shared))
-}
-
-type Shared<T> = Arc<Mutex<(Option<io::Result<T>>, Option<Waker>)>>;
-
-struct Answer<T>(Shared<T>);
-
-impl<T> Answer<T> {
-    fn give(self, value: io::Result<T>) {
-        let waker = {
-            let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            shared.0 = Some(value);
-            shared.1.take()
-        };
-        if let Some(waker) = waker {
-            waker.wake();
-        }
-    }
-}
-
-struct Answered<T>(Shared<T>);
-
-impl<T> Future for Answered<T> {
-    type Output = io::Result<T>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<T>> {
-        let mut shared = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        match shared.0.take() {
-            Some(value) => Poll::Ready(value),
-            None if Arc::strong_count(&self.0) == 1 => {
-                Poll::Ready(Err(io::Error::other("the read ended without an answer")))
-            }
-            None => {
-                shared.1 = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::task::{Context, Poll, Waker};
 
     use super::*;
 
@@ -401,18 +368,7 @@ mod tests {
 
     #[test]
     fn a_handle_is_read_whole_in_pieces() {
-        let mut picked = PickedFile::Handle(Box::new(Bytes(RefCell::new(b"hello, file".to_vec()))));
-        assert_eq!(now(picked.read_all()).unwrap(), b"hello, file");
-    }
-
-    #[test]
-    fn a_path_is_read_whole_on_a_thread() {
-        let path = std::env::temp_dir().join(format!("waft-read-all-{}", std::process::id()));
-        std::fs::write(&path, b"on disk").unwrap();
-        let mut picked = PickedFile::Path(path.clone());
-        assert_eq!(now(picked.read_all()).unwrap(), b"on disk");
-        std::fs::remove_file(path).unwrap();
-        let mut missing = PickedFile::Path(PathBuf::from("/no/such/waft/file"));
-        assert!(now(missing.read_all()).is_err());
+        let handle: Box<dyn FileHandle> = Box::new(Bytes(RefCell::new(b"hello, file".to_vec())));
+        assert_eq!(now(handle.read_all()).unwrap(), b"hello, file");
     }
 }

@@ -23,6 +23,7 @@ waft-embedder.workspace = true
 # media, Image I/O's codecs and the notification center, which macOS shares.
 waft-embedder-apple = { workspace = true, default-features = false }
 valo.workspace = true
+valo-system-fonts.workspace = true
 valo-codec.workspace = true
 # The software decoder, behind `image-software`, for the images Image I/O does not take.
 valo-codec-software = { version = "0.26.0", optional = true }

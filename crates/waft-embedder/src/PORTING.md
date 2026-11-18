@@ -37,6 +37,64 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — a canvas here belongs to no view, and the embedder holds no implicit view whose metrics a canvas could read.
   Affect: the caller says which view's ratio the shadow is drawn at; a render object passes its own view's.
 
+## http.rs → dart:io `HttpClient`
+
+- Change: HTTP is an optional service on `Platform` (`Platform::http`), reached as `app.platform().http()`, where Dart's `HttpClient` is a global any code may make.
+  Reason: layering — a framework crate holds no platform, and a host may have no client at all, as a host without a network stack.
+  Affect: a provider or an app checks for `None` and reports its own error instead of calling a global client.
+
+- Change: the request and response values are the `http` crate's (`Request`, `Response`, `Method`, `StatusCode`, `HeaderMap`, `Uri`), and a body is Waft's `Body` over a `BodyStream`, where Dart's client has its own request and response types and a body is a `Stream<List<int>>`.
+  Reason: vocabulary — one set of HTTP values for every platform's client and the framework.
+  Affect: headers are appended to a `HeaderMap` and a body is read with a future rather than listened to.
+
+- Change: `HttpClient::send` answers a future of the response once its head arrives, its body still streaming; dropping the future or the response cancels the transfer.
+  Reason: language — a future is the cancellation point here, where Dart cancels through `HttpClientRequest.abort`.
+  Affect: a caller reads `response.body_mut().read_all()` after the head, and dropping an unwanted response stops its download.
+
+- Change: a request body on Apple's systems is read whole before the request is sent, where `NSURLSession` would otherwise need an `NSInputStream`.
+  Reason: platform — Waft's body reads through futures, which an `NSInputStream` cannot drive without blocking.
+  Affect: an upload is held in memory on Apple; the interface still streams a request body for a host whose client can.
+
+- Change: redirect policy and the three timeouts are per request (`SendOptions { redirects, connect_timeout, first_byte_timeout, between_bytes_timeout }`), where Dart sets `followRedirects`, `maxRedirects` and `connectionTimeout` on the client and has no first-byte or between-bytes bound.
+  Reason: language and interface — a client here is shared and immutable, and the timeouts are WASI 0.3's `request-options`, so a WebAssembly component passes them through.
+  Affect: each call names its policy and which steps are bounded; a timeout covers the whole exchange on Apple, where `NSURLSession` has no first-byte timer of its own.
+
+- Change: a failure is WASI 0.3's `error-code` cases, Rust-named, plus `TooManyRedirects`, where Dart throws `SocketException`, `HandshakeException`, `HttpException` and others.
+  Reason: interface — a WebAssembly component's adapter passes WASI's errors through, and another platform maps its own failures into the closest case.
+  Affect: a caller matches cases such as `ConnectionRefused`, `HttpRequestUriInvalid` and `HttpResponseTimeout`; each platform's module doc gives its mapping.
+
+- Change: the browser's client follows redirects up to the browser's own limit whatever `RedirectPolicy::Follow`'s `max`, fails with `TooManyRedirects` at the first redirect where the policy follows none, applies the page's CORS rules and proxy, restarts one timer for the head and then for each piece of the body, and exposes no trailers.
+  Reason: platform — `fetch` takes no redirect limit, hides a redirect response from the page, gives no connection callback to time separately, and gives no trailers.
+  Affect: on the web a redirect limit above zero is the browser's, a redirect response cannot be read, `connect_timeout` bounds the head and `first_byte_timeout` the body after it, and `BodyStream::trailers` answers `None`.
+
+## files.rs → dart:io `File` / `RandomAccessFile`
+
+- Change: the file system is an optional service on `Platform` (`Platform::files`), reached as `app.platform().files()`, where dart:io's `File` and `Directory` are globals.
+  Reason: layering — reading a path is the host's, and a page has no file system at all.
+  Affect: an app checks for `None`; a host without files cannot read a path.
+
+- Change: every file operation answers a future, including a whole-file `read` and `write`, and there is no synchronous read or write, where dart:io has `readAsBytesSync` and `writeAsBytesSync`.
+  Reason: language — no framework call blocks the main thread, and a platform's own asynchronous file IO is awaited.
+  Affect: a caller awaits each read and write; a synchronous caller has no counterpart.
+
+- Change: an opened file is a `File` read and written at an offset, with a cursor that the `read`/`write` pair advances and `read_at`/`write_at` leave alone, where `RandomAccessFile` has `setPosition` and a position property.
+  Reason: language — the cursor is the file's own state here, not a value a caller sets.
+  Affect: seek by choosing an offset on each call; there is no position to read back.
+
+- Change: `OpenMode` renames Dart's `FileMode.read`, `write`, `append`, `writeOnly` and `writeOnlyAppend` in snake case, and `appends` means the cursor starts at the end rather than that every write is forced to the end.
+  Reason: language — the modes are Rust values, and a write at an offset after opening in append mode is allowed, as Dart allows it.
+  Affect: opening in an append mode places the cursor at the end; a later write at an offset stays at that offset.
+
+- Change: `metadata` and `list` answer `Metadata` and `ListedEntry` values, where dart:io answers `FileStat` and `FileSystemEntity` with their own methods; `create_folder` makes a folder and its parents, as Dart's `Directory.create(recursive: true)` does.
+  Reason: language — plain values cross a host boundary unchanged, and a folder is made by the file system rather than a `Directory` object.
+  Affect: a listing is a `Vec` of names, paths and kinds; a stat is a struct; there is no `Directory` to hold.
+
+## file_dialogs.rs → `file_selector` `XFile`
+
+- Change: `XFile.readAsBytes` is split by who owns the read: a picked path is read by the platform's `Files` (`files.read(path)`), a handle or a stream by itself (`read_all` on `FileHandle` and `FileStream`). `XFile` reads itself because Dart's IO is ambient and it hides whether it holds a path or a blob; Waft has the enum and an explicit platform, so the pick stays an honest account of what the system gave.
+  Reason: layering — a picked path is still a path, and the file system that reads it is the platform's.
+  Affect: a caller passes `app.platform().files()`; a host with no file system cannot read a picked path.
+
 ## fragment_program.rs, fragment_shader.rs → dart:ui `FragmentProgram`, `FragmentShader`, the uniform slots and `UniformArray` (`painting.dart`), engine `lib/ui/painting/fragment_program.cc`, `fragment_shader.cc`
 Ported against Flutter `9c427b5d7b`.
 
@@ -92,7 +150,7 @@ Ported against Flutter `9c427b5d7b`.
   Reason: platform — a host with its own lookup (a guest across a boundary) passes a font manager instead of the platform's.
   Affect: Cupertino text shapes with the system font on every platform that has one.
 
-- Change: `Platform::default_font_families` asks the host for `txt::GetDefaultFontFamilies()`, by default the engine's answer on the OS this build targets, where Flutter's engine has its own OS's answer compiled in.
+- Change: `Platform::default_font_families` asks the host for `txt::GetDefaultFontFamilies()`, each embedder answering its OS's and a host that answers nothing getting `txt/platform.cc`'s `Arial`, where Flutter's engine has its own OS's answer compiled in.
   Reason: platform — one build can run on several systems, as a WebAssembly component does, and only its host knows at run time which one it is on.
   Affect: such a build draws text that leaves `font_family` unset in the default family of the system it runs on, not of one fixed when it was compiled.
 
@@ -436,7 +494,7 @@ Ported against Flutter `9c427b5d7b`.
   Reason: platform — there are no plugins and no method channels; the host trait is the channel.
   Affect: an app asks the platform for its dialogs, and a host without them answers `None`.
 
-- Change: a pick is a `PickedFile`: a path where the system gives one, the system's handle where it gives none (the web; Android where the document seeks), and a stream where the system gives a pipe (Android), where Flutter's `XFile` holds a path or a blob, reading only; `PickedFile::read_all` is `XFile.readAsBytes`.
+- Change: a pick is a `PickedFile`: a path where the system gives one, the system's handle where it gives none (the web; Android where the document seeks), and a stream where the system gives a pipe (Android), where Flutter's `XFile` holds a path or a blob, reading only; `XFile.readAsBytes` is `files.read(path)` for a path and `read_all` on a handle or a stream.
   Reason: platform — Android's documents and the web's files have no path, and a copy into the app's cache could not be written back.
   Affect: an app reads and writes a handle at any offset where the system gives no path, and reads a stream through once.
 

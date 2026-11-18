@@ -1,6 +1,6 @@
 # waft-embedder-web
 
-Browser host: one canvas, `requestAnimationFrame`, WebGPU.
+Browser host: one canvas, `requestAnimationFrame`, WebGPU, and HTTP over `fetch`. The page has no file system, so `Platform::files` answers `None`.
 
 An application depends on `waft-embedder-default`, not this crate. That crate picks winit on native and this host on wasm. `DefaultEmbedder::run` is the same start closure on both. The page must have a canvas whose id is `waft` (or pass another id to `canvas_id`).
 

@@ -10,4 +10,5 @@ What it provides:
 - The system's shell: the menu bar and pop-up menus, the Dock icon's menu and the notification area, notifications, the clipboard, file dialogs, opening files and links, and quitting through the app's answer.
 - The system's media: players, media assets and cameras, image codecs and video frame readers, where the system has them.
 - The user's appearance, languages and local time zone.
+- HTTP over `NSURLSession` and the file system on the embedder's threads, on macOS; Windows and Linux answer `None` until their clients are written.
 - macOS only, through `WinitPlatform::macos`: hearing a reopen, a window that slides in, hiding the app, placing a composition layer in a `CALayer` the app holds, showing the system's layer as one, and keeping the app from being throttled while it does work the user is waiting on (`MacOs::begin_user_activity`, with a `UserActivity` that ends the activity when dropped).

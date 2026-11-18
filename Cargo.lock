@@ -5116,6 +5116,7 @@ name = "waft-cupertino"
 version = "0.6.0"
 dependencies = [
  "indexmap",
+ "valo-system-fonts",
  "waft-animation",
  "waft-embedder",
  "waft-foundation",
@@ -5133,6 +5134,7 @@ dependencies = [
 name = "waft-embedder"
 version = "0.6.0"
 dependencies = [
+ "http",
  "indexmap",
  "pollster",
  "raw-window-handle",
@@ -5160,6 +5162,7 @@ dependencies = [
  "valo",
  "valo-codec",
  "valo-codec-software",
+ "valo-system-fonts",
  "waft-embedder",
  "wgpu",
 ]
@@ -5170,6 +5173,7 @@ version = "0.6.0"
 dependencies = [
  "block2",
  "dispatch2",
+ "http",
  "libc",
  "objc2",
  "objc2-av-foundation",
@@ -5223,6 +5227,7 @@ dependencies = [
  "valo",
  "valo-codec",
  "valo-codec-software",
+ "valo-system-fonts",
  "waft-embedder",
  "waft-embedder-apple",
  "waft-embedder-ios",
@@ -5235,6 +5240,7 @@ version = "0.6.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
+ "http",
  "js-sys",
  "valo",
  "waft-embedder",
@@ -5268,6 +5274,7 @@ dependencies = [
  "valo-codec",
  "valo-codec-software",
  "valo-geometry",
+ "valo-system-fonts",
  "waft-embedder",
  "waft-embedder-apple",
  "waft-embedder-winit",
@@ -5363,6 +5370,7 @@ dependencies = [
 name = "waft-painting"
 version = "0.6.0"
 dependencies = [
+ "http",
  "indexmap",
  "valo",
  "valo-system-fonts",
@@ -5371,6 +5379,7 @@ dependencies = [
  "waft-gestures",
  "waft-scheduler",
  "waft-services",
+ "waft-test",
 ]
 
 [[package]]
@@ -5447,6 +5456,7 @@ dependencies = [
 name = "waft-test"
 version = "0.6.0"
 dependencies = [
+ "http",
  "waft-embedder",
  "waft-foundation",
  "wgpu",
@@ -5474,6 +5484,7 @@ dependencies = [
 name = "waft-winui"
 version = "0.6.0"
 dependencies = [
+ "valo-system-fonts",
  "waft-animation",
  "waft-embedder",
  "waft-foundation",
@@ -5492,6 +5503,7 @@ version = "0.6.0"
 dependencies = [
  "png 0.17.16",
  "pollster",
+ "valo-system-fonts",
  "waft-animation",
  "waft-embedder",
  "waft-foundation",
@@ -6515,6 +6527,7 @@ dependencies = [
 name = "winui_gallery"
 version = "0.6.0"
 dependencies = [
+ "valo-system-fonts",
  "waft",
  "waft-animation",
  "waft-embedder",

@@ -456,13 +456,16 @@ mod tests {
             let file = file.clone();
             move || vec![file.picked()]
         });
-        let Some(mut picked) = now(dialogs.open_file(None, OpenOptions::default())).unwrap() else {
-            panic!("a pick");
+        let pick = || {
+            let Some(PickedFile::Handle(handle)) =
+                now(dialogs.open_file(None, OpenOptions::default())).unwrap()
+            else {
+                panic!("a handle");
+            };
+            handle
         };
-        assert_eq!(now(picked.read_all()).unwrap(), b"hello");
-        let PickedFile::Handle(handle) = &picked else {
-            panic!("a handle");
-        };
+        assert_eq!(now(pick().read_all()).unwrap(), b"hello");
+        let handle = pick();
         let mut writer = now(handle.open_write().expect("writable")).unwrap();
         now(writer.write_at(5, b", file")).unwrap();
         assert_eq!(file.contents(), b"hello", "not before it finishes");

@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use objc2_foundation::{NSLocale, NSString};
 use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
-    Brightness, Cameras, CaptionSettings, Clipboard, Compositor, Dispatcher, FileDialogs,
-    FontSource, HardwareBuffer, HardwareBufferAllocator, ImageCodec, ImageCodecFuture,
+    Brightness, Cameras, CaptionSettings, Clipboard, Compositor, Dispatcher, FileDialogs, Files,
+    FontSource, HardwareBuffer, HardwareBufferAllocator, HttpClient, ImageCodec, ImageCodecFuture,
     ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, MediaAssets,
     Notifications, Offset, Opener, Platform, Players, RequestId, Screen, Screens, SignedDuration,
     SnapshotDelegate, SystemFontSource, TargetPlatform, VideoFrame, VideoFrameReaders, ViewError,
@@ -65,6 +65,10 @@ pub struct IosPlatform {
     snapshots: SnapshotDelegate,
     clipboard: Pasteboard,
     file_dialogs: DocumentPickers,
+    /// `NSURLSession`, which the system's proxy and certificates apply to.
+    http: waft_embedder_apple::http::AppleHttpClient,
+    /// `std`'s file system on the host's threads.
+    files: waft_embedder_apple::files::AppleFiles,
     opener: UiKitOpener,
     notifications: Option<Rc<dyn Notifications>>,
     players: Option<Rc<dyn Players>>,
@@ -80,12 +84,16 @@ impl IosPlatform {
     /// `display_link`.
     pub(crate) fn new(views: Rc<Views>, gpu: &Gpu, display_link: Rc<DisplayLink>) -> IosPlatform {
         let images = valo::ImageContext::new(gpu.device.clone(), gpu.queue.clone());
+        let wakes = Arc::new(Wakes::default());
+        let dispatcher: Arc<dyn Dispatcher> = Arc::new(IosDispatcher(Arc::clone(&wakes)));
         IosPlatform {
+            http: waft_embedder_apple::http::AppleHttpClient::new(),
+            files: waft_embedder_apple::files::AppleFiles::new(dispatcher),
             file_dialogs: DocumentPickers::new(Rc::clone(&views)),
             opener: UiKitOpener::new(Rc::clone(&views)),
             views,
             display_link,
-            wakes: Arc::default(),
+            wakes,
             vsync_waits: Arc::default(),
             origin: Instant::now(),
             brightness: Cell::new(Brightness::Light),
@@ -259,7 +267,14 @@ impl Platform for IosPlatform {
 
     /// The system's fonts, as its own configuration lists them.
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
-        Some(Box::new(SystemFontSource::platform()))
+        Some(Box::new(SystemFontSource::new(
+            valo_system_fonts::fontmgr::platform(),
+        )))
+    }
+
+    /// The engine's default families on iOS (`txt/platform_mac.mm`).
+    fn default_font_families(&self) -> Vec<String> {
+        waft_embedder::default_font_families(TargetPlatform::IOS)
     }
 
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
@@ -349,6 +364,16 @@ impl Platform for IosPlatform {
     /// UIKit's document pickers (`file_dialogs.rs`).
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         Some(&self.file_dialogs)
+    }
+
+    /// `NSURLSession`, which uses the system's proxy and trusts the system's certificates.
+    fn http(&self) -> Option<&dyn HttpClient> {
+        Some(&self.http)
+    }
+
+    /// `std`'s file system, its blocking work on the host's threads.
+    fn files(&self) -> Option<&dyn Files> {
+        Some(&self.files)
     }
 
     /// UIKit's opening of links, and the Open In menu for files (`opener.rs`).

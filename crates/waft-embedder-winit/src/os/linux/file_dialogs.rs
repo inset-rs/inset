@@ -1,8 +1,8 @@
 //! The file dialogs: the desktop portal's `FileChooser`, which the desktop shows, over the session
 //! bus, answering the `file://` URIs it gives as paths. Each dialog asks on a thread of its own,
 //! which waits for the portal's `Response` for as long as the dialog shows, so the app goes on
-//! meanwhile. The dialogs are `None` where the session bus has no portal, running or one it can
-//! start.
+//! meanwhile; a dropped future closes the request, which closes the dialog. The dialogs are `None`
+//! where the session bus has no portal, running or one it can start.
 //!
 //! A type becomes the portal's filter, by its extensions' globs and its MIME types, under its
 //! label. A dialog is modal to its parent's window on X11, which the portal names by the window's
@@ -24,7 +24,7 @@ use winit::window::Window;
 use zbus::zvariant::OwnedValue;
 
 use super::Linux;
-use super::portal::{self, owned};
+use super::portal::{self, Closer, owned};
 use crate::file_dialogs::{ParentWindows, dialog_answer, portal_filters};
 use crate::os::capabilities::SystemFileDialogs;
 
@@ -159,12 +159,16 @@ impl PortalDialogs {
                 .unwrap_or_default(),
             options,
         };
-        let (answer, answered) = dialog_answer();
+        let close = Closer::new();
+        let (answer, answered) = dialog_answer({
+            let close = close.clone();
+            move || close.close()
+        });
         let asking = std::thread::Builder::new()
             .name("waft-file-dialog".to_owned())
-            .spawn(move || answer.give(ask_portal(ask)));
+            .spawn(move || answer.give(ask_portal(ask, &close)));
         if let Err(error) = asking {
-            let (failed, answered) = dialog_answer();
+            let (failed, answered) = dialog_answer(|| {});
             failed.give(Err(FileDialogError::Failed(error.to_string())));
             return answered;
         }
@@ -182,16 +186,20 @@ fn parent_window(window: &dyn Window) -> Option<String> {
 }
 
 /// Asks the portal and waits for its answer: the paths chosen, none if the user cancelled.
-fn ask_portal(ask: Ask) -> Result<Vec<PathBuf>, FileDialogError> {
+fn ask_portal(ask: Ask, close: &Closer) -> Result<Vec<PathBuf>, FileDialogError> {
     let Ask {
         method,
         title,
         parent_window,
         options,
     } = ask;
-    let response = portal::request(FILE_CHOOSER, method, options, |options| {
-        (parent_window, title, options)
-    })
+    let response = portal::request(
+        FILE_CHOOSER,
+        method,
+        options,
+        |options| (parent_window, title, options),
+        close,
+    )
     .map_err(|error| FileDialogError::Failed(error.to_string()))?;
     match response.code {
         0 => Ok(uris(&response.results)
