@@ -34,8 +34,9 @@ pub trait HttpClient {
 pub struct SendOptions {
     /// Which redirects the client follows.
     pub redirects: RedirectPolicy,
-    /// How long the whole exchange may take, or `None` for the client's own limit. A client
-    /// reports [`HttpError::Timeout`] when it runs out.
+    /// How long the whole exchange may take, from sending the request to the body's end, or
+    /// `None` for the client's own limit. A client reports [`HttpError::Timeout`] when it runs
+    /// out.
     pub timeout: Option<Duration>,
 }
 
@@ -43,7 +44,7 @@ impl SendOptions {
     /// Follow up to five redirects, and wait as long as the platform does.
     pub const fn new() -> SendOptions {
         SendOptions {
-            redirects: RedirectPolicy::Follow { max: 5 },
+            redirects: RedirectPolicy::DEFAULT,
             timeout: None,
         }
     }
@@ -54,7 +55,8 @@ impl SendOptions {
         self
     }
 
-    /// Dart `HttpClient.connectionTimeout`: how long the exchange may take.
+    /// How long the whole exchange may take. Dart's `HttpClient.connectionTimeout` bounds only
+    /// the connection; this bounds the response's head and body too.
     pub fn timeout(mut self, timeout: Duration) -> SendOptions {
         self.timeout = Some(timeout);
         self
@@ -69,7 +71,7 @@ impl Default for SendOptions {
 
 /// What a client does with a redirect: follows it, up to a number, or answers the redirect
 /// response itself.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RedirectPolicy {
     /// Follow up to `max` redirects, then fail with [`HttpError::TooManyRedirects`]. Dart's
     /// `HttpClient` follows five by default.
@@ -78,8 +80,18 @@ pub enum RedirectPolicy {
         max: usize,
     },
     /// Answer the first redirect response as it is, as Dart's `followRedirects = false` does.
-    #[default]
     Never,
+}
+
+impl RedirectPolicy {
+    /// Dart's `HttpClient`: follow up to five redirects.
+    pub const DEFAULT: RedirectPolicy = RedirectPolicy::Follow { max: 5 };
+}
+
+impl Default for RedirectPolicy {
+    fn default() -> RedirectPolicy {
+        RedirectPolicy::DEFAULT
+    }
 }
 
 /// Why a request got no response, or its body stopped short.
@@ -325,6 +337,7 @@ mod tests {
         let options = SendOptions::default();
         assert_eq!(options.redirects, RedirectPolicy::Follow { max: 5 });
         assert_eq!(options.timeout, None);
+        assert_eq!(RedirectPolicy::default(), options.redirects);
         let options = SendOptions::new()
             .redirects(RedirectPolicy::Never)
             .timeout(Duration::from_secs(2));
