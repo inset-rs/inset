@@ -60,10 +60,13 @@ jobs:
       # which open no window on this host, but libxcb is linked by winit's X11 backend.
       # `mesa-vulkan-drivers` is its software Vulkan device for the rendering tests, and
       # `fonts-noto-cjk` the fallback face the system-font test waits for.
+      # A mirror that stalls on one package held this step for 17 minutes: a stuck download times
+      # out after 30 seconds and is tried again, rather than waiting on apt's default.
       - name: System packages
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt_net="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=5"
+          sudo apt-get $apt_net update
+          sudo apt-get $apt_net install -y --no-install-recommends \
             libxcb1-dev libx11-dev libxkbcommon-dev libwayland-dev \
             libdbus-1-dev libfontconfig1-dev \
             libgl1-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
