@@ -22,6 +22,7 @@ waft-rendering.workspace = true
 waft-shell.workspace = true
 waft-widgets.workspace = true
 [dev-dependencies]
+valo-system-fonts.workspace = true
 waft-animation.workspace = true
 waft-test.workspace = true
 waft-services.workspace = true

@@ -7,12 +7,12 @@ use std::sync::{Arc, Mutex};
 
 use waft_embedder::{
     AppExit, AppLifecycleState, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer,
-    Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, HardwareBuffer,
-    HardwareBufferAllocator, Image, ImageCodecFuture, ImageDecodeError, Instant, MediaAssets,
-    MenuBar, Notifications, Opener, Picture, Platform, Players, PointerReport, PopupMenus,
-    RequestId, Restoration, SignedDuration, SystemChrome, SystemContextMenu, TargetPlatform,
-    TextServices, TrayIcons, VideoFrame, VideoFrameReaders, View, ViewEmbedder, ViewError,
-    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
+    Compositor, Dispatcher, DockMenu, FileDialogs, Files, FontSource, Haptics, HardwareBuffer,
+    HardwareBufferAllocator, HttpClient, Image, ImageCodecFuture, ImageDecodeError, Instant,
+    MediaAssets, MenuBar, Notifications, Opener, Picture, Platform, Players, PointerReport,
+    PopupMenus, RequestId, Restoration, SignedDuration, SystemChrome, SystemContextMenu,
+    TargetPlatform, TextServices, TrayIcons, VideoFrame, VideoFrameReaders, View, ViewEmbedder,
+    ViewError, ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
 
 use waft_embedder::image_codecs::ImageCodecs;
@@ -74,6 +74,8 @@ pub struct TestPlatform {
     popup_menus: Option<Rc<dyn PopupMenus>>,
     tray_icons: Option<Rc<dyn TrayIcons>>,
     file_dialogs: Option<Rc<dyn FileDialogs>>,
+    http: Option<Rc<dyn HttpClient>>,
+    files: Option<Rc<dyn Files>>,
     opener: Option<Rc<dyn Opener>>,
     notifications: Option<Rc<dyn Notifications>>,
     compositor: Option<Arc<dyn Compositor>>,
@@ -122,6 +124,8 @@ impl TestPlatform {
             popup_menus: None,
             tray_icons: None,
             file_dialogs: None,
+            http: None,
+            files: None,
             opener: None,
             notifications: None,
             compositor: None,
@@ -315,6 +319,18 @@ impl TestPlatform {
 
     pub fn with_file_dialogs(mut self, file_dialogs: Rc<dyn FileDialogs>) -> TestPlatform {
         self.file_dialogs = Some(file_dialogs);
+        self
+    }
+
+    /// The HTTP client behind `http`; none unless set, so every request fails at once.
+    pub fn with_http(mut self, http: Rc<dyn HttpClient>) -> TestPlatform {
+        self.http = Some(http);
+        self
+    }
+
+    /// The file system behind `files`; none unless set, so every path fails at once.
+    pub fn with_files(mut self, files: Rc<dyn Files>) -> TestPlatform {
+        self.files = Some(files);
         self
     }
 
@@ -617,6 +633,14 @@ impl Platform for TestPlatform {
 
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         self.file_dialogs.as_deref()
+    }
+
+    fn http(&self) -> Option<&dyn HttpClient> {
+        self.http.as_deref()
+    }
+
+    fn files(&self) -> Option<&dyn Files> {
+        self.files.as_deref()
     }
 
     fn opener(&self) -> Option<&dyn Opener> {

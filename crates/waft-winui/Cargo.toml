@@ -26,6 +26,7 @@ waft-services.workspace = true
 waft-widgets.workspace = true
 
 [dev-dependencies]
+valo-system-fonts.workspace = true
 waft-test.workspace = true
 waft-widgets = { workspace = true, features = ["test-support"] }
 

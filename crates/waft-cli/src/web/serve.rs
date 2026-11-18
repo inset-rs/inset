@@ -13,6 +13,10 @@ pub enum Browser {
     Chrome,
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the CLI serves in the background; it is not the framework"
+)]
 pub fn serve_and_open(dir: PathBuf, browser: Browser) -> Result<()> {
     let listener = bind()?;
     let url = format!("http://127.0.0.1:{}/", listener.local_addr()?.port());

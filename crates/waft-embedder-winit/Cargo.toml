@@ -20,6 +20,7 @@ test-support = []
 [dependencies]
 waft-embedder.workspace = true
 valo.workspace = true
+valo-system-fonts.workspace = true
 valo-codec.workspace = true
 # The steps of a clip's path, handed to Core Animation as a mask.
 valo-geometry.workspace = true

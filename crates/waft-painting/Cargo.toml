@@ -10,6 +10,8 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+# The request and response values a network image is fetched with.
+http.workspace = true
 indexmap.workspace = true
 waft-embedder.workspace = true
 waft-foundation.workspace = true
@@ -23,6 +25,8 @@ test-support = ["waft-embedder/test-support"]
 
 [dev-dependencies]
 waft-embedder = { workspace = true, features = ["test-support"] }
+# A platform with an HTTP client and a file system in memory, and an image codec.
+waft-test.workspace = true
 valo.workspace = true
 valo-system-fonts.workspace = true
 

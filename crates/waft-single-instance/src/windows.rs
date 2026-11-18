@@ -65,6 +65,10 @@ pub(crate) fn claim(id: &str) -> io::Result<SingleInstance> {
     }
     let arrivals = Arc::new(Arrivals::default());
     let first = FirstInstance::new(Arc::clone(&arrivals), Box::new(Owned(mutex)));
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the single-instance listener is a system service, not the framework"
+    )]
     thread::Builder::new()
         .name("waft-single-instance".to_owned())
         .spawn(move || listen(&pipe, &arrivals))?;

@@ -24,7 +24,9 @@
 mod caption_style;
 mod clipboard;
 mod file_dialogs;
+mod files;
 mod hardware_buffers;
+mod http;
 mod image_codecs;
 mod media;
 mod menus;
@@ -41,7 +43,9 @@ mod windows;
 pub use caption_style::MockCaptionSettings;
 pub use clipboard::MockClipboard;
 pub use file_dialogs::{AskedDialog, MemoryFile, MemoryFolder, MockFileDialogs};
+pub use files::MemoryFiles;
 pub use hardware_buffers::{AskedAllocation, MockHardwareBuffer, MockHardwareBufferAllocator};
+pub use http::{MockHttpClient, MockResponse, SentRequest};
 pub use image_codecs::{CodecCall, ImageAnswers, ImageFacts, MockImageCodecs};
 pub use media::{
     AssetAnswers, FrameAsked, MadeLayer, MockCameras, MockCaptureSession, MockCompositor,

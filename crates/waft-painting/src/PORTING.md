@@ -105,6 +105,22 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — choosing among those copies means reading the list of them a bundle publishes, and no bundle here publishes one.
   Affect: on a high-density screen a picture is drawn from the file named rather than from a sharper copy shipped beside it, unless that copy is named itself.
 
+## image_provider.rs → `NetworkImage`
+
+- Change: a status other than 200, a body that is empty, or a failure from the platform's client is reported as an `ImageDecodeError` whose message names the status, URL or reason, where Dart throws `NetworkImageLoadException`, `Exception` or the client's own error.
+  Reason: language — image providers report through `ImageDecodeError` here.
+  Affect: an `on_error` handler reads the message; there is no status code field to match on.
+
+- Change: a `FileImage` reads through the platform's file system (`Platform::files`) rather than dart:io, and an empty file is an `ImageDecodeError` naming the path where Dart throws a `StateError` and evicts the key.
+  Reason: layering — a framework crate has no file system of its own; the cache drops a pending entry when its load reports an error.
+  Affect: an app gives its platform a file system to use `FileImage`; without one, the error says so.
+
+## image_stream.rs → `ImageChunkEvent`
+
+- Change: a chunk listener is a callback (`ImageStreamListener::on_chunk`) rather than a Dart `Stream` subscription, and a provider reports events through `ImageStreamCompleter::report_image_chunk_event`.
+  Reason: language — the framework calls listeners directly, as every other listener here.
+  Affect: progress is observed by adding a listener with a chunk callback; there is no stream to cancel.
+
 ## decoration_image.rs → decoration_image.dart
 
 - Change: `paint_image` draws with the paint's alpha alone and carries no colour or blend mode over the image.
@@ -116,8 +132,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `DecorationImage`, and the `image` field on `BoxDecoration` and `ShapeDecoration`. Trigger: a decoration that paints an image.
 - `paintImage`'s nine-patch centre slice, which stretches the middle of a picture and leaves its edges alone, along with its colour filter, `invertColors`, and the choice of how it is sampled. Trigger: an image drawn as a resizable frame; painting's colour filters; a caller that needs to choose how an image is sampled.
 - Deciding what an image is called only after reading something: Dart's `ImageProvider.obtainKey` answers with a future so a provider can go and look first, where ours answers straight away. Trigger: a provider that has to read a bundle's list of files before it can name one.
-- `ImageChunkEvent` reports loading progress to stream listeners. Trigger: a provider that reports progress, such as a network provider.
-- `ResizeImage`, `FileImage` and `NetworkImage`. Trigger: decoding to a chosen size; a file system; an HTTP client.
+- `ResizeImage`. Trigger: decoding to a chosen size.
 - `ImageProvider.evict` and `obtainCacheStatus`. Trigger: a caller that drops or inspects one image in the cache.
 - `debug.dart`'s other flags (`debugPaintPictureSizesEnabled`, `debugInvertOversizedImages`, …). Trigger: image loading, or tests that need it.
 - `ColorProperty`. Trigger: diagnostics.
