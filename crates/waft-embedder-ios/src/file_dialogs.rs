@@ -110,8 +110,10 @@ impl Drop for PickerFuture {
             answering.remove(index);
             true
         });
-        if showing {
-            picker.dismissViewControllerAnimated_completion(true, None);
+        // Dismissed by the controller that presented it, which takes with it anything the picker
+        // presented in turn; asked of the picker, UIKit would dismiss only that.
+        if showing && let Some(presenter) = picker.presentingViewController() {
+            presenter.dismissViewControllerAnimated_completion(true, None);
         }
     }
 }
