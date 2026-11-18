@@ -194,11 +194,12 @@ mod tests {
 
     use super::*;
 
+    /// A click's identity and what it asked for, as the test hears them.
+    type Heard = Arc<Mutex<Vec<(Option<String>, NotificationActivation)>>>;
+
     /// An activator whose clicks are heard with the identity they carry, the process's own ID
     /// `Waft.Test`.
-    fn activator_heard_by(
-        heard: &Arc<Mutex<Vec<(Option<String>, NotificationActivation)>>>,
-    ) -> INotificationActivationCallback {
+    fn activator_heard_by(heard: &Heard) -> INotificationActivationCallback {
         let hearing = Arc::clone(heard);
         let factory: IClassFactory = ActivatorFactory {
             clicks: Clicks {

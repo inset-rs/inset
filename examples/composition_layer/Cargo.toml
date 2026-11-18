@@ -7,7 +7,8 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
-[dependencies]
+# The example is macOS only, so are its dependencies.
+[target.'cfg(target_os = "macos")'.dependencies]
 waft-embedder.workspace = true
 waft-embedder-winit.workspace = true
 waft-foundation.workspace = true
@@ -18,7 +19,6 @@ waft-shell.workspace = true
 waft-widgets.workspace = true
 
 # What a producer draws into: IOSurfaces, allocated and filled on the CPU.
-[target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFDictionary", "CFNumber", "CFString"] }
 objc2-io-surface = { version = "0.3", features = ["libc"] }
 

@@ -117,6 +117,7 @@ pub fn set_default_font_manager(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
     use super::*;
     use crate::Platform;
 
