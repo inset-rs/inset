@@ -435,24 +435,6 @@ pub enum TargetPlatform {
     Windows,
 }
 
-/// The OS this build targets, as Flutter names it; `None` for one Flutter does not name, such as
-/// a web page's or a WebAssembly component's.
-const THIS_OS: Option<TargetPlatform> = if cfg!(target_os = "android") {
-    Some(TargetPlatform::Android)
-} else if cfg!(target_os = "fuchsia") {
-    Some(TargetPlatform::Fuchsia)
-} else if cfg!(target_os = "ios") {
-    Some(TargetPlatform::IOS)
-} else if cfg!(target_os = "linux") {
-    Some(TargetPlatform::Linux)
-} else if cfg!(target_os = "macos") {
-    Some(TargetPlatform::MacOS)
-} else if cfg!(target_os = "windows") {
-    Some(TargetPlatform::Windows)
-} else {
-    None
-};
-
 /// The host's threads as any thread reaches them: the two things the framework asks of them.
 /// gpui's `PlatformDispatcher`. Flutter's embedder API has the first as `post_task_callback`,
 /// with its target time, and keeps the second — the engine's own worker threads — to itself.
@@ -633,16 +615,12 @@ pub trait Platform: Any {
     /// Flutter's `txt::GetDefaultFontFamilies()`: the families text uses when its style names
     /// none, first match first.
     ///
-    /// Defaults to the engine's answer on the OS this build targets
-    /// ([`default_font_families`](crate::default_font_families)). A host that learns its OS at
-    /// run time answers for that OS, and one whose fonts are not the OS's, as a web page's are
-    /// not, answers its own.
+    /// The engine decides this per OS, so the host answers it: one on an OS Flutter names gives
+    /// that OS's [`default_font_families`](crate::default_font_families), and one whose fonts are
+    /// not the OS's, as a web page's are not, answers its own. Defaults to `txt/platform.cc`, the
+    /// engine's answer on an OS it has no file of its own for.
     fn default_font_families(&self) -> Vec<String> {
-        match THIS_OS {
-            Some(os) => crate::default_font_families(os),
-            // `txt/platform.cc`: the engine's answer on an OS it has no file of its own for.
-            None => vec![String::from("Arial")],
-        }
+        vec![String::from("Arial")]
     }
 
     /// Open an encoded image, answering with a codec for its frames.

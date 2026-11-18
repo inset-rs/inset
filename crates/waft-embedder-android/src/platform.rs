@@ -354,6 +354,11 @@ impl Platform for AndroidPlatform {
         )))
     }
 
+    /// The engine's default families on Android (`txt/platform_android.cc`).
+    fn default_font_families(&self) -> Vec<String> {
+        waft_embedder::default_font_families(TargetPlatform::Android)
+    }
+
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {
         let loader = self.image_loader.clone();
         Box::pin(async move {

@@ -113,12 +113,23 @@ mod tests {
     use crate::Platform;
 
     #[test]
-    fn default_font_families_match_the_engine_on_this_os() {
-        let names = crate::InertPlatform.default_font_families();
-        assert!(!names.is_empty());
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        assert_eq!(names, vec![CUPERTINO_TEXT]);
-        #[cfg(target_os = "android")]
-        assert_eq!(names, vec!["sans-serif"]);
+    fn a_host_that_answers_nothing_gets_the_engines_generic_family() {
+        assert_eq!(crate::InertPlatform.default_font_families(), vec!["Arial"]);
+    }
+
+    #[test]
+    fn each_os_gets_the_families_of_its_engine_file() {
+        assert_eq!(
+            default_font_families(TargetPlatform::MacOS),
+            vec![CUPERTINO_TEXT]
+        );
+        assert_eq!(
+            default_font_families(TargetPlatform::Android),
+            vec!["sans-serif"]
+        );
+        assert_eq!(
+            default_font_families(TargetPlatform::Windows),
+            vec!["Segoe UI", "Arial"]
+        );
     }
 }

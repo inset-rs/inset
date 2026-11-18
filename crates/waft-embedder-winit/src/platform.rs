@@ -290,6 +290,12 @@ impl Platform for WinitPlatform {
         )))
     }
 
+    /// The engine's default families on this OS (`txt/platform_mac.mm`, `platform_windows.cc`,
+    /// `platform_linux.cc`).
+    fn default_font_families(&self) -> Vec<String> {
+        waft_embedder::default_font_families(System::TARGET_PLATFORM)
+    }
+
     fn compositor(&self) -> Option<Arc<dyn Compositor>> {
         self.compositor.clone()
     }

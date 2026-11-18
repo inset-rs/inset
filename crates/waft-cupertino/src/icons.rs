@@ -7422,6 +7422,20 @@ mod tests {
     use waft_foundation::AppCell;
     use waft_painting::{TextPainter, TextSpan, TextStyle};
 
+    /// The engine's default families on the OS these tests run on, as its embedder answers them.
+    fn this_os_default_families() -> Vec<String> {
+        let os = if cfg!(target_os = "windows") {
+            waft_embedder::TargetPlatform::Windows
+        } else if cfg!(target_os = "linux") {
+            waft_embedder::TargetPlatform::Linux
+        } else if cfg!(target_os = "android") {
+            waft_embedder::TargetPlatform::Android
+        } else {
+            waft_embedder::TargetPlatform::MacOS
+        };
+        waft_embedder::default_font_families(os)
+    }
+
     use super::*;
 
     /// The glyph of an icon, as the text a paragraph shapes.
@@ -7510,7 +7524,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let binding = PaintingBinding::instance(&mut app);
-        let families = app.platform().default_font_families();
+        let families = this_os_default_families();
         binding.install_fonts(&mut app, |fonts| {
             waft_embedder::set_default_font_manager(
                 fonts,

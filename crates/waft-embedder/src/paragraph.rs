@@ -1716,7 +1716,21 @@ mod layout_tests {
     //! Shaping needs real fonts: these shape against the OS fonts.
 
     use super::*;
-    use crate::Platform;
+    use crate::TargetPlatform;
+
+    /// The engine's default families on the OS these tests run on, as its embedder answers them.
+    fn this_os_default_families() -> Vec<String> {
+        let os = if cfg!(target_os = "windows") {
+            TargetPlatform::Windows
+        } else if cfg!(target_os = "linux") {
+            TargetPlatform::Linux
+        } else if cfg!(target_os = "android") {
+            TargetPlatform::Android
+        } else {
+            TargetPlatform::MacOS
+        };
+        crate::default_font_families(os)
+    }
 
     fn fonts() -> FontCollection {
         let mut fonts = FontCollection::new();
@@ -2097,7 +2111,7 @@ mod layout_tests {
             Box::new(crate::SystemFontSource::new(
                 valo_system_fonts::fontmgr::platform(),
             )),
-            &crate::InertPlatform.default_font_families(),
+            &this_os_default_families(),
         );
         let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
         builder.push_style(TextStyle {

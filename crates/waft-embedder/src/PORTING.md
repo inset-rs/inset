@@ -150,7 +150,7 @@ Ported against Flutter `9c427b5d7b`.
   Reason: platform — a host with its own lookup (a guest across a boundary) passes a font manager instead of the platform's.
   Affect: Cupertino text shapes with the system font on every platform that has one.
 
-- Change: `Platform::default_font_families` asks the host for `txt::GetDefaultFontFamilies()`, by default the engine's answer on the OS this build targets, where Flutter's engine has its own OS's answer compiled in.
+- Change: `Platform::default_font_families` asks the host for `txt::GetDefaultFontFamilies()`, each embedder answering its OS's and a host that answers nothing getting `txt/platform.cc`'s `Arial`, where Flutter's engine has its own OS's answer compiled in.
   Reason: platform — one build can run on several systems, as a WebAssembly component does, and only its host knows at run time which one it is on.
   Affect: such a build draws text that leaves `font_family` unset in the default family of the system it runs on, not of one fixed when it was compiled.
 
