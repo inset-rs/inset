@@ -530,7 +530,10 @@ impl Body {
     /// `trailers`, sent after this body ends: the body answers them once its bytes have been
     /// read, as HTTP sends its trailers after the last byte. A body whose stream has fields of
     /// its own has them replaced. A client whose protocol layer cannot send trailers fails the
-    /// request rather than dropping them.
+    /// request rather than dropping them. Over HTTP/1.1 the request names its trailers in a
+    /// `Trailer` header, as RFC 9110 §6.6.2 asks of a sender: a client may drop a field it was
+    /// not told of (hyper does), and a body's trailers may not be known until it ends, so the
+    /// request says them, not the client.
     pub fn with_trailers(self, trailers: HeaderMap) -> Body {
         Body(BodyKind::Trailered {
             inner: Box::new(self.0),
