@@ -174,7 +174,7 @@ pub struct NavigationView {
     pub is_pane_visible: bool,
     /// `IsTitleBarAutoPaddingEnabled`: whether the toggle, the pane's items and the content's
     /// controls keep clear of what the system covers of the view (the `MediaQuery`'s `padding`,
-    /// which a `Page` that `extends_content_into_system_bars` leaves), while the pane and the
+    /// which a `FluentPage` that `extends_content_into_system_bars` leaves), while the pane and the
     /// content reach the view's edges.
     pub is_title_bar_auto_padding_enabled: bool,
     /// Whether the menu toggle is visible in left layouts.
@@ -1641,7 +1641,7 @@ impl NavigationViewState {
     }
 
     /// `UpdateTitleBarPadding`'s padding, widened from the title bar to every side the system's
-    /// bars cover: the `MediaQuery`'s `padding` a `Page` extending its content into the bars
+    /// bars cover: the `MediaQuery`'s `padding` a `FluentPage` extending its content into the bars
     /// leaves, while `IsTitleBarAutoPaddingEnabled`. A page that pads for the bars itself removes
     /// that padding, and the navigation keeps clear of nothing more, as WinUI's adds no title-bar
     /// padding to a navigation not at the window's top.

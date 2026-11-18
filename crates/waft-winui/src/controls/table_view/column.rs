@@ -36,14 +36,6 @@ pub enum TableViewSortCycle {
     DescendingAscendingNone,
 }
 
-/// XAML `Visibility`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Visibility {
-    #[default]
-    Visible,
-    Collapsed,
-}
-
 /// Which property of a column last changed: the branch of `TableViewColumn::OnPropertyChanged` the owning table takes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) enum ColumnChange {
@@ -103,7 +95,7 @@ pub struct TableViewColumn<T> {
     can_resize: bool,
     actual_width: f64,
     frozen_edge: TableViewFrozenEdge,
-    visibility: Visibility,
+    visible: bool,
     can_sort: bool,
     sort_cycle: TableViewSortCycle,
     /// `SortMemberPath` as the key it names.
@@ -129,7 +121,7 @@ impl<T: 'static> TableViewColumn<T> {
             can_resize: true,
             actual_width: DEFAULT_WIDTH,
             frozen_edge: TableViewFrozenEdge::None,
-            visibility: Visibility::Visible,
+            visible: true,
             can_sort: true,
             sort_cycle: TableViewSortCycle::AscendingDescending,
             sort_key: None,
@@ -266,15 +258,15 @@ impl<T: 'static> TableViewColumn<T> {
         }
     }
 
-    /// `Visibility`.
-    pub fn visibility(self: Handle<Self>, app: &App) -> Visibility {
-        app.get(self).visibility
+    /// `Visibility`: whether the column and its cells are shown.
+    pub fn visible(self: Handle<Self>, app: &App) -> bool {
+        app.get(self).visible
     }
 
     /// Sets `Visibility`.
-    pub fn set_visibility(self: Handle<Self>, app: &mut App, value: Visibility) {
-        if app.get(self).visibility != value {
-            app.get_mut(self).visibility = value;
+    pub fn set_visible(self: Handle<Self>, app: &mut App, value: bool) {
+        if app.get(self).visible != value {
+            app.get_mut(self).visible = value;
             self.changed(app, ColumnChange::Visibility);
         }
     }

@@ -4,6 +4,22 @@ Audience: readers familiar with Flutter and Rust; the headings identify the corr
 WinUI home: `controls/dev/` for the controls, `dxaml/phone/lib/ThemeTransitions.cpp` for the Frame's navigation transitions
 Ported against: aa3207e6
 
+## Names that share the app's namespace with `waft::*`
+
+An app globs the facade and a kit together (`use waft::*; use waft_winui::*;`), so a name both
+export would be ambiguous. A kit reuses Flutter's type where WinUI's is the same thing, and
+prefixes a type of its own, as decided for WaOS's docs:
+
+- `Page` is `FluentPage`, as `FluentApp` and `FluentPageRoute` are; Flutter's widgets library
+  already exports `Page`, a route's settings. An app writes `FluentPage::new()`.
+- `Slider`, `ColorPicker` and `ColorPickerSlider`'s `Orientation` is Flutter's [`Axis`]:
+  horizontal and vertical are exactly it, and `Orientation` is Flutter's landscape/portrait
+  media-query type. An app writes `.orientation(Axis::Vertical)`.
+- `TableViewColumn`'s `Visibility` is `visible(app)` / `set_visible(app, bool)`: Flutter's
+  `Visibility` is a widget, and WinUI's two states are a boolean.
+- the checkbox's `CheckState` is internal, so an app never sees it; its `is_checked` is already
+  `Option<bool>`, as Flutter's `Checkbox(value:)` is `bool?`, and `None` is indeterminate.
+
 ## app.rs → Flutter `material/app.dart` and `cupertino/app.dart`, over WinUI's theme resources
 
 - Change: `FluentApp` takes [`FluentTheme`](crate::FluentTheme) values, each a WinUI [`Theme`](crate::Theme) with an [`AccentPalette`](crate::AccentPalette), where `MaterialApp` takes `ThemeData` and `CupertinoApp` `CupertinoThemeData`.

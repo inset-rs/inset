@@ -1,4 +1,4 @@
-//! The Page example: the gallery itself is a `Page`, and this destination fills the area the page leaves free, its text box on the bottom edge, so the system's bars and the keyboard can be seen to stay clear of it.
+//! The Page example: the gallery itself is a `FluentPage`, and this destination fills the area the page leaves free, its text box on the bottom edge, so the system's bars and the keyboard can be seen to stay clear of it.
 
 use crate::{example, label};
 use waft_foundation::{App, Handle, Ref};
@@ -14,7 +14,7 @@ pub fn build(resources: &ThemeResources, horizontal_inset: f64) -> WidgetRef {
         "Its background reaches under the system's bars; its content stays inside them, and shrinks above the keyboard. Focus the box below on a phone.",
         resources,
         label(
-            "Page::new().background(..).content(..)",
+            "FluentPage::new().background(..).content(..)",
             TextBlockStyle::Body,
             resources.text_fill_color_secondary,
         ),

@@ -19,14 +19,6 @@ use waft_services::{KeyEvent, LogicalKeyboardKey};
 use waft_widgets::Listener as PointerListener;
 use waft_widgets::*;
 
-/// XAML `Orientation`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Orientation {
-    #[default]
-    Horizontal,
-    Vertical,
-}
-
 /// XAML `SliderSnapsTo`: what `Value` snaps to while the thumb moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum SliderSnapsTo {
@@ -146,7 +138,9 @@ pub struct Slider {
     pub tick_frequency: f64,
     pub tick_placement: TickPlacement,
     pub snaps_to: SliderSnapsTo,
-    pub orientation: Orientation,
+    /// XAML `Orientation`: the track runs left to right ([`Axis::Horizontal`]) or bottom to top
+    /// ([`Axis::Vertical`]).
+    pub orientation: Axis,
     /// XAML `IsDirectionReversed`: the value grows toward the start of the track.
     pub is_direction_reversed: bool,
     pub header: Option<WidgetRef>,
@@ -174,7 +168,7 @@ impl Slider {
             tick_frequency: 0.0,
             tick_placement: TickPlacement::None,
             snaps_to: SliderSnapsTo::StepValues,
-            orientation: Orientation::Horizontal,
+            orientation: Axis::Horizontal,
             is_direction_reversed: false,
             header: None,
             is_enabled: true,
@@ -243,8 +237,8 @@ impl Slider {
         self
     }
 
-    /// XAML `Orientation`.
-    pub fn orientation(mut self, orientation: Orientation) -> Slider {
+    /// XAML `Orientation`: [`Axis::Horizontal`] or [`Axis::Vertical`].
+    pub fn orientation(mut self, orientation: Axis) -> Slider {
         self.orientation = orientation;
         self
     }
@@ -310,8 +304,8 @@ impl Slider {
     /// The thumb's extent along the orientation: `Slider::GetThumbLength`.
     fn thumb_length(&self, r: &ThemeResources) -> f64 {
         match self.orientation {
-            Orientation::Horizontal => r.slider_horizontal_thumb_width,
-            Orientation::Vertical => r.slider_vertical_thumb_height,
+            Axis::Horizontal => r.slider_horizontal_thumb_width,
+            Axis::Vertical => r.slider_vertical_thumb_height,
         }
     }
 
@@ -507,8 +501,8 @@ impl SliderState {
         let widget = self.widget(app).clone();
         let track_size = self.track_size(app);
         let (track_length, click_delta) = match widget.orientation {
-            Orientation::Horizontal => (track_size.width(), point.dx()),
-            Orientation::Vertical => (track_size.height(), track_size.height() - point.dy()),
+            Axis::Horizontal => (track_size.width(), point.dx()),
+            Axis::Vertical => (track_size.height(), track_size.height() - point.dy()),
         };
         let thumb_length = widget.thumb_length(&r);
         let clickable_length = (track_length - thumb_length).max(1.0);
@@ -532,8 +526,8 @@ impl SliderState {
         let track_size = self.track_size(app);
         let range = widget.range();
         let (change, actual_size) = match widget.orientation {
-            Orientation::Horizontal => (change.dx(), track_size.width()),
-            Orientation::Vertical => (-change.dy(), track_size.height()),
+            Axis::Horizontal => (change.dx(), track_size.width()),
+            Axis::Vertical => (-change.dy(), track_size.height()),
         };
         let offset = change * range.span() / (actual_size - widget.thumb_length(&r)).max(1.0);
         if !offset.is_finite() {
@@ -886,7 +880,7 @@ fn decrease_length(track_length: f64, thumb_length: f64, fraction: f64) -> f64 {
 /// The thumb's slot in the template grid: after the decrease rect along the track (before it when reversed), centred across it in the three rows or columns.
 fn thumb_rect(
     r: &ThemeResources,
-    orientation: Orientation,
+    orientation: Axis,
     is_direction_reversed: bool,
     track_size: Size,
     fraction: f64,
@@ -896,7 +890,7 @@ fn thumb_rect(
             - r.slider_horizontal_thumb_height)
             / 2.0;
     match orientation {
-        Orientation::Horizontal => {
+        Axis::Horizontal => {
             let thumb = r.slider_horizontal_thumb_width;
             let decrease = decrease_length(track_size.width(), thumb, fraction);
             let left = if is_direction_reversed {
@@ -906,7 +900,7 @@ fn thumb_rect(
             };
             Rect::from_ltwh(left, across, thumb, r.slider_horizontal_thumb_height)
         }
-        Orientation::Vertical => {
+        Axis::Vertical => {
             let thumb = r.slider_vertical_thumb_height;
             let decrease = decrease_length(track_size.height(), thumb, fraction);
             let top = if is_direction_reversed {
@@ -974,8 +968,8 @@ fn slider_container(
 ) -> WidgetRef {
     let brushes = brushes(resources, resources, states.slider);
     let template = match widget.orientation {
-        Orientation::Horizontal => horizontal_template(resources, widget, states, &brushes),
-        Orientation::Vertical => vertical_template(resources, widget, states, &brushes),
+        Axis::Horizontal => horizontal_template(resources, widget, states, &brushes),
+        Axis::Vertical => vertical_template(resources, widget, states, &brushes),
     };
     ColoredBox::new(brushes.container)
         .child(template)
@@ -999,12 +993,12 @@ pub(crate) fn decrease_definitions(
 /// `child` stretched along `orientation` to a bounded length, adding nothing to an unbounded one.
 /// The track and tick bars use it so that a slider fills the width or height its parent bounds, as
 /// Flutter's `Slider` does, and in an unbounded length is as long as its thumb, as XAML measures it.
-pub(crate) fn fill_bounded<K>(orientation: Orientation, child: impl IntoWidget<K>) -> WidgetRef {
+pub(crate) fn fill_bounded<K>(orientation: Axis, child: impl IntoWidget<K>) -> WidgetRef {
     match orientation {
-        Orientation::Horizontal => LimitedBox::new()
+        Axis::Horizontal => LimitedBox::new()
             .max_width(0.0)
             .child(SizedBox::new().width(f64::INFINITY).child(child)),
-        Orientation::Vertical => LimitedBox::new()
+        Axis::Vertical => LimitedBox::new()
             .max_height(0.0)
             .child(SizedBox::new().height(f64::INFINITY).child(child)),
     }
@@ -1050,7 +1044,7 @@ fn horizontal_template(
     let mut children = vec![
         // `HorizontalTrackRect`.
         GridCell::new(fill_bounded(
-            Orientation::Horizontal,
+            Axis::Horizontal,
             SizedBox::new()
                 .height(resources.slider_track_theme_height)
                 .child(track_rectangle(resources, brushes.track)),
@@ -1082,7 +1076,7 @@ fn horizontal_template(
                     Align::new()
                         .alignment(AlignmentGeometry::BOTTOM_CENTER)
                         .child(fill_bounded(
-                            Orientation::Horizontal,
+                            Axis::Horizontal,
                             SizedBox::new()
                                 .height(resources.slider_outside_tick_bar_theme_height)
                                 .child(tick_bar(resources, widget, states, brushes.tick_bar)),
@@ -1098,7 +1092,7 @@ fn horizontal_template(
         // `HorizontalInlineTickBar`: over the track, `SliderInlineTickBarFill`.
         children.push(
             GridCell::new(fill_bounded(
-                Orientation::Horizontal,
+                Axis::Horizontal,
                 SizedBox::new()
                     .height(resources.slider_track_theme_height)
                     .child(tick_bar(
@@ -1127,7 +1121,7 @@ fn horizontal_template(
                     Align::new()
                         .alignment(AlignmentGeometry::TOP_CENTER)
                         .child(fill_bounded(
-                            Orientation::Horizontal,
+                            Axis::Horizontal,
                             SizedBox::new()
                                 .height(resources.slider_outside_tick_bar_theme_height)
                                 .child(tick_bar(resources, widget, states, brushes.tick_bar)),
@@ -1192,7 +1186,7 @@ fn vertical_template(
     let mut children = vec![
         // `VerticalTrackRect`.
         GridCell::new(fill_bounded(
-            Orientation::Vertical,
+            Axis::Vertical,
             SizedBox::new()
                 .width(resources.slider_track_theme_height)
                 .child(track_rectangle(resources, brushes.track)),
@@ -1224,7 +1218,7 @@ fn vertical_template(
                     Align::new()
                         .alignment(AlignmentGeometry::CENTER_RIGHT)
                         .child(fill_bounded(
-                            Orientation::Vertical,
+                            Axis::Vertical,
                             SizedBox::new()
                                 .width(resources.slider_outside_tick_bar_theme_height)
                                 .child(tick_bar(resources, widget, states, brushes.tick_bar)),
@@ -1240,7 +1234,7 @@ fn vertical_template(
         // `VerticalInlineTickBar`.
         children.push(
             GridCell::new(fill_bounded(
-                Orientation::Vertical,
+                Axis::Vertical,
                 SizedBox::new()
                     .width(resources.slider_track_theme_height)
                     .child(tick_bar(
@@ -1269,7 +1263,7 @@ fn vertical_template(
                     Align::new()
                         .alignment(AlignmentGeometry::CENTER_LEFT)
                         .child(fill_bounded(
-                            Orientation::Vertical,
+                            Axis::Vertical,
                             SizedBox::new()
                                 .width(resources.slider_outside_tick_bar_theme_height)
                                 .child(tick_bar(resources, widget, states, brushes.tick_bar)),
@@ -1373,7 +1367,7 @@ fn thumb(
         resources.text_fill_color_primary,
     )))
     .padding([8.0, 3.0, 8.0, 5.0])
-    .placement(if widget.orientation == Orientation::Horizontal {
+    .placement(if widget.orientation == Axis::Horizontal {
         PlacementMode::Top
     } else {
         PlacementMode::Left

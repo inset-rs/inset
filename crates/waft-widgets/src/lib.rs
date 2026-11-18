@@ -63,7 +63,7 @@ pub use widgets::image::Image;
 pub mod __private {
     pub use waft_foundation as foundation;
 }
-pub use multi_view_app::{MultiViewApp, MultiViewAppState, ViewBuilder, ViewCloseHandler};
+pub use multi_view_app::{MultiViewApp, MultiViewAppState, MultiViewBuilder, ViewCloseHandler};
 pub use view::*;
 pub use widgets::actions::*;
 pub use widgets::animated_size::*;
@@ -77,7 +77,6 @@ pub use widgets::banner::*;
 pub use widgets::basic::*;
 pub use widgets::bottom_navigation_bar_item::*;
 pub use widgets::composition_layer_view::*;
-pub use widgets::constants::*;
 pub use widgets::container::*;
 pub use widgets::context_menu_button_item::*;
 pub use widgets::date::*;

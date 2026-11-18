@@ -9,6 +9,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[package.metadata.waft]
+# A platform: its threads and target code are its own.
+platform = true
+
 [features]
 default = ["image-apple", "image-software", "image-worker"]
 image-apple = ["waft-embedder-apple/image-apple"]

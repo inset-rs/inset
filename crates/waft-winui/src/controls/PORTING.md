@@ -852,17 +852,17 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
   Reason: language — WinUI catches a throwing predicate and leaves the item out, and Rust has no exceptions to catch.
   Affect: A predicate that panics panics the application.
 
-## page.rs → `Page`
+## page.rs → `FluentPage`
 
-- Change: `Page` keeps its content clear of the system's bars by the ambient `MediaQuery`'s `padding`, and hands its content a `MediaQuery` with that padding removed, wherever the page sits.
+- Change: `FluentPage` keeps its content clear of the system's bars by the ambient `MediaQuery`'s `padding`, and hands its content a `MediaQuery` with that padding removed, wherever the page sits.
   Reason: framework — WinUI's `CalculateUpdatedBounds` applies the window's layout bounds only when the page is the window's size, while Waft, after Flutter's `SafeArea`, removes padding an ancestor has used from the `MediaQuery` it passes down.
   Affect: A page nested in another page, or under a `SafeArea`, adds no inset, as in WinUI; a page smaller than the window still pads by what its `MediaQuery` reports, where WinUI's would add none.
 
-- Change: `Page` also shrinks its content by the keyboard's height, `MediaQuery::view_insets.bottom`, and removes that inset from the content's `MediaQuery`, as Flutter's `Scaffold` does with `resizeToAvoidBottomInset`.
+- Change: `FluentPage` also shrinks its content by the keyboard's height, `MediaQuery::view_insets.bottom`, and removes that inset from the content's `MediaQuery`, as Flutter's `Scaffold` does with `resizeToAvoidBottomInset`.
   Reason: framework — WinUI leaves the page's size alone and scrolls the focused text box into view from its input pane handler (`CInputPaneHandler`), which the kit does not port.
   Affect: Content laid out to the page's bottom edge, such as a text box there, moves above the keyboard while the keyboard shows.
 
-- Change: `Page::extends_content_into_system_bars`, off by default, lets the content fill the page under the system's bars and leaves their padding in the content's `MediaQuery`; the keyboard is still kept clear. It takes the place of WinUI's `Window.ExtendsContentIntoTitleBar` and of `ApplicationView.DesiredBoundsMode`'s `UseCoreWindow`, and covers every system bar, not only the title bar.
+- Change: `FluentPage::extends_content_into_system_bars`, off by default, lets the content fill the page under the system's bars and leaves their padding in the content's `MediaQuery`; the keyboard is still kept clear. It takes the place of WinUI's `Window.ExtendsContentIntoTitleBar` and of `ApplicationView.DesiredBoundsMode`'s `UseCoreWindow`, and covers every system bar, not only the title bar.
   Reason: framework — Waft has no window object or app-wide bounds mode for the switch to live on, and its system bars are the `MediaQuery`'s padding on every side, where WinUI's switch covers only the window's title bar.
   Affect: An application sets the switch on its root page, as a WinUI application sets it on its window; the content, such as a `NavigationView`, then keeps its own controls clear of the bars from that padding.
 
@@ -914,9 +914,9 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 - Cancelling a `TreeView` drag with Escape remains deferred. Trigger: Waft's drag and drop can be cancelled by a key.
 - `SelectorBar`'s accessibility, its automation peers and their selection pattern, remains deferred. Trigger: The kit gains accessibility support.
 - `SelectorBarItem`'s tooltip for a truncated text, which the spec leaves open, remains deferred. Trigger: WinUI's control shows one.
-- `Page`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
-- `Page`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
-- `Page` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.
+- `FluentPage`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
+- `FluentPage`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
+- `FluentPage` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.
 - `ItemsViewSource`'s in-place changes, which `SelectionModel::on_items_added` and `on_items_removed` would follow as `TableViewSource`'s do, remain deferred; `ItemsViewSource::set_items` replaces the items and clears the selection. Trigger: A caller that changes an `ItemsView`'s items in place.
 - `ItemsView`'s other layouts, `LinedFlowLayout` and `UniformGridLayout`, its `ItemTransitionProvider` and its `VerticalScrollController` remain deferred. Trigger: An application needs a grid or flow of items, or animated insertion and removal.
 - `ItemsView`'s and `ItemContainer`'s accessibility, their automation peers and selection patterns, remains deferred. Trigger: The kit gains accessibility support.

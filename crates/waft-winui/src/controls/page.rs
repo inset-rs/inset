@@ -8,8 +8,11 @@ use waft_painting::{EdgeInsets, EdgeInsetsGeometry};
 use waft_widgets::*;
 
 /// XAML `Page`: content on a background, clear of the system's bars and keyboard.
+///
+/// `FluentPage`, not `Page`: Flutter's widgets library already has a `Page` (a route's
+/// settings), and a kit's `*` globs beside `waft::*`.
 #[derive(Clone, Debug, Default)]
-pub struct Page {
+pub struct FluentPage {
     /// `Content`: what the page shows, inside the area the system's bars and the keyboard leave free.
     pub content: Option<WidgetRef>,
 
@@ -23,7 +26,7 @@ pub struct Page {
     pub key: Option<KeyRef>,
 }
 
-impl Page {
+impl FluentPage {
     /// Creates a page with no content and no background.
     pub fn new() -> Self {
         Self::default()
@@ -54,7 +57,7 @@ impl Page {
     }
 }
 
-impl StatelessWidget for Page {
+impl StatelessWidget for FluentPage {
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
     }

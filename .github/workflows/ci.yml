@@ -21,11 +21,13 @@ jobs:
         run: cargo fmt --all -- --check
       - name: No thread of its own
         run: |
-          exempt=$(grep -v '^#' platform-guard-exempt-crates.txt | sed '/^$/d')
-          for manifest in crates/*/Cargo.toml; do
-            name=$(basename "$(dirname "$manifest")")
-            if printf '%s\n' "$exempt" | grep -qx "$name"; then continue; fi
-            cargo clippy --manifest-path "$manifest" --all-targets -- -D clippy::disallowed_methods
+          crates="$PWD/crates/"
+          for name in $(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg crates "$crates" '.packages[]
+                | select(.manifest_path | startswith($crates))
+                | select(.metadata.waft.platform != true)
+                | .name'); do
+            cargo clippy -p "$name" --all-targets --no-deps -- -D clippy::disallowed_methods
           done
       - name: Tests
         run: cargo test --workspace --no-fail-fast

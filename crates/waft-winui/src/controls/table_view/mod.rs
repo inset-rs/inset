@@ -11,9 +11,7 @@ mod selection;
 mod sort;
 mod source;
 
-pub use column::{
-    TableViewCellTemplate, TableViewColumn, TableViewFrozenEdge, TableViewSortCycle, Visibility,
-};
+pub use column::{TableViewCellTemplate, TableViewColumn, TableViewFrozenEdge, TableViewSortCycle};
 pub use selection::TableViewSelection;
 pub use sort::TableViewSort;
 pub use source::{SortDirection, TableViewSource};
@@ -841,7 +839,7 @@ impl<T: 'static> TableViewState<T> {
                 id: column.id(),
                 auto: column.width(app).unit == GridUnitType::Auto,
                 width: column.actual_width(app),
-                visible: column.visibility(app) == Visibility::Visible,
+                visible: column.visible(app),
             })
             .collect();
         // Only the contiguous prefix from the first column is frozen.

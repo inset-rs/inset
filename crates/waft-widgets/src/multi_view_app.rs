@@ -47,7 +47,10 @@ use crate::view::{View, ViewCollection};
 
 /// What a [`MultiViewApp`] shows in one of the views the platform hosts for the app; `None` shows
 /// nothing there.
-pub type ViewBuilder = Rc<dyn Fn(&mut App, &ViewRef) -> Option<WidgetRef>>;
+///
+/// A name of its own, not `ViewBuilder`: Material's `SearchAnchor` already owns that name in
+/// Flutter, and a kit's `*` globs beside `waft::*`.
+pub type MultiViewBuilder = Rc<dyn Fn(&mut App, &ViewRef) -> Option<WidgetRef>>;
 
 /// What a request to close one of the views a [`MultiViewApp`] shows content in does, given the
 /// view.
@@ -56,7 +59,7 @@ pub type ViewCloseHandler = Rc<dyn Fn(&mut App, &ViewRef)>;
 /// Shows, in each view the platform hosts for the app, what its builder answers for it.
 pub struct MultiViewApp {
     pub key: Option<KeyRef>,
-    builder: ViewBuilder,
+    builder: MultiViewBuilder,
     on_close_requested: Option<ViewCloseHandler>,
 }
 

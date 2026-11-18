@@ -59,8 +59,11 @@ pub fn segment_duration(markers: (f64, f64)) -> Duration {
 }
 
 /// XAML `ToggleButton.IsChecked`, whose `IReference<bool>` is null for indeterminate.
+///
+/// Internal: the control's own `is_checked` is already `Option<bool>`, as Flutter's
+/// `Checkbox(value:)`; this names the three drawing states for the template.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum CheckState {
+pub(crate) enum CheckState {
     #[default]
     Unchecked,
     Checked,
@@ -68,7 +71,7 @@ pub enum CheckState {
 }
 
 impl CheckState {
-    pub fn from_is_checked(is_checked: Option<bool>) -> CheckState {
+    pub(crate) fn from_is_checked(is_checked: Option<bool>) -> CheckState {
         match is_checked {
             Some(true) => CheckState::Checked,
             Some(false) => CheckState::Unchecked,
@@ -105,7 +108,7 @@ pub struct CheckBoxBrushes {
 }
 
 /// The `{ThemeResource …}` values the `CombinedStates` storyboard for (`check`, `common`) names.
-pub fn check_box_brushes(
+pub(crate) fn check_box_brushes(
     r: &ThemeResources,
     check: CheckState,
     common: CommonState,

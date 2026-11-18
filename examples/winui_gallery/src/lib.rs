@@ -465,7 +465,7 @@ impl State for GalleryState {
 /// navigation keeps its toggle, pane items and content clear of them while its pane and content
 /// reach the screen's edges.
 fn gallery_page(resources: &ThemeResources, navigation: NavigationView) -> WidgetRef {
-    waft_winui::Page::new()
+    waft_winui::FluentPage::new()
         .background(Brush::Solid(resources.solid_background_fill_color_base))
         .extends_content_into_system_bars(true)
         .content(navigation)

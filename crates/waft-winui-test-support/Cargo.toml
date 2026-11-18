@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.waft]
+# A fixture crate for the WinUI tests, not the framework.
+platform = true
+
 [dependencies]
 valo-system-fonts.workspace = true
 waft-animation.workspace = true
