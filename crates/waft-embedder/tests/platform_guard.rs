@@ -62,7 +62,7 @@ fn no_framework_crate_switches_on_the_target() {
                 .strip_prefix(&root)
                 .unwrap_or(&file)
                 .to_string_lossy()
-                .into_owned();
+                .replace('\\', "/");
             scan(&file, &relative, &mut hits);
         }
     }

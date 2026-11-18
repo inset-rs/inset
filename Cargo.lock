@@ -5326,7 +5326,6 @@ name = "waft-markdown"
 version = "0.6.0"
 dependencies = [
  "pulldown-cmark",
- "valo-system-fonts",
  "waft-embedder",
  "waft-foundation",
  "waft-gestures",

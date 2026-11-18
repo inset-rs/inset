@@ -457,10 +457,20 @@ mod tests {
             &MockCompositor::new(),
             &Rc::new(TestView::new(800.0, 600.0)),
         );
-        let picked = PickedFile::Path(PathBuf::from("/movies/a b.mov"));
+        // A rootless path gains the current drive on Windows, as `std::path::absolute` then
+        // answers, so the URL carries it.
+        let (path, url) = if cfg!(windows) {
+            (
+                PathBuf::from(r"C:\movies\a b.mov"),
+                "file:///C:/movies/a%20b.mov",
+            )
+        } else {
+            (PathBuf::from("/movies/a b.mov"), "file:///movies/a%20b.mov")
+        };
+        let picked = PickedFile::Path(path);
         let player = Player::new(&mut cell.borrow_mut(), &picked.url()).unwrap();
         let opened = players.opened();
-        assert_eq!(opened[0].url(), "file:///movies/a%20b.mov");
+        assert_eq!(opened[0].url(), url);
         assert_eq!(player.state(&cell.borrow()).status, PlayerStatus::Loading);
 
         let heard = Rc::new(std::cell::Cell::new(0));

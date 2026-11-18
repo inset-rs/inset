@@ -50,13 +50,16 @@ jobs:
       # What the desktop host, its clipboard and text stack probe for at link time. The X11 and
       # Wayland libraries winit opens at run time are not needed to build or to run the tests,
       # which open no window on this host, but libxcb is linked by winit's X11 backend.
+      # `mesa-vulkan-drivers` is its software Vulkan device for the rendering tests, and
+      # `fonts-noto-cjk` the fallback face the system-font test waits for.
       - name: System packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libxcb1-dev libx11-dev libxkbcommon-dev libwayland-dev \
             libdbus-1-dev libfontconfig1-dev \
-            libgl1-mesa-dev libegl1-mesa-dev libvulkan-dev
+            libgl1-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
+            fonts-noto-cjk
       - name: Check
         run: cargo check --workspace --all-targets
       - name: Lint
