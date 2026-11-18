@@ -1,8 +1,7 @@
 //! Reusable application fixture with simulated time and input.
 
 use crate::{CaptureView, gpu};
-use std::{cell::RefCell, rc::Rc, time::Duration};
-use waft_embedder::valo::Context;
+use std::{rc::Rc, time::Duration};
 use waft_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, SystemFontSource,
     TargetPlatform, View,
@@ -11,7 +10,7 @@ use waft_foundation::{App, AppCell};
 use waft_gestures::GestureBinding;
 use waft_rendering::RenderParagraph;
 use waft_scheduler::SchedulerBinding;
-use waft_test::{MockClipboard, TestPlatform, TestViewHost};
+use waft_test::{MockClipboard, TestPlatform};
 use waft_widgets::{AnyElement, WidgetRef, WidgetsBinding};
 
 /// Mounts an arbitrary application with simulated time and pointer input.
@@ -34,15 +33,7 @@ pub struct Fixture {
 impl Fixture {
     /// Mounts whatever `run` starts, for a test of one control.
     pub fn with_root(size: [u32; 2], run: impl FnOnce(&mut App)) -> Self {
-        let (device, queue) = gpu::headless_device().expect("GPU required");
-        let view = Rc::new(CaptureView {
-            size,
-            renderer: RefCell::new(Context::new(device, queue)),
-            pixels: RefCell::new(Vec::new()),
-            host: TestViewHost::default(),
-        });
-        // Images made from pixels go to the capture view's renderer, which draws them.
-        let renderer = view.clone();
+        let view = Rc::new(CaptureView::new(size));
         let clipboard = MockClipboard::new();
         let platform = TestPlatform::new()
             .on(TargetPlatform::MacOS)
@@ -51,9 +42,12 @@ impl Fixture {
             .with_font_source(|| {
                 Box::new(SystemFontSource::new(valo_system_fonts::fontmgr::platform()))
             })
-            .with_pixel_import(move |pixels| {
-                let renderer = renderer.renderer.borrow();
-                renderer.image_context().upload_pixels(pixels, false).ok()
+            .with_pixel_import(|pixels| {
+                // Images made from pixels go to the binary's renderer, which draws them.
+                gpu::with_context(|context| {
+                    context.image_context().upload_pixels(pixels, false).ok()
+                })
+                .flatten()
             });
         let cell = AppCell::with_platform(Rc::new(platform));
         {
@@ -281,16 +275,16 @@ impl Fixture {
     }
     /// Checks the frame and optionally writes it under WINUI_CAPTURE_DIR.
     pub fn capture(&self, name: &str) {
-        let pixels = self.view.pixels.borrow();
+        let pixels = self.view.pixels();
         assert_eq!(
             pixels.len(),
-            (self.view.size[0] * self.view.size[1] * 4) as usize
+            (self.view.size()[0] * self.view.size()[1] * 4) as usize
         );
         assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
         if let Ok(dir) = std::env::var("WINUI_CAPTURE_DIR") {
             let dir = std::path::Path::new(&dir);
             std::fs::create_dir_all(dir).unwrap();
-            gpu::write_png(&dir.join(format!("{name}.png")), self.view.size, &pixels);
+            gpu::write_png(&dir.join(format!("{name}.png")), self.view.size(), &pixels);
         }
     }
 }

@@ -345,7 +345,7 @@ fn determinate_progress_clamps_to_the_range_and_handles_a_zero_span() {
                     .into_widget(),
             );
         });
-        let pixels = fixture.view.pixels.borrow();
+        let pixels = fixture.view.pixels();
         let red_pixels = pixels
             .as_chunks::<4>()
             .0

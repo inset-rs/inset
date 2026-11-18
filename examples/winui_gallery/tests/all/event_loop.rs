@@ -1,10 +1,9 @@
 //! The gallery under a driver that behaves like the winit embedder: frames only when requested, timers only when the dispatcher's `wake_at` deadline is reached or a ready task asks with `wake_now`, the app clock advanced only by frames and wakes.
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use waft_embedder::valo::Context;
 use waft_embedder::{
     Contact, Dispatcher, EmbedderClient, FontSource, Frame, FrameVsync, Instant, Offset, Platform,
     PointerDeviceKind, PointerReport, ReportedChange, SystemFontSource, TargetPlatform, View,
@@ -113,14 +112,7 @@ struct Driver {
 }
 impl Driver {
     fn new() -> Driver {
-        let (device, queue) =
-            waft_winui_test_support::gpu::headless_device().expect("GPU required");
-        let view = Rc::new(CaptureView {
-            size: [900, 2000],
-            renderer: RefCell::new(Context::new(device, queue)),
-            pixels: RefCell::new(Vec::new()),
-            host: waft_test::TestViewHost::default(),
-        });
+        let view = Rc::new(CaptureView::new([900, 2000]));
         let platform = Rc::new(LoopPlatform {
             view,
             origin: Instant::now(),

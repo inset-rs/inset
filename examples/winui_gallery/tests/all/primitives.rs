@@ -35,7 +35,7 @@ fn per_side_border_paints_and_insets_each_side_independently() {
     let mut fixture = Fixture::with_root([160, 120], mount(move |_| border_tree(100.0, observed)));
     assert_eq!(&*reports.borrow(), &[(Size::ZERO, Size::new(62.0, 24.0))]);
     {
-        let pixels = fixture.view.pixels.borrow();
+        let pixels = fixture.view.pixels();
         let pixel = |x: usize, y: usize| &pixels[(y * 160 + x) * 4..][..4];
         for (x, y) in [(31, 50), (60, 27), (125, 50), (60, 90)] {
             assert_eq!(pixel(x, y), &[255, 0, 0, 255], "border at {x},{y}");
@@ -96,7 +96,7 @@ fn filtered_corner_radii_leave_the_other_corners_square() {
                 .into_widget()
         }),
     );
-    let pixels = fixture.view.pixels.borrow();
+    let pixels = fixture.view.pixels();
     let pixel = |x: usize, y: usize| &pixels[(y * 120 + x) * 4..][..4];
     assert_eq!(pixel(20, 20), &[255, 255, 255, 255]);
     assert_eq!(pixel(99, 20), &[0, 0, 255, 255]);

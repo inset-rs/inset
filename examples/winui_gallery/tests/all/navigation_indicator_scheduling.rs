@@ -83,9 +83,9 @@ fn accent_pixels(f: &Fixture) -> Vec<(usize, usize)> {
         (color & 255) as i16,
     ];
     let mut points = Vec::new();
-    for (i, pixel) in f.view.pixels.borrow().as_chunks::<4>().0.iter().enumerate() {
+    for (i, pixel) in f.view.pixels().as_chunks::<4>().0.iter().enumerate() {
         if (0..3).all(|c| (pixel[c] as i16 - rgb[c]).abs() <= 2) {
-            points.push((i % f.view.size[0] as usize, i / f.view.size[0] as usize));
+            points.push((i % f.view.size()[0] as usize, i / f.view.size()[0] as usize));
         }
     }
     points

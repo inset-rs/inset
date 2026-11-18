@@ -7,4 +7,4 @@ pub mod gpu;
 mod view;
 
 pub use fixture::{Fixture, mount};
-pub use view::CaptureView;
+pub use view::{CaptureView, LastFrame};

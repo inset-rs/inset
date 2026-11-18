@@ -136,7 +136,7 @@ fn each_named_style_fills_with_its_own_severity_colour() {
 /// Whether each of the badge's four corner pixels is filled rather than the white background.
 fn corners(view: [u32; 2], badge: InfoBadge) -> [bool; 4] {
     let (fixture, size) = badge_at_top_left(view, badge);
-    let pixels = fixture.view.pixels.borrow();
+    let pixels = fixture.view.pixels();
     let filled = |x: f64, y: f64| {
         let index = ((y as usize) * view[0] as usize + x as usize) * 4;
         pixels[index..index + 3] != [255, 255, 255]
@@ -178,7 +178,7 @@ fn icon_foreground_inherits_the_badge_unless_explicitly_overridden() {
                 .foreground(Color::from_argb(255, 255, 0, 0))
                 .icon_source(icon),
         );
-        let pixels = f.view.pixels.borrow();
+        let pixels = f.view.pixels();
         let index = (8 * 32 + 8) * 4;
         assert_eq!(
             &pixels[index..index + 3],
