@@ -4,6 +4,7 @@
 #![feature(arbitrary_self_types)]
 
 mod button_input;
+mod fluent_app;
 mod selector_bar_icon;
 mod table_view_selection;
 mod text_box_height;

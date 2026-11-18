@@ -87,12 +87,14 @@ impl Shell {
         self.handle_event(f)
     }
 
-    /// Moves the app clock up to the platform's `elapsed`, firing the timers that came due.
+    /// Moves the app clock up to the platform's `elapsed`, firing the timers that came due as
+    /// Dart's VM does after the event loop was away: once each, their ticks jumping over the
+    /// periods that passed.
     fn advance_clock(&mut self, elapsed: Duration) {
         if elapsed <= self.clock {
             return;
         }
-        self.app.elapse(elapsed - self.clock);
+        self.app.elapse_to(elapsed);
         self.clock = elapsed;
     }
 
@@ -863,6 +865,25 @@ mod tests {
             },
         );
         assert_eq!(fired.take(), vec!["late"]);
+    }
+
+    #[test]
+    fn a_late_wake_catches_a_periodic_timer_up_as_dart_does() {
+        let platform = Rc::new(TestPlatform::new());
+        let ticks = Rc::new(Cell::new(Vec::new()));
+        let heard = Rc::clone(&ticks);
+        let mut shell = Shell::new(platform, move |app| {
+            let heard = Rc::clone(&heard);
+            waft_foundation::Timer::periodic(app, Duration::from_millis(1), move |app, timer| {
+                let mut seen = heard.take();
+                seen.push(timer.tick(app));
+                heard.set(seen);
+            });
+        });
+
+        // The app was away for 100 s; its 1 ms timer fires once and its tick jumps.
+        shell.wake(Duration::from_secs(100));
+        assert_eq!(ticks.take(), [100_000]);
     }
 
     /// The refresh period of the frames below, a 60 Hz display's, in the microseconds the

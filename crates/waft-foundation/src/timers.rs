@@ -9,10 +9,24 @@ use crate::app::App;
 use crate::change_notifier::Listener;
 use crate::completer::{Completer, CompleterFuture};
 
-/// Drain budget for one [`App::elapse`](crate::App::elapse): a callback that
+/// Drain budget for one [`AppCell::elapse`](crate::AppCell::elapse): a callback that
 /// keeps scheduling an already-due timer must fail loud, not spin. Not a Dart
 /// constant.
 const TIMER_BUDGET: usize = 100_000;
+
+/// How a turn of the event loop moves the clock and which timers it fires.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TimerMode {
+    /// A running app's, as Dart's VM (`timer_impl.dart`, `_runTimers`): the clock is already at
+    /// the turn's time, the turn fires the timers that were due when it began, each once, a
+    /// periodic one's [`tick`](Timer::tick) jumping over the periods it missed, and a timer made
+    /// or re-armed during the turn waits for the next one, so nothing a stall missed is replayed.
+    CatchUp,
+    /// A test's fake clock, as FakeAsync's `elapse`: the clock walks to each due timer in turn,
+    /// so every period fires and a timer made on the way fires in the same walk if it comes due
+    /// in it; only a zero-period timer waits for the next turn, as it would never move the clock.
+    EachPeriod,
+}
 
 /// A scheduled callback — `dart:async` `Timer(duration, callback)` and
 /// `Timer.periodic(duration, callback)`, which is handed its timer.
@@ -33,6 +47,11 @@ impl Timer {
     /// Dart's `Timer.periodic(duration, callback)`, which fires every `duration` from when it
     /// was made until it is cancelled, and hands `callback` the timer, whose [`tick`](Self::tick)
     /// counts the periods that passed.
+    ///
+    /// A running app that was away for several periods fires once when it runs again and
+    /// `tick` jumps over them, as Dart's VM does ([`AppCell::elapse_to`](crate::AppCell::elapse_to));
+    /// a test's [`elapse`](crate::AppCell::elapse) fires each period in turn, as FakeAsync does.
+    /// A zero `duration` fires once per turn of either clock.
     pub fn periodic(
         app: &mut App,
         duration: Duration,
@@ -82,7 +101,33 @@ struct ScheduledTimer {
     period: Option<Duration>,
     /// The fires it has had, which [`Timer::tick`] answers.
     tick: u64,
+    /// The turn of the event loop it was made or re-armed in: a turn fires only the timers
+    /// armed before it, under [`TimerMode::CatchUp`], and a zero-period timer once a turn always.
+    armed_turn: u64,
     callback: TimerCallback,
+}
+
+impl ScheduledTimer {
+    /// Whether the turn `turn` may fire it, in `mode`, once it is due.
+    fn fires_in_turn(&self, turn: u64, mode: TimerMode) -> bool {
+        let armed_before = self.armed_turn < turn;
+        match mode {
+            TimerMode::CatchUp => armed_before,
+            TimerMode::EachPeriod => armed_before || self.period != Some(Duration::ZERO),
+        }
+    }
+
+    /// Dart's VM's catch-up in `_runTimers`: a periodic timer more than a period overdue at
+    /// `now` moves its due time and tick over the periods it missed.
+    fn skip_missed_periods(&mut self, period: Duration, now: Duration) {
+        let overdue = now.saturating_sub(self.due);
+        if period.is_zero() || overdue <= period {
+            return;
+        }
+        let missed = u32::try_from(overdue.as_nanos() / period.as_nanos()).unwrap_or(u32::MAX);
+        self.due += period * missed;
+        self.tick += u64::from(missed);
+    }
 }
 
 /// Pending timers and the logical clock they measure from.
@@ -95,6 +140,8 @@ pub(crate) struct Timers {
     /// [`timer_wakeup_if_changed`](Self::timer_wakeup_if_changed) writes it: a value kept
     /// in two places is a value that can disagree with itself.
     host_timer_wakeup: Option<Duration>,
+    /// The event-loop turn, counted so a timer armed during one is told from those due in it.
+    turn: u64,
 }
 
 impl Timers {
@@ -126,9 +173,15 @@ impl Timers {
             due,
             period,
             tick: 0,
+            armed_turn: self.turn,
             callback,
         });
         Timer { id }
+    }
+
+    /// Begins an event-loop turn: the timers armed before it may fire in it.
+    pub(crate) fn begin_turn(&mut self) {
+        self.turn += 1;
     }
 
     /// How far off the earliest waiting timer is, when that is not what the host was last
@@ -166,34 +219,46 @@ impl Timers {
         !self.queue.is_empty()
     }
 
-    /// Removes and returns the next timer due at or before `target`, advancing
-    /// the clock to that timer's due time, and arms a periodic timer for its
-    /// next fire. `None` when none are due.
-    pub(crate) fn pop_next_due(&mut self, target: Duration) -> Option<(Timer, TimerCallback)> {
+    /// Removes and returns the next timer that fires at or before `target` in this turn,
+    /// advancing the clock to its due time if it is behind, and re-arms a periodic timer for its
+    /// next fire. `None` when none does. Which timers a turn fires is [`TimerMode`]'s.
+    pub(crate) fn pop_next_due(
+        &mut self,
+        target: Duration,
+        mode: TimerMode,
+    ) -> Option<(Timer, TimerCallback)> {
         let index = self
             .queue
             .iter()
             .enumerate()
-            .filter(|(_, scheduled)| scheduled.due <= target)
+            .filter(|(_, scheduled)| {
+                scheduled.due <= target && scheduled.fires_in_turn(self.turn, mode)
+            })
             .min_by_key(|(_, scheduled)| (scheduled.due, scheduled.id))
             .map(|(index, _)| index)?;
         let mut scheduled = self.queue.remove(index);
-        if scheduled.due > self.now {
-            self.now = scheduled.due;
+        self.now = self.now.max(scheduled.due);
+        if let Some(period) = scheduled.period {
+            scheduled.skip_missed_periods(period, self.now);
         }
         scheduled.tick += 1;
+        let fired = (Timer { id: scheduled.id }, Rc::clone(&scheduled.callback));
         if let Some(period) = scheduled.period {
-            let due = scheduled.due + period;
-            let next = ScheduledTimer {
-                id: scheduled.id,
-                due,
-                period: scheduled.period,
-                tick: scheduled.tick,
-                callback: Rc::clone(&scheduled.callback),
-            };
-            self.queue.push(next);
+            self.rearm(scheduled, period);
         }
-        Some((Timer { id: scheduled.id }, scheduled.callback))
+        Some(fired)
+    }
+
+    /// Queues a periodic timer that just fired for its next fire, a period after the one it
+    /// had, or now for a zero period, as the VM's `_advanceWakeupTime` does.
+    fn rearm(&mut self, mut scheduled: ScheduledTimer, period: Duration) {
+        scheduled.due = if period.is_zero() {
+            self.now
+        } else {
+            scheduled.due + period
+        };
+        scheduled.armed_turn = self.turn;
+        self.queue.push(scheduled);
     }
 
     pub(crate) fn advance_to(&mut self, target: Duration) {
@@ -294,6 +359,89 @@ mod tests {
         cell.elapse(Duration::from_millis(50));
         assert_eq!(*seen.borrow(), [1], "the callback's cancel stopped it");
         assert!(!started.is_active(&cell.borrow()));
+    }
+
+    #[test]
+    fn a_running_apps_timer_catches_up_with_one_fire_after_a_stall() {
+        let cell = AppCell::new();
+        let seen = ticks();
+        let sink = Rc::clone(&seen);
+        let timer = Timer::periodic(&mut cell.borrow_mut(), Duration::from_millis(1), {
+            let seen = Rc::clone(&sink);
+            move |app, timer| seen.borrow_mut().push(timer.tick(app))
+        });
+
+        cell.elapse_to(Duration::from_secs(100));
+        assert_eq!(
+            *seen.borrow(),
+            [100_000],
+            "one fire, its tick jumping over the 100 s of periods"
+        );
+        assert_eq!(timer.tick(&cell.borrow()), 100_000);
+
+        cell.elapse_to(Duration::from_millis(100_001));
+        assert_eq!(*seen.borrow(), [100_000, 100_001]);
+    }
+
+    #[test]
+    fn a_running_apps_timer_runs_at_the_time_the_app_came_back() {
+        let cell = AppCell::new();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&seen);
+        Timer::periodic(&mut cell.borrow_mut(), Duration::from_millis(1), {
+            move |app, _timer| sink.borrow_mut().push(app.clock())
+        });
+
+        cell.elapse_to(Duration::from_secs(100));
+        assert_eq!(
+            *seen.borrow(),
+            [Duration::from_secs(100)],
+            "the VM's clock is the real time the event loop reached the timer"
+        );
+    }
+
+    #[test]
+    fn a_running_apps_delay_chain_waits_a_whole_delay_after_a_stall() {
+        let cell = AppCell::new();
+        let fires = Rc::new(std::cell::Cell::new(0u32));
+        let count = Rc::clone(&fires);
+        cell.borrow().spawn(async move |cx| {
+            loop {
+                cx.update(|app| delayed(app, Duration::from_millis(10)))
+                    .await;
+                count.set(count.get() + 1);
+            }
+        });
+        cell.checkpoint();
+
+        cell.elapse_to(Duration::from_secs(100));
+        assert_eq!(
+            fires.get(),
+            1,
+            "the next delay is measured from when the app came back, not replayed"
+        );
+        cell.elapse_to(Duration::from_millis(100_010));
+        assert_eq!(fires.get(), 2);
+    }
+
+    #[test]
+    fn a_zero_period_timer_fires_once_a_turn_and_never_spins() {
+        let cell = AppCell::new();
+        let seen = ticks();
+        let sink = Rc::clone(&seen);
+        Timer::periodic(&mut cell.borrow_mut(), Duration::ZERO, {
+            let seen = Rc::clone(&sink);
+            move |app, timer| seen.borrow_mut().push(timer.tick(app))
+        });
+
+        cell.elapse(Duration::from_millis(100));
+        assert_eq!(
+            *seen.borrow(),
+            [1],
+            "one fire in the turn, not 100 ms of them"
+        );
+        cell.elapse(Duration::ZERO);
+        assert_eq!(*seen.borrow(), [1, 2], "the next turn fires once more");
     }
 
     #[test]

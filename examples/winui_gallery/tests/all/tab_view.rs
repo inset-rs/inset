@@ -177,6 +177,8 @@ fn fixture(count: usize) -> (Fixture, Probe) {
     let page = p.clone();
     let f = Fixture::with_root([480, 220], move |app| {
         winui_gallery::install_fonts(app);
+        // A `WidgetsApp` mounts without the kit, so the icon font its glyphs use is its own.
+        install_icon_font(app);
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| Page(page.clone(), count).into_widget()),
@@ -471,6 +473,8 @@ fn cross_strip_drop_is_owner_managed_and_completes_source_drag() {
     let copy = probe.clone();
     let mut f = Fixture::with_root([480, 220], move |app| {
         winui_gallery::install_fonts(app);
+        // A `WidgetsApp` mounts without the kit, so the icon font its glyphs use is its own.
+        install_icon_font(app);
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| CrossPage(copy.clone()).into_widget()),

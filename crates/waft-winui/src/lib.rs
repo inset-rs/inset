@@ -2,9 +2,13 @@
 //!
 //! See the [repository](https://github.com/waos-dev/waft/tree/main/crates/waft-winui) for setup and the gallery.
 #![feature(arbitrary_self_types)]
+mod app;
 mod controls;
 mod primitives;
+mod route;
 mod theme;
+pub use app::*;
 pub use controls::*;
 pub use primitives::*;
+pub use route::*;
 pub use theme::*;
