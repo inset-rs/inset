@@ -506,7 +506,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
             .multi_selectable_selection_container_delegate_data(app)
             .additions
             .clone();
-        merging_selectables.sort_by(|a, b| {
+        waft_foundation::merge_sort(&mut merging_selectables, |a, b| {
             MultiSelectableSelectionContainerDelegate::compare_order(self, app, *a, *b)
         });
         let existing_selectables = self
@@ -1714,7 +1714,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
                 .multi_selectable_selection_container_delegate_data(app)
                 .selectables
                 .clone();
-            selectables.sort_by(|a, b| {
+            waft_foundation::merge_sort(&mut selectables, |a, b| {
                 MultiSelectableSelectionContainerDelegate::compare_order(self, app, *a, *b)
             });
             self.multi_selectable_selection_container_delegate_data_mut(app)
@@ -6177,6 +6177,205 @@ mod tests {
                 paragraph_selection(tester, paragraph_showing(tester, "How are you?")),
                 (0, 12)
             );
+        });
+    }
+
+    /// A delegate whose order is a rock-paper-scissors cycle: lanes 0 < 1 < 2 < 0. That is not
+    /// a total order, which Rust's `sort_by` may panic on and Flutter's merge sort tolerates.
+    struct RockPaperScissorsDelegate {
+        selection_container_delegate: SelectionContainerDelegateData,
+        multi_selectable_selection_container_delegate:
+            MultiSelectableSelectionContainerDelegateData,
+        lanes: Vec<(AnySelectable, usize)>,
+        seed: u64,
+    }
+
+    impl RockPaperScissorsDelegate {
+        fn new(app: &mut App) -> Ref<RockPaperScissorsDelegate> {
+            app.create(RockPaperScissorsDelegate {
+                selection_container_delegate: SelectionContainerDelegateData::new(),
+                multi_selectable_selection_container_delegate:
+                    MultiSelectableSelectionContainerDelegateData::new(),
+                lanes: Vec::new(),
+                seed: 12345,
+            })
+        }
+
+        fn lane(self: Handle<Self>, app: &App, selectable: AnySelectable) -> usize {
+            app.get(self)
+                .lanes
+                .iter()
+                .find_map(|(held, lane)| (*held == selectable).then_some(*lane))
+                .unwrap_or(0)
+        }
+    }
+
+    impl SelectionContainerDelegate for RockPaperScissorsDelegate {
+        fn selection_container_delegate_data(
+            self: Handle<Self>,
+            app: &App,
+        ) -> &SelectionContainerDelegateData {
+            &app.get(self).selection_container_delegate
+        }
+
+        fn selection_container_delegate_data_mut(
+            self: Handle<Self>,
+            app: &mut App,
+        ) -> &mut SelectionContainerDelegateData {
+            &mut app.get_mut(self).selection_container_delegate
+        }
+    }
+
+    impl MultiSelectableSelectionContainerDelegate for RockPaperScissorsDelegate {
+        crate::multi_selectable_selection_container_delegate_accessors!();
+
+        fn compare_order(
+            self: Handle<Self>,
+            app: &mut App,
+            a: AnySelectable,
+            b: AnySelectable,
+        ) -> Ordering {
+            let (a, b) = (self.lane(app, a), self.lane(app, b));
+            if a == b {
+                Ordering::Equal
+            } else if (a + 1) % 3 == b {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        }
+
+        fn ensure_child_updated(self: Handle<Self>, _app: &mut App, _selectable: AnySelectable) {}
+
+        fn dispatch_selection_event_to_child(
+            self: Handle<Self>,
+            _app: &mut App,
+            _selectable: AnySelectable,
+            _event: &SelectionEvent,
+        ) -> SelectionResult {
+            SelectionResult::End
+        }
+    }
+
+    impl SelectionHandler for RockPaperScissorsDelegate {
+        fn value(self: Handle<Self>, app: &App) -> SelectionGeometry {
+            MultiSelectableSelectionContainerDelegateBase::value(self, app)
+        }
+
+        fn push_handle_layers(
+            self: Handle<Self>,
+            app: &mut App,
+            start_handle: Option<Ref<LayerLink>>,
+            end_handle: Option<Ref<LayerLink>>,
+        ) {
+            MultiSelectableSelectionContainerDelegateBase::push_handle_layers(
+                self,
+                app,
+                start_handle,
+                end_handle,
+            );
+        }
+
+        fn selected_content(self: Handle<Self>, app: &App) -> Option<SelectedContent> {
+            MultiSelectableSelectionContainerDelegateBase::selected_content(self, app)
+        }
+
+        fn selection(self: Handle<Self>, app: &App) -> Option<SelectedContentRange> {
+            MultiSelectableSelectionContainerDelegateBase::selection(self, app)
+        }
+
+        fn dispatch_selection_event(
+            self: Handle<Self>,
+            app: &mut App,
+            event: &SelectionEvent,
+        ) -> SelectionResult {
+            MultiSelectableSelectionContainerDelegateBase::dispatch_selection_event(
+                self, app, event,
+            )
+        }
+
+        fn content_length(self: Handle<Self>, app: &App) -> usize {
+            MultiSelectableSelectionContainerDelegateBase::content_length(self, app)
+        }
+    }
+
+    impl SelectionRegistrar for RockPaperScissorsDelegate {
+        fn add(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+            // The lane sequence is the one that makes the comparison cyclic in a way `sort_by`
+            // detects for fifty elements; a registration's order is its input order.
+            let seed = app.get(self).seed;
+            let lane = {
+                let next = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                app.get_mut(self).seed = next;
+                ((next >> 33) as usize) % 3
+            };
+            app.get_mut(self).lanes.push((selectable, lane));
+            MultiSelectableSelectionContainerDelegateBase::add(self, app, selectable);
+        }
+
+        fn remove(self: Handle<Self>, app: &mut App, selectable: AnySelectable) {
+            app.get_mut(self)
+                .lanes
+                .retain(|(held, _)| *held != selectable);
+            MultiSelectableSelectionContainerDelegateBase::remove(self, app, selectable);
+        }
+    }
+
+    impl ChangeNotifier for RockPaperScissorsDelegate {
+        fn change_notifier_data(&self) -> &ChangeNotifierData {
+            &self
+                .multi_selectable_selection_container_delegate
+                .change_notifier
+        }
+
+        fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
+            &mut self
+                .multi_selectable_selection_container_delegate
+                .change_notifier
+        }
+    }
+
+    // Not a Flutter case: the screen order is not a total order, and a list long enough makes
+    // Rust's `sort_by` detect it and panic; the delegates sort with Flutter's merge sort.
+    #[test]
+    fn fifty_selectables_sort_with_a_comparator_that_is_not_a_total_order() {
+        test_widgets(|tester| {
+            let delegate = tester.update(RockPaperScissorsDelegate::new);
+            let children: Vec<WidgetRef> = (0..50)
+                .map(|_| {
+                    SizedBox::new()
+                        .height(10.0)
+                        .child(SelectionSpy)
+                        .into_widget()
+                })
+                .collect();
+            tester.pump_widget(SelectionContainer::new(
+                delegate.erase(),
+                Column::new().children(children),
+            ));
+            for _ in 0..3 {
+                tester.update(|app| SchedulerBinding::schedule_frame(app, FrameTarget::EveryView));
+                tester.pump_and_settle();
+            }
+            tester.update(|app| {
+                assert_eq!(
+                    app.get(&delegate)
+                        .multi_selectable_selection_container_delegate
+                        .selectables
+                        .len(),
+                    50,
+                    "the frame merged all fifty selectables"
+                );
+                // A selection sorts them again, which tolerates the same comparator.
+                SelectionHandler::dispatch_selection_event(
+                    delegate.handle(),
+                    app,
+                    &SelectionEvent::SelectAll,
+                );
+                assert!(SelectionHandler::value(delegate.handle(), app).has_content);
+            });
         });
     }
 

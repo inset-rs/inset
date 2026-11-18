@@ -4,6 +4,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Identical
 
+- collections.rs → collections.dart
 - observer_list.rs → observer_list.dart
 
 ## app.rs
@@ -120,6 +121,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
+- collections.rs: `listEquals`, `setEquals` and `mapEquals`. Trigger: the first caller that compares two whole collections, rather than the loop each widget writes today.
 - date_time.rs: `parse` / `tryParse`, `difference`. Trigger: a caller that parses a date or measures between two (`difference` would return a `SignedDuration`).
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.
