@@ -1,20 +1,23 @@
 //! HTTP in a browser: `fetch`, whose promise the app's executor awaits and whose response body
 //! streams out of a `ReadableStream`. The browser's own fetch does the redirects, applies the
-//! page's cookies and its CORS rules, and uses its proxy; a request dropped aborts the fetch.
+//! page's cookies and its CORS rules, and uses its proxy; a request dropped aborts the fetch, and
+//! a `SendOptions` timeout aborts it through `AbortSignal.timeout`.
 //!
-//! A browser's `fetch` does not expose trailers, cannot be told a redirect limit, and has no
-//! timeout of its own, so a `SendOptions` timeout is not applied here.
+//! A browser's `fetch` does not expose trailers, and hides a redirect response from the page: it
+//! follows redirects up to its own limit, or with `redirect: "manual"` answers an opaque response
+//! with no status or location. A policy that follows none fails with `TooManyRedirects` at the
+//! first redirect, rather than answering it.
 
 use js_sys::{Reflect, Uint8Array};
 use waft_embedder::{
     Body, BodyReadFuture, BodyStream, BodyTrailersFuture, HttpClient, HttpError, HttpFuture,
-    SendOptions,
+    RedirectPolicy, SendOptions,
 };
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    AbortController, Headers, ReadableStreamDefaultReader, Request as WebRequest, RequestInit,
-    Response as WebResponse,
+    AbortController, AbortSignal, Headers, ReadableStreamDefaultReader, Request as WebRequest,
+    RequestInit, RequestRedirect, Response as WebResponse, ResponseType,
 };
 
 /// HTTP over the page's `fetch`.
@@ -28,7 +31,7 @@ impl BrowserHttpClient {
 }
 
 impl HttpClient for BrowserHttpClient {
-    fn send(&self, mut request: http::Request<Body>, _options: SendOptions) -> HttpFuture {
+    fn send(&self, mut request: http::Request<Body>, options: SendOptions) -> HttpFuture {
         Box::pin(async move {
             let controller =
                 AbortController::new().map_err(|error| HttpError::Protocol(describe(&error)))?;
@@ -51,7 +54,8 @@ impl HttpClient for BrowserHttpClient {
                     .map_err(|error| HttpError::Protocol(describe(&error)))?;
             }
             init.set_headers(&web_headers);
-            init.set_signal(Some(&controller.signal()));
+            init.set_signal(Some(&signal(&controller, &options)));
+            init.set_redirect(redirect_mode(options.redirects));
             if !bytes.is_empty() {
                 let data = Uint8Array::from(&bytes[..]);
                 init.set_body(&JsValue::from(data));
@@ -65,6 +69,9 @@ impl HttpClient for BrowserHttpClient {
                 .map_err(|error| fetch_error(&error))?
                 .dyn_into()
                 .map_err(|error| HttpError::Protocol(describe(&error)))?;
+            if response.type_() == ResponseType::Opaqueredirect {
+                return Err(HttpError::TooManyRedirects);
+            }
 
             let status = http::StatusCode::from_u16(response.status())
                 .map_err(|_| HttpError::Protocol(format!("status {}", response.status())))?;
@@ -80,15 +87,13 @@ impl HttpClient for BrowserHttpClient {
                         .map_err(|error| HttpError::Protocol(describe(&error)))
                 })
                 .transpose()?;
-            let body = Body::from_stream(body_with_length(
-                BrowserBodyStream {
-                    reader,
-                    pending: Vec::new(),
-                    ended,
-                    _abort: abort,
-                },
+            let body = Body::from_stream(BrowserBodyStream {
+                reader,
+                pending: Vec::new(),
+                ended,
                 length,
-            ));
+                _abort: abort,
+            });
             let mut answer = http::Response::builder()
                 .status(status)
                 .version(http::Version::HTTP_11);
@@ -102,13 +107,37 @@ impl HttpClient for BrowserHttpClient {
     }
 }
 
-/// A fetch that the browser refused before any response: a network failure, CORS, a bad URL.
+/// What aborts the fetch: dropping the request, and its timeout when it has one.
+fn signal(controller: &AbortController, options: &SendOptions) -> AbortSignal {
+    let dropped = controller.signal();
+    match options.timeout {
+        Some(timeout) => {
+            let timed_out = AbortSignal::timeout_with_f64(timeout.as_secs_f64() * 1000.0);
+            AbortSignal::any(&js_sys::Array::of2(&dropped, &timed_out))
+        }
+        None => dropped,
+    }
+}
+
+/// `fetch`'s redirect mode for `policy`: the browser follows up to its own limit, or the first
+/// redirect is the opaque response a policy that follows none fails on.
+fn redirect_mode(policy: RedirectPolicy) -> RequestRedirect {
+    match policy {
+        RedirectPolicy::Follow { max } if max > 0 => RequestRedirect::Follow,
+        RedirectPolicy::Follow { .. } | RedirectPolicy::Never => RequestRedirect::Manual,
+    }
+}
+
+/// A fetch or a body read the browser failed: its timeout's `TimeoutError`, or a network
+/// failure, CORS or a bad URL.
 fn fetch_error(error: &JsValue) -> HttpError {
-    let text = describe(error);
-    if text.contains("timed out") {
+    let name = Reflect::get(error, &JsValue::from_str("name"))
+        .ok()
+        .and_then(|name| name.as_string());
+    if name.as_deref() == Some("TimeoutError") {
         HttpError::Timeout
     } else {
-        HttpError::Connection(text)
+        HttpError::Connection(describe(error))
     }
 }
 
@@ -184,6 +213,8 @@ struct BrowserBodyStream {
     reader: Option<ReadableStreamDefaultReader>,
     pending: Vec<u8>,
     ended: bool,
+    /// The body's length, which the response head names rather than the stream.
+    length: Option<u64>,
     _abort: AbortOnDrop,
 }
 
@@ -206,7 +237,7 @@ impl BodyStream for BrowserBodyStream {
                 };
                 let value = JsFuture::from(reader.read())
                     .await
-                    .map_err(|error| HttpError::Connection(describe(&error)))?;
+                    .map_err(|error| fetch_error(&error))?;
                 let done = Reflect::get(&value, &JsValue::from_str("done"))
                     .ok()
                     .and_then(|done| done.as_bool())
@@ -228,24 +259,6 @@ impl BodyStream for BrowserBodyStream {
     }
 
     fn length(&self) -> Option<u64> {
-        // The response head carries it, not the stream: `body_with_length` names it.
-        None
+        self.length
     }
-}
-
-/// A body stream whose length its response head names.
-fn body_with_length(stream: BrowserBodyStream, length: Option<u64>) -> impl BodyStream {
-    struct Named<B: BodyStream>(B, Option<u64>);
-    impl<B: BodyStream> BodyStream for Named<B> {
-        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> BodyReadFuture<'a> {
-            self.0.read(buf)
-        }
-        fn trailers(&mut self) -> BodyTrailersFuture<'_> {
-            self.0.trailers()
-        }
-        fn length(&self) -> Option<u64> {
-            self.1
-        }
-    }
-    Named(stream, length)
 }

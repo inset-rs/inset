@@ -226,12 +226,12 @@ impl Platform for WebPlatform {
         Some(&BrowserClipboard)
     }
 
-    /// The browser's pickers (`file_dialogs.rs`).
-    /// `fetch`, the page's HTTP; the page has no file system for `files`.
+    /// `fetch`, the page's HTTP (`http.rs`); the page has no file system for `files`.
     fn http(&self) -> Option<&dyn HttpClient> {
         Some(&self.http)
     }
 
+    /// The browser's pickers (`file_dialogs.rs`).
     fn file_dialogs(&self) -> Option<&dyn FileDialogs> {
         Some(&BrowserFileDialogs)
     }

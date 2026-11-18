@@ -63,9 +63,9 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: language — a Rust error is matched rather than caught.
   Affect: a caller matches `HttpError` and writes one error path.
 
-- Change: the browser's client follows redirects and applies the page's CORS rules and proxy; `RedirectPolicy` and `SendOptions::timeout` are not applied there, and `fetch` exposes no trailers.
-  Reason: platform — `fetch` decides redirects and offers no per-request timeout or trailers.
-  Affect: on the web a redirect limit is the browser's, a timeout is the browser's, and `BodyStream::trailers` answers `None`.
+- Change: the browser's client follows redirects up to the browser's own limit whatever `RedirectPolicy::Follow`'s `max`, fails with `TooManyRedirects` at the first redirect where the policy follows none, applies the page's CORS rules and proxy, and exposes no trailers.
+  Reason: platform — `fetch` takes no redirect limit, hides a redirect response from the page, and gives no trailers.
+  Affect: on the web a redirect limit above zero is the browser's, a redirect response cannot be read, and `BodyStream::trailers` answers `None`.
 
 ## files.rs → dart:io `File` / `RandomAccessFile`
 
