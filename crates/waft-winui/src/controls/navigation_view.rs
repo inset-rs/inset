@@ -1890,8 +1890,10 @@ impl NavigationViewState {
                 Positioned::new(
                     SizedBox::new()
                         .height(r.navigation_view_pane_header_row_min_height)
+                        // The holder shows only in TogglePaneButtonVisible, whose setter
+                        // replaces NavigationViewPaneTitlePresenterMargin.
                         .child(Margin::new(
-                            r.navigation_view_pane_title_presenter_margin,
+                            r.navigation_view_item_inner_header_margin,
                             Offstage::new()
                                 .offstage(chrome.closed_compact)
                                 .child(pane_title(&resources, widget.pane_title.clone())),

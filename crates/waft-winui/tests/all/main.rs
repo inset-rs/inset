@@ -5,6 +5,7 @@
 
 mod button_input;
 mod fluent_app;
+mod navigation_view_pane_title;
 mod selector_bar_icon;
 mod table_view_selection;
 mod text_box_height;
