@@ -18,19 +18,35 @@ Ported against: aa3207e6
   Reason: framework — theme changes are not animated here, as the kit's `ThemeScope` resolves values at build.
   Affect: switching theme mode changes every themed control at once, with no transition.
 
+- Change: `FluentApp` gives its text a default style — the kit's content-control family, WinUI body text's 14 points, and the theme's `TextFillColorPrimary` — where `MaterialApp` gives its own body style and `CupertinoApp` the theme's text theme.
+  Reason: platform — WinUI's body text is `BodyTextBlockStyle`, whose family is `ContentControlThemeFontFamily`.
+  Affect: a `Text` with no style draws in Selawik at 14 points in the theme's primary text colour, changing with the theme.
+
+- Change: `FluentApp` wraps its pages in a `ScrollConfiguration` with [`FluentScrollBehavior`](crate::FluentScrollBehavior): a two-point `ScrollBarForeground` bar, shown while scrolling, and clamping with no glow or stretch.
+  Reason: platform — WinUI's `ScrollViewer` has auto-hiding overlay bars and no overscroll indicator.
+  Affect: scrollables show a thin bar in the theme's colour and stop at the edge on every system, where the default behaviour glows on Android and Fuchsia.
+
+- Change: `FluentApp` wraps its pages in `DefaultSelectionStyle` with the accent's `base` at 40% for a selection and the accent for a caret, where `MaterialApp` uses its primary colour.
+  Reason: platform — WinUI's selection highlight is the system accent.
+  Affect: selecting text or placing a caret uses the app's accent.
+
 - Change: `FluentApp.router` and the high-contrast and system-accent settings are not built; a system accent palette is not read.
   Reason: scope — the router branch waits with Flutter's `router.dart`, high contrast with a host palette, and WinUI's accent with a Windows-only API.
   Affect: an app routes with `home`, `routes`, `on_generate_route` and the other `WidgetsApp` routing fields; the accent stays the palette it was given.
 
 ## route.rs → WinUI `NavigationThemeTransition` / `EntranceNavigationTransitionInfo`
 
-- Change: `FluentPageRoute::new` answers a `PageRouteBuilder` configured with the entrance, not a route type of its own as `MaterialPageRoute` is.
-  Reason: framework — every part of the transition is a `PageRouteBuilder` callback, and its options stay at hand.
-  Affect: a route is pushed as `FluentPageRoute::new(app, builder).settings(...).into_erased()`, and a kit app returns it from `WidgetsApp::page_route_builder`.
+- Change: `FluentPageRoute` is a `PageRoute` with its own route data, as `MaterialPageRoute` and `CupertinoPageRoute` are, where Dart's `MaterialPageRoute` extends `PageRouteBuilder`.
+  Reason: framework — the kit has no `PageRouteBuilder` subclass; the route holds the data and plays the transition itself.
+  Affect: it is pushed as `FluentPageRoute::new(app, builder).settings(...).into_erased()`, with setters for the `PageRoute` options.
 
-- Change: the leaving animation uses `BackNavigatingAway`'s 150 ms and `(0.7, 0.0, 1.0, 0.5)` curve, while Flutter reverses the entering animation over the reverse duration.
-  Reason: platform — WinUI's Frame has a storyboard per navigation trigger, and its out storyboard is shorter than its in one.
-  Affect: a page leaves in 150 ms, while it entered in 450 ms.
+- Change: the leaving animation uses `BackNavigatingAway`'s 150 ms and `(0.7, 0.0, 1.0, 0.5)` curve, and the back as a whole takes 450 ms so the revealed page can fade in after it.
+  Reason: platform — WinUI's Frame has a storyboard per navigation trigger, and its back runs the leaving and revealed pages' storyboards one after the other.
+  Affect: a page leaves in 150 ms, while it entered in 450 ms, and the page below returns over the remaining 300 ms.
+
+- Change: the covered page is its own `build_transitions` half: it fades out over 150 ms as a page enters, and from 150 ms into a back fades in over 300 ms, where Flutter's routes animate the page below through the secondary animation.
+  Reason: platform — `NavigationThemeTransition` plays `NavigatingAway` on the page an unload covers, and `BackNavigatingTo` on the one a back reveals.
+  Affect: a page below dims as another enters and returns as the top page leaves.
 
 - Change: the page stays 140 effective pixels lower and invisible for 150 ms, then slides up with opacity snapped on at 150 ms, where the WinUI storyboard registers a discrete opacity keyframe at that time.
   Reason: platform — the transition is a XAML storyboard, whose discrete keyframes are steps.

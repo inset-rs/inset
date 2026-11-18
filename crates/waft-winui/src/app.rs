@@ -13,18 +13,21 @@ use std::fmt::{self, Debug};
 
 use waft_embedder::{Brightness, Color, Locale, SystemUiOverlayStyle};
 use waft_foundation::{App, Handle};
+use waft_painting::TextStyle;
 use waft_services::SystemChrome;
 use waft_widgets::{
-    ActionRef, BuildContext, GenerateAppTitle, GlobalKey, InitialRouteListFactory, IntoWidget,
-    KeyRef, LocaleListResolutionCallback, LocaleResolutionCallback, LocalizationsDelegateRef,
-    MediaQuery, NavigationNotification, NavigatorObserverRef, NotificationListenerCallback,
-    RouteFactory, RouteSettingsRef, ShortcutMap, State, StateData, StatefulWidget,
+    ActionRef, BuildContext, DefaultSelectionStyle, GenerateAppTitle, GlobalKey,
+    InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
+    LocaleResolutionCallback, LocalizationsDelegateRef, MediaQuery, NavigationNotification,
+    NavigatorObserverRef, NotificationListenerCallback, RouteFactory, RouteSettingsRef,
+    ScrollBehaviorRef, ScrollConfiguration, ShortcutMap, State, StateData, StatefulWidget,
     TransitionBuilder, View, WidgetBuilder, WidgetRef, WidgetsApp,
 };
 
 use crate::primitives::install_icon_font;
 use crate::route::FluentPageRoute;
-use crate::theme::{AccentPalette, Theme, ThemeScope};
+use crate::scroll_behavior::FluentScrollBehavior;
+use crate::theme::{AccentPalette, TextBlockStyle, Theme, ThemeResources, ThemeScope};
 
 /// A Fluent app's colours: which WinUI theme dictionary its controls resolve against, and the
 /// accent palette they draw with.
@@ -498,7 +501,8 @@ impl FluentAppState {
             .supported_locales(widget.supported_locales.clone())
             .show_performance_overlay(widget.show_performance_overlay)
             .show_semantics_debugger(widget.show_semantics_debugger)
-            .debug_show_checked_mode_banner(widget.debug_show_checked_mode_banner);
+            .debug_show_checked_mode_banner(widget.debug_show_checked_mode_banner)
+            .text_style(default_text_style(&theme));
 
         if let Some(navigator_key) = widget.navigator_key.clone() {
             widgets_app = widgets_app.navigator_key(navigator_key);
@@ -604,15 +608,35 @@ impl State for FluentAppState {
                 },
             );
         }
-        ThemeScope::new(
-            theme.theme,
-            waft_widgets::Builder::new(move |app, context| {
-                self.build_widget_app(app, context).into_widget()
-            }),
+        let app = waft_widgets::Builder::new(move |app, context| {
+            self.build_widget_app(app, context).into_widget()
+        })
+        .into_widget();
+        let accent = theme.accent.base;
+        // Dart's `withOpacity`, deprecated there too: its rounding to an 8-bit alpha is part of
+        // the value being ported.
+        #[allow(deprecated)]
+        let selected = accent.with_opacity(0.4);
+        let selection = DefaultSelectionStyle::new(app)
+            .selection_color(selected)
+            .cursor_color(accent)
+            .into_widget();
+        let scrolling = ScrollConfiguration::new(
+            ScrollBehaviorRef::new(FluentScrollBehavior::new()),
+            selection,
         )
-        .accent(theme.accent)
-        .into_widget()
+        .into_widget();
+        ThemeScope::new(theme.theme, scrolling)
+            .accent(theme.accent)
+            .into_widget()
     }
+}
+
+/// WinUI's body text: the kit's content-control family, 14 points, and the theme's
+/// `TextFillColorPrimary`, which every `Text` without a style inherits.
+fn default_text_style(theme: &FluentTheme) -> TextStyle {
+    let resources = ThemeResources::new(theme.theme, theme.accent);
+    TextBlockStyle::Body.text_style(&resources, resources.text_fill_color_primary)
 }
 
 impl Debug for FluentApp {
