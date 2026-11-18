@@ -462,10 +462,7 @@ mod tests {
             };
             picked
         };
-        assert_eq!(
-            now(pick().read_all(&crate::MemoryFiles::new())).unwrap(),
-            b"hello"
-        );
+        assert_eq!(now(pick().read_all(None)).unwrap(), b"hello");
         let picked = pick();
         let PickedFile::Handle(handle) = &picked else {
             panic!("a handle");
