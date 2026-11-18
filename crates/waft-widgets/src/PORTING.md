@@ -371,10 +371,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the arguments arrive through fluent setters, so they are only complete once the chain ends (basic.rs's assert entry).
   Affect: a contradictory configuration panics where the app widget is handed to the tree, not on its first build.
 
-- Change: the assert that a `home` or `routes` app names a `page_route_builder`, unless it also gives a `builder` or `on_generate_route`, runs in every build, where Dart's constructor assert runs only in debug.
-  Reason: framework — a release build that hides a route it cannot build would fail on the first navigation, far from the widget that misconfigured it.
-  Affect: `WidgetsApp::new(color).home(Home)` panics at `.into_widget()` with Flutter's message, in a release build too; a `builder`-only app and `run_app(widget)` still work without a builder.
-
 - Change: `WidgetsApp::default_shortcuts` and `default_actions` build a fresh value per call, with new action objects.
   Reason: language — an `Rc` or an arena handle cannot be a `const`, and Dart's `defaultActions` is one mutable map of shared action objects.
   Affect: modifying the returned map changes only the app it is passed to, where Dart's global map is shared by every `WidgetsApp`.

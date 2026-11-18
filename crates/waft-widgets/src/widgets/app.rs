@@ -760,6 +760,12 @@ pub struct WidgetsApp {
     pub use_inherited_media_query: bool,
 }
 
+/// Flutter's message for an app that routes with `home` or `routes` but names no page route:
+/// the constructor's assert in a debug build, the first route's panic in a release one.
+const PAGE_ROUTE_BUILDER_REQUIRED: &str = "If neither builder nor onGenerateRoute are provided, \
+    the pageRouteBuilder must be specified so that the default handler will know what kind of \
+    PageRoute transition to build.";
+
 impl WidgetsApp {
     /// Creates a widget that wraps a number of widgets that are commonly
     /// required for an application.
@@ -781,7 +787,7 @@ impl WidgetsApp {
     /// needs to know how to build `PageRoute`s, so the
     /// [`page_route_builder`](Self::page_route_builder) setter must be given one too, unless a
     /// [`builder`](Self::builder) or [`on_generate_route`](Self::on_generate_route) is; Flutter's
-    /// assert checks it when the widget is turned into a [`WidgetRef`], in a release build too.
+    /// assert checks it when the widget is turned into a [`WidgetRef`] in a debug build.
     ///
     /// The [`builder`](Self::builder) setter is designed to provide the ability to wrap the
     /// visible content of the app in some other widget. It is recommended that you use
@@ -1193,17 +1199,11 @@ impl StatefulWidget for WidgetsApp {
              navigator-related properties, navigatorKey, initialRoute, and navigatorObservers, \
              must have their initial values (null, null, and the empty list, respectively)."
         );
-    }
-
-    fn check_constructor(&self) {
-        self.debug_check_constructor();
-        assert!(
+        debug_assert!(
             self.builder.is_some()
                 || self.on_generate_route.is_some()
                 || self.page_route_builder.is_some(),
-            "If neither builder nor onGenerateRoute are provided, the \
-             pageRouteBuilder must be specified so that the default handler \
-             will know what kind of PageRoute transition to build."
+            "{PAGE_ROUTE_BUILDER_REQUIRED}"
         );
     }
 
@@ -1420,10 +1420,11 @@ impl WidgetsAppState {
         };
 
         if let Some(page_content_builder) = page_content_builder {
-            let page_route_builder =
-                self.widget(app).page_route_builder.clone().expect(
-                    "WidgetsApp checks page_route_builder when it is turned into a WidgetRef",
-                );
+            let page_route_builder = self
+                .widget(app)
+                .page_route_builder
+                .clone()
+                .expect(PAGE_ROUTE_BUILDER_REQUIRED);
             let route = page_route_builder(app, settings, page_content_builder);
             return Some(route.into_erased());
         }
