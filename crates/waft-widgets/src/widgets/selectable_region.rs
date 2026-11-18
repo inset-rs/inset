@@ -5631,6 +5631,249 @@ mod tests {
         });
     }
 
+    /// `keyboard_utils.dart`'s `sendKeyCombination`: the modifiers down, the trigger down and up,
+    /// a pump, then the modifiers up in reverse.
+    fn send_key_combination(
+        tester: &mut WidgetTester,
+        trigger: (waft_services::PhysicalKeyboardKey, LogicalKeyboardKey),
+        shift: bool,
+        alt: bool,
+        control: bool,
+        meta: bool,
+    ) {
+        use waft_services::PhysicalKeyboardKey;
+        let modifiers: Vec<(PhysicalKeyboardKey, LogicalKeyboardKey)> = [
+            (
+                control,
+                PhysicalKeyboardKey::CONTROL_LEFT,
+                LogicalKeyboardKey::CONTROL_LEFT,
+            ),
+            (
+                shift,
+                PhysicalKeyboardKey::SHIFT_LEFT,
+                LogicalKeyboardKey::SHIFT_LEFT,
+            ),
+            (
+                alt,
+                PhysicalKeyboardKey::ALT_LEFT,
+                LogicalKeyboardKey::ALT_LEFT,
+            ),
+            (
+                meta,
+                PhysicalKeyboardKey::META_LEFT,
+                LogicalKeyboardKey::META_LEFT,
+            ),
+        ]
+        .into_iter()
+        .filter(|(pressed, _, _)| *pressed)
+        .map(|(_, physical, logical)| (physical, logical))
+        .collect();
+        for (physical, logical) in &modifiers {
+            tester.send_key_down_event(*physical, *logical);
+        }
+        tester.send_key_down_event(trigger.0, trigger.1);
+        tester.send_key_up_event(trigger.0, trigger.1);
+        tester.pump();
+        for (physical, logical) in modifiers.iter().rev() {
+            tester.send_key_up_event(*physical, *logical);
+        }
+    }
+
+    fn arrow_right() -> (waft_services::PhysicalKeyboardKey, LogicalKeyboardKey) {
+        (
+            waft_services::PhysicalKeyboardKey::ARROW_RIGHT,
+            LogicalKeyboardKey::ARROW_RIGHT,
+        )
+    }
+
+    fn arrow_left() -> (waft_services::PhysicalKeyboardKey, LogicalKeyboardKey) {
+        (
+            waft_services::PhysicalKeyboardKey::ARROW_LEFT,
+            LogicalKeyboardKey::ARROW_LEFT,
+        )
+    }
+
+    fn arrow_up() -> (waft_services::PhysicalKeyboardKey, LogicalKeyboardKey) {
+        (
+            waft_services::PhysicalKeyboardKey::ARROW_UP,
+            LogicalKeyboardKey::ARROW_UP,
+        )
+    }
+
+    fn arrow_down() -> (waft_services::PhysicalKeyboardKey, LogicalKeyboardKey) {
+        (
+            waft_services::PhysicalKeyboardKey::ARROW_DOWN,
+            LogicalKeyboardKey::ARROW_DOWN,
+        )
+    }
+
+    /// `paragraph`'s one selection, as Dart's tests read `selections[0].start` and `.end`.
+    fn paragraph_selection_start_end(
+        tester: &WidgetTester,
+        paragraph: RenderHandle<RenderParagraph>,
+    ) -> (i32, i32) {
+        tester.update(|app| {
+            let selections = paragraph.selections(app);
+            assert_eq!(selections.len(), 1);
+            (selections[0].start(), selections[0].end())
+        })
+    }
+
+    /// The keyboard cases' start: the three texts under a region, and a mouse drag from offset
+    /// 2 to offset 6 of the first.
+    fn select_two_to_six_of_the_first_text(
+        tester: &mut WidgetTester,
+    ) -> RenderHandle<RenderParagraph> {
+        pump_region(tester, three_texts());
+        let paragraph_1 = paragraph_showing(tester, "How are you?");
+        let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+        let at = text_offset_to_position(tester, paragraph_1, 2);
+        tester.down(&mut gesture, at);
+        tester.pump();
+        let at = text_offset_to_position(tester, paragraph_1, 6);
+        tester.move_to(&mut gesture, at, true);
+        tester.up(&gesture);
+        tester.pump();
+        tester.remove_pointer(&gesture);
+        assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 6));
+        paragraph_1
+    }
+
+    // selectable_region_test.dart 'can use keyboard to granularly extend selection - character'.
+    #[test]
+    fn can_use_keyboard_to_granularly_extend_selection_character() {
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let paragraph_1 = select_two_to_six_of_the_first_text(tester);
+
+            send_key_combination(tester, arrow_right(), true, false, false, false);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 7));
+
+            for i in 0..5 {
+                send_key_combination(tester, arrow_right(), true, false, false, false);
+                tester.pump();
+                assert_eq!(
+                    paragraph_selection_start_end(tester, paragraph_1),
+                    (2, 8 + i)
+                );
+            }
+
+            for i in 0..5 {
+                send_key_combination(tester, arrow_left(), true, false, false, false);
+                tester.pump();
+                assert_eq!(
+                    paragraph_selection_start_end(tester, paragraph_1),
+                    (2, 11 - i)
+                );
+            }
+        });
+    }
+
+    // selectable_region_test.dart 'can use keyboard to granularly extend selection - word'.
+    #[test]
+    fn can_use_keyboard_to_granularly_extend_selection_word() {
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let paragraph_1 = select_two_to_six_of_the_first_text(tester);
+            let (alt, control) = match tester.target_platform() {
+                TargetPlatform::Android
+                | TargetPlatform::Fuchsia
+                | TargetPlatform::Linux
+                | TargetPlatform::Windows => (false, true),
+                TargetPlatform::IOS | TargetPlatform::MacOS => (true, false),
+            };
+
+            send_key_combination(tester, arrow_right(), true, alt, control, false);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 7));
+
+            send_key_combination(tester, arrow_right(), true, alt, control, false);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 11));
+
+            send_key_combination(tester, arrow_right(), true, alt, control, false);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+
+            send_key_combination(tester, arrow_right(), true, alt, control, false);
+            tester.pump();
+            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 4));
+
+            send_key_combination(tester, arrow_left(), true, alt, control, false);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 0));
+
+            send_key_combination(tester, arrow_left(), true, alt, control, false);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 8));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 0));
+        });
+    }
+
+    /// The line and document cases' modifiers: `(alt, meta)`.
+    fn line_modifiers(platform: TargetPlatform) -> (bool, bool) {
+        match platform {
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Linux
+            | TargetPlatform::Windows => (true, false),
+            TargetPlatform::IOS | TargetPlatform::MacOS => (false, true),
+        }
+    }
+
+    // selectable_region_test.dart 'can use keyboard to granularly extend selection - line'.
+    #[test]
+    fn can_use_keyboard_to_granularly_extend_selection_line() {
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let paragraph_1 = select_two_to_six_of_the_first_text(tester);
+            let (alt, meta) = line_modifiers(tester.target_platform());
+
+            send_key_combination(tester, arrow_right(), true, alt, false, meta);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+
+            send_key_combination(tester, arrow_right(), true, alt, false, meta);
+            tester.pump();
+            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 14));
+
+            send_key_combination(tester, arrow_left(), true, alt, false, meta);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 0));
+
+            send_key_combination(tester, arrow_left(), true, alt, false, meta);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (0, 2));
+        });
+    }
+
+    // selectable_region_test.dart 'can use keyboard to granularly extend selection - document'.
+    #[test]
+    fn can_use_keyboard_to_granularly_extend_selection_document() {
+        test_widgets_variant(TargetPlatformVariant::all(), |tester| {
+            let paragraph_1 = select_two_to_six_of_the_first_text(tester);
+            let (alt, meta) = line_modifiers(tester.target_platform());
+
+            send_key_combination(tester, arrow_down(), true, alt, false, meta);
+            tester.pump();
+            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            let paragraph_3 = paragraph_showing(tester, "Fine, thank you.");
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (2, 12));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 14));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_3), (0, 16));
+
+            send_key_combination(tester, arrow_up(), true, alt, false, meta);
+            tester.pump();
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_1), (0, 2));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_2), (0, 0));
+            assert_eq!(paragraph_selection_start_end(tester, paragraph_3), (0, 0));
+        });
+    }
+
     /// The three texts most of `selectable_region_test.dart`'s cases select across.
     fn three_texts() -> Column {
         Column::new().children([
