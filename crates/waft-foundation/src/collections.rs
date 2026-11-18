@@ -1,4 +1,8 @@
-//! Flutter counterpart: `foundation/collections.dart` (the sorts and searches).
+//! Flutter counterpart: `foundation/collections.dart` (the equality checks, the searches and the
+//! sorts).
+//!
+//! Flutter's `null` collection is `None`: [`list_equals`], [`set_equals`] and [`map_equals`]
+//! take an `Option` of each side, and two `None`s are equal.
 //!
 //! [`merge_sort`] is Flutter's stable merge sort: it keeps equal elements in the order they
 //! started in, and it does not require its comparator to be a consistent total order, which
@@ -9,9 +13,65 @@
 //! to below 32 elements is private, as the helpers it merges with.
 
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 /// Limit below which merge sort defaults to insertion sort.
 const K_MERGE_SORT_LIMIT: usize = 32;
+
+/// Compares two sets for element-by-element equality.
+///
+/// Two `None`s are equal, and a `None` is never equal to a set. Two sets are equal when they
+/// have the same length and every element of one is in the other; order is not compared.
+pub fn set_equals<T: Eq + Hash>(a: Option<&HashSet<T>>, b: Option<&HashSet<T>>) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return a.is_none() && b.is_none();
+    };
+    if a.len() != b.len() {
+        return false;
+    }
+    if std::ptr::eq(a, b) {
+        return true;
+    }
+    a.iter().all(|value| b.contains(value))
+}
+
+/// Compares two lists for element-by-element equality.
+///
+/// Two `None`s are equal, and a `None` is never equal to a list. Two lists are equal when they
+/// have the same length and the same elements in the same order.
+pub fn list_equals<T: PartialEq>(a: Option<&[T]>, b: Option<&[T]>) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return a.is_none() && b.is_none();
+    };
+    if a.len() != b.len() {
+        return false;
+    }
+    if std::ptr::eq(a, b) {
+        return true;
+    }
+    a.iter().zip(b).all(|(x, y)| x == y)
+}
+
+/// Compares two maps for element-by-element equality.
+///
+/// Two `None`s are equal, and a `None` is never equal to a map. Two maps are equal when they
+/// have the same length, and every key of one is a key of the other with an equal value.
+pub fn map_equals<K: Eq + Hash, V: PartialEq>(
+    a: Option<&HashMap<K, V>>,
+    b: Option<&HashMap<K, V>>,
+) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return a.is_none() && b.is_none();
+    };
+    if a.len() != b.len() {
+        return false;
+    }
+    if std::ptr::eq(a, b) {
+        return true;
+    }
+    a.iter().all(|(key, value)| b.get(key) == Some(value))
+}
 
 /// Returns the position of `value` in `sorted_list`, or `-1` if it does not contain it.
 ///
@@ -353,8 +413,8 @@ fn merge_slices_into_target<T: Clone>(
 
 #[cfg(test)]
 mod tests {
-    //! `test/foundation/collections_test.dart`: its `binarySearch` and `MergeSort*` cases.
-    //! (Its `listEquals`, `setEquals` and `mapEquals` cases have no function here yet.)
+    //! `test/foundation/collections_test.dart`: its equality, `binarySearch` and `MergeSort*`
+    //! cases.
 
     use super::*;
 
@@ -392,6 +452,59 @@ mod tests {
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
             Some(self.cmp(other))
         }
+    }
+
+    // collections_test.dart 'listEquals'.
+    #[test]
+    fn list_equals_compares_length_order_and_elements() {
+        let list_a = vec![1, 2, 3];
+        let list_b = vec![1, 2, 3];
+        let list_c = vec![1, 2];
+        let list_d = vec![3, 2, 1];
+
+        assert!(list_equals::<i32>(None, None));
+        assert!(!list_equals(Some(&list_a), None));
+        assert!(!list_equals(None, Some(&list_b)));
+        assert!(list_equals(Some(&list_a), Some(&list_a)));
+        assert!(list_equals(Some(&list_a), Some(&list_b)));
+        assert!(!list_equals(Some(&list_a), Some(&list_c)));
+        assert!(!list_equals(Some(&list_a), Some(&list_d)));
+    }
+
+    // collections_test.dart 'setEquals'.
+    #[test]
+    fn set_equals_ignores_order() {
+        let set_a = HashSet::from([1, 2, 3]);
+        let set_b = HashSet::from([1, 2, 3]);
+        let set_c = HashSet::from([1, 2]);
+        let set_d = HashSet::from([3, 2, 1]);
+
+        assert!(set_equals::<i32>(None, None));
+        assert!(!set_equals(Some(&set_a), None));
+        assert!(!set_equals(None, Some(&set_b)));
+        assert!(set_equals(Some(&set_a), Some(&set_a)));
+        assert!(set_equals(Some(&set_a), Some(&set_b)));
+        assert!(!set_equals(Some(&set_a), Some(&set_c)));
+        assert!(set_equals(Some(&set_a), Some(&set_d)));
+    }
+
+    // collections_test.dart 'mapEquals'.
+    #[test]
+    fn map_equals_compares_keys_and_values() {
+        let map_a = HashMap::from([(1, 1), (2, 2), (3, 3)]);
+        let map_b = HashMap::from([(1, 1), (2, 2), (3, 3)]);
+        let map_c = HashMap::from([(1, 1), (2, 2)]);
+        let map_d = HashMap::from([(3, 3), (2, 2), (1, 1)]);
+        let map_e = HashMap::from([(3, 1), (2, 2), (1, 3)]);
+
+        assert!(map_equals::<i32, i32>(None, None));
+        assert!(!map_equals(Some(&map_a), None));
+        assert!(!map_equals(None, Some(&map_b)));
+        assert!(map_equals(Some(&map_a), Some(&map_a)));
+        assert!(map_equals(Some(&map_a), Some(&map_b)));
+        assert!(!map_equals(Some(&map_a), Some(&map_c)));
+        assert!(map_equals(Some(&map_a), Some(&map_d)));
+        assert!(!map_equals(Some(&map_a), Some(&map_e)));
     }
 
     // collections_test.dart 'binarySearch'.
