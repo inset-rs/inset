@@ -21,20 +21,31 @@ const HOST_AND_TOOL_CRATES: &[&str] = &[
     "waft-winui-test-support",
 ];
 
-/// Files where a target switch is Flutter's own, not a platform check in the framework.
-const FLUTTER_TARGET_CONSTANTS: &[&str] = &[
-    // `kIsWeb` and `kIsWasm`, dart:ui's constants, which Flutter's foundation defines by target.
-    "crates/waft-foundation/src/constants.rs",
-    // `THIS_OS`, the engine's answer for `GetDefaultFontFamilies`, which Flutter's engine
-    // decides per target rather than asking the OS.
-    "crates/waft-embedder/src/platform.rs",
-    // The umbrella crate choosing which host to re-export: `DefaultEmbedder`, `AndroidApp`, the
-    // desktop settings.
-    "crates/waft/src/lib.rs",
+/// The lines where a target switch is Flutter's own, not a platform check in the framework: a
+/// file and the text its line holds. Each names one switch, so a new one in the same file is
+/// still caught.
+const FLUTTER_TARGET_CONSTANTS: &[(&str, &str)] = &[
+    // `kIsWeb` and `kIsWasm`, the constants Flutter's foundation defines by the compilation
+    // target (`bool.fromEnvironment('dart.library.js_util')`).
+    (
+        "crates/waft-foundation/src/constants.rs",
+        "pub const K_IS_WEB: bool = cfg!(",
+    ),
+    (
+        "crates/waft-foundation/src/constants.rs",
+        "pub const K_IS_WASM: bool = cfg!(",
+    ),
     // Flutter's debug-only assert on the input actions `Platform.isIOS` and `Platform.isAndroid`
     // accept: dart:io's platform, which is the OS the process runs on, not the app's chosen
     // `TargetPlatform` (Flutter's test binding says Android while the process runs on macOS).
-    "crates/waft-services/src/text_input.rs",
+    (
+        "crates/waft-services/src/text_input.rs",
+        "if cfg!(target_os = \"ios\") {",
+    ),
+    (
+        "crates/waft-services/src/text_input.rs",
+        "} else if cfg!(target_os = \"android\") {",
+    ),
 ];
 
 #[test]
@@ -62,10 +73,7 @@ fn no_framework_crate_switches_on_the_target() {
                 .unwrap_or(&file)
                 .to_string_lossy()
                 .into_owned();
-            if FLUTTER_TARGET_CONSTANTS.contains(&relative.as_str()) {
-                continue;
-            }
-            scan(&file, &mut hits);
+            scan(&file, &relative, &mut hits);
         }
     }
     assert!(
@@ -106,8 +114,9 @@ fn rust_files(src: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Adds each line of `file` outside a test module that switches on the target.
-fn scan(file: &Path, hits: &mut Vec<String>) {
+/// Adds each line of `file` outside a test module that switches on the target and is not one of
+/// Flutter's own.
+fn scan(file: &Path, relative: &str, hits: &mut Vec<String>) {
     let Ok(text) = fs::read_to_string(file) else {
         return;
     };
@@ -117,15 +126,17 @@ fn scan(file: &Path, hits: &mut Vec<String>) {
     let mut pending_test = false;
     for (number, line) in text.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("#[cfg(any(test,") {
+        if trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("#[cfg(all(test,") {
             pending_test = true;
-        }
-        if pending_test && (trimmed.starts_with("mod ") || trimmed.contains(" mod ")) {
-            test_module = Some(depth);
+        } else if pending_test && !trimmed.starts_with("#[") {
+            // The item a `cfg(test)` is on: a module is read out to its end, anything else alone.
+            if trimmed.starts_with("mod ") || trimmed.contains(" mod ") {
+                test_module = Some(depth);
+            }
             pending_test = false;
         }
         let in_test = test_module.is_some() || pending_test;
-        if !in_test && has_target_switch(trimmed) {
+        if !in_test && has_target_switch(trimmed) && !is_flutter_constant(relative, trimmed) {
             hits.push(format!("{}:{}: {}", file.display(), number + 1, trimmed));
         }
         depth += braces(line);
@@ -137,17 +148,18 @@ fn scan(file: &Path, hits: &mut Vec<String>) {
     }
 }
 
+fn is_flutter_constant(relative: &str, line: &str) -> bool {
+    FLUTTER_TARGET_CONSTANTS
+        .iter()
+        .any(|&(file, text)| file == relative && line.starts_with(text))
+}
+
 fn has_target_switch(line: &str) -> bool {
     let conditional = line.contains("cfg(") || line.contains("cfg!(") || line.contains("cfg_attr(");
     conditional
-        && [
-            "target_os",
-            "target_family",
-            "target_arch",
-            "target_vendor",
-        ]
-        .iter()
-        .any(|target| line.contains(target))
+        && ["target_os", "target_family", "target_arch", "target_vendor"]
+            .iter()
+            .any(|target| line.contains(target))
 }
 
 fn braces(line: &str) -> i32 {
