@@ -104,10 +104,10 @@ pub enum RedirectPolicy {
     /// Follow up to `max` redirects, then fail with [`HttpError::TooManyRedirects`]. Dart's
     /// `HttpClient` follows five by default.
     ///
-    /// A 307 or a 308 resends the request's method and body: a client that cannot send the body
-    /// again answers the redirect response as it is, rather than sending a request whose body is
-    /// missing, and leaves the decision to the app. A body made from bytes can be sent again
-    /// ([`Body::try_clone`]); one that streams cannot.
+    /// A 307 or a 308 resends the request's method and body: a client follows it when it holds
+    /// the body, or [`Body::try_clone`] answers `Some` for it; otherwise it answers the redirect
+    /// response as it is, rather than sending a request whose body is missing, and leaves the
+    /// decision to the app.
     Follow {
         /// How many redirects may be followed.
         max: usize,
@@ -426,6 +426,10 @@ pub trait BodyStream {
 
     /// The fields that came after the body, once it has ended; `None` where the response has
     /// none, and always `None` on a client whose protocol layer does not expose them.
+    ///
+    /// Called only after [`read`](Self::read) has answered `0`; asking again answers the same
+    /// fields, so an implementation over a future that may be awaited once keeps its answer. On
+    /// a request body this answers the fields to send.
     fn trailers(&mut self) -> BodyTrailersFuture<'_>;
 
     /// How many bytes the whole body carries, when the sender said so, as `Content-Length`
@@ -462,6 +466,12 @@ enum BodyKind {
     Empty,
     /// Bytes in memory, and how many of them have been read.
     Bytes { bytes: Bytes, read: usize },
+    /// A body with the fields to send after it, which it answers once its bytes are read. Its
+    /// own stream's fields, if it had any, are replaced.
+    Trailered {
+        inner: Box<BodyKind>,
+        trailers: HeaderMap,
+    },
     /// A stream, read as the platform delivers it.
     Stream(Box<dyn BodyStream>),
 }
@@ -477,6 +487,7 @@ impl BodyStream for BodyKind {
                 *read = end;
                 Box::pin(std::future::ready(Ok(end - start)))
             }
+            BodyKind::Trailered { inner, .. } => inner.read(buf),
             BodyKind::Stream(stream) => stream.read(buf),
         }
     }
@@ -484,6 +495,10 @@ impl BodyStream for BodyKind {
     fn trailers(&mut self) -> BodyTrailersFuture<'_> {
         match self {
             BodyKind::Empty | BodyKind::Bytes { .. } => Box::pin(std::future::ready(Ok(None))),
+            BodyKind::Trailered { trailers, .. } => {
+                let trailers = trailers.clone();
+                Box::pin(std::future::ready(Ok(Some(trailers))))
+            }
             BodyKind::Stream(stream) => stream.trailers(),
         }
     }
@@ -492,6 +507,7 @@ impl BodyStream for BodyKind {
         match self {
             BodyKind::Empty => Some(0),
             BodyKind::Bytes { bytes, .. } => Some(bytes.len() as u64),
+            BodyKind::Trailered { inner, .. } => inner.length(),
             BodyKind::Stream(stream) => stream.length(),
         }
     }
@@ -511,29 +527,23 @@ impl Body {
         Body(BodyKind::Stream(Box::new(stream)))
     }
 
-    /// `trailers`, sent after this body ends: its stream answers them once its bytes have been
-    /// read, as HTTP sends its trailers after the last byte. A client whose protocol layer cannot
-    /// send trailers fails the request rather than dropping them.
+    /// `trailers`, sent after this body ends: the body answers them once its bytes have been
+    /// read, as HTTP sends its trailers after the last byte. A body whose stream has fields of
+    /// its own has them replaced. A client whose protocol layer cannot send trailers fails the
+    /// request rather than dropping them.
     pub fn with_trailers(self, trailers: HeaderMap) -> Body {
-        Body(BodyKind::Stream(Box::new(Trailered {
+        Body(BodyKind::Trailered {
             inner: Box::new(self.0),
             trailers,
-        })))
+        })
     }
 
     /// A second body with the same bytes, for a request a client sends again on a redirect that
-    /// resends its body. `Some` for a body made from bytes and for an empty one; `None` for one
-    /// that streams — including one [`with_trailers`](Self::with_trailers) wrapped — whose bytes
-    /// are gone once they are read, and whose trailers may depend on them.
+    /// resends its body. `Some` for a body made from bytes and for an empty one, with the fields
+    /// it sends; `None` for one that streams, whose bytes are gone once they are read and whose
+    /// fields may depend on them.
     pub fn try_clone(&self) -> Option<Body> {
-        match &self.0 {
-            BodyKind::Empty => Some(Body(BodyKind::Empty)),
-            BodyKind::Bytes { bytes, .. } => Some(Body(BodyKind::Bytes {
-                bytes: bytes.clone(),
-                read: 0,
-            })),
-            BodyKind::Stream(_) => None,
-        }
+        Some(Body(self.0.clone_for_resend()?))
     }
 
     /// Reads the next bytes of the body into `buf`, answering how many it read, `0` at the end:
@@ -551,25 +561,20 @@ impl Body {
                 *read = bytes.len();
                 Box::pin(std::future::ready(Ok(bytes.slice(start..).to_vec())))
             }
-            BodyKind::Stream(stream) => Box::pin(read_all(Some(&mut **stream))),
+            body => Box::pin(read_all(body)),
         }
     }
 
     /// The fields that came after the body, once it has ended: reads what is left of the body
     /// first, discarding those bytes to reach its end, as HTTP sends its trailers only after its
-    /// last byte, so asking for them never waits for a reader that never comes. A body that has
-    /// ended answers without reading. Asking again answers the same fields, which a client that
-    /// sends them keeps; `None` where the response has none, and always `None` on a client whose
-    /// protocol layer does not expose them.
+    /// last byte, so asking for them never waits for a reader that never comes. The bytes are
+    /// discarded into a buffer on the stack, so a body that has already ended costs no allocation.
+    /// Asking again answers the same fields, which a client that sends them keeps; `None` where
+    /// the response has none, and always `None` on a client whose protocol layer does not expose
+    /// them.
     pub fn trailers(&mut self) -> BodyTrailersFuture<'_> {
         Box::pin(async move {
-            // One byte tells whether anything is left, so a body that has ended answers without
-            // a read buffer of its own.
-            let mut probe = [0u8; 1];
-            if self.read(&mut probe).await? != 0 {
-                let mut chunk = vec![0; READ_CHUNK];
-                while self.read(&mut chunk).await? != 0 {}
-            }
+            skip_to_end(&mut self.0).await?;
             self.0.trailers().await
         })
     }
@@ -617,10 +622,26 @@ impl fmt::Debug for Body {
     }
 }
 
-async fn read_all(stream: Option<&mut dyn BodyStream>) -> Result<Vec<u8>, HttpError> {
-    let Some(stream) = stream else {
-        return Ok(Vec::new());
-    };
+impl BodyKind {
+    /// A body over the same bytes, read from its start, when the bytes are held rather than
+    /// streamed: what a client sends again on a redirect that resends its body.
+    fn clone_for_resend(&self) -> Option<BodyKind> {
+        match self {
+            BodyKind::Empty => Some(BodyKind::Empty),
+            BodyKind::Bytes { bytes, .. } => Some(BodyKind::Bytes {
+                bytes: bytes.clone(),
+                read: 0,
+            }),
+            BodyKind::Trailered { inner, trailers } => Some(BodyKind::Trailered {
+                inner: Box::new(inner.clone_for_resend()?),
+                trailers: trailers.clone(),
+            }),
+            BodyKind::Stream(_) => None,
+        }
+    }
+}
+
+async fn read_all(stream: &mut dyn BodyStream) -> Result<Vec<u8>, HttpError> {
     let mut bytes = Vec::with_capacity(usize::try_from(stream.length().unwrap_or(0)).unwrap_or(0));
     let mut chunk = vec![0; READ_CHUNK];
     loop {
@@ -632,26 +653,12 @@ async fn read_all(stream: Option<&mut dyn BodyStream>) -> Result<Vec<u8>, HttpEr
     }
 }
 
-/// A body with the fields to send after it: the stream reads the body's bytes, and answers the
-/// fields once they are read, as a body's last frame.
-struct Trailered {
-    inner: Box<dyn BodyStream>,
-    trailers: HeaderMap,
-}
-
-impl BodyStream for Trailered {
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> BodyReadFuture<'a> {
-        self.inner.read(buf)
-    }
-
-    fn trailers(&mut self) -> BodyTrailersFuture<'_> {
-        let trailers = self.trailers.clone();
-        Box::pin(std::future::ready(Ok(Some(trailers))))
-    }
-
-    fn length(&self) -> Option<u64> {
-        self.inner.length()
-    }
+/// Reads `stream` to its end, discarding what is left: what asking for a body's trailers does
+/// before it can answer them.
+async fn skip_to_end(stream: &mut dyn BodyStream) -> Result<(), HttpError> {
+    let mut discarded = [0u8; 8192];
+    while stream.read(&mut discarded).await? != 0 {}
+    Ok(())
 }
 
 #[cfg(test)]
@@ -829,12 +836,45 @@ mod tests {
 
         let mut trailers = HeaderMap::new();
         trailers.insert("x-checksum", 7u32.into());
+        let wrapped = Body::from(b"a body".to_vec()).with_trailers(trailers.clone());
         assert!(
-            Body::from(b"a body".to_vec())
-                .with_trailers(trailers)
-                .try_clone()
-                .is_none(),
-            "a wrapped body's trailers may depend on its bytes, so it is not sent again"
+            wrapped.try_clone().is_some(),
+            "bytes and the fixed trailers they send go again together"
+        );
+    }
+
+    #[test]
+    fn a_body_with_fixed_trailers_is_sent_again_with_them() {
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", 7u32.into());
+        let body = Body::from(b"a body".to_vec()).with_trailers(trailers.clone());
+        let mut again = body
+            .try_clone()
+            .expect("a body of bytes and fixed trailers is sent again");
+        assert_eq!(now(again.read_all()).unwrap(), b"a body");
+        assert_eq!(now(again.trailers()).unwrap(), Some(trailers.clone()));
+        let mut third = body.try_clone().unwrap();
+        assert_eq!(
+            now(third.trailers()).unwrap(),
+            Some(trailers),
+            "each clone answers the same fields"
+        );
+    }
+
+    #[test]
+    fn trailers_given_to_a_stream_replace_its_own() {
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-other", 1u32.into());
+        let mut body =
+            Body::from_stream(Pieces(b"streamed body".to_vec(), 0)).with_trailers(trailers.clone());
+        assert_eq!(
+            now(body.trailers()).unwrap(),
+            Some(trailers),
+            "the given fields are the ones sent"
+        );
+        assert!(
+            body.try_clone().is_none(),
+            "a stream's bytes are gone once they are read"
         );
     }
 

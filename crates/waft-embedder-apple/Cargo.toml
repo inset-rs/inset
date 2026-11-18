@@ -69,6 +69,7 @@ pollster.workspace = true
 # notification center's delegate and completion handlers need `unsafe`, which the workspace
 # forbids; here it is denied instead, and `composition`, `hardware_buffers`, `gpu_interop`,
 # `media`, `image_codecs`, `caption_appearance`, `notifications`, `http` (`NSURLSession`'s
-# delegate) and `local_time` (the C library's `localtime_r`) alone allow it.
+# delegate and the shared, immutable `NSData` a request body is kept as) and `local_time` (the C
+# library's `localtime_r`) alone allow it.
 [lints.rust]
 unsafe_code = "deny"

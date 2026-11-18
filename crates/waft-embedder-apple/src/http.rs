@@ -149,7 +149,7 @@ impl Default for AppleHttpClient {
 
 impl HttpClient for AppleHttpClient {
     fn send(&self, request: Request<Body>, options: SendOptions) -> HttpFuture {
-        let exchange = Arc::new(Exchange::new(&options));
+        let exchange = Arc::new(Exchange::new(&options, request.method().as_str()));
         let loaded = load(
             self.session.clone(),
             Arc::clone(&self.exchanges),
@@ -198,7 +198,7 @@ async fn load(
     if request.body_mut().trailers().await?.is_some() {
         return Err(HttpError::HttpRequestTrailerSectionSize(Some(0)));
     }
-    let body = (!bytes.is_empty()).then(|| SharedBody(NSData::from_vec(bytes)));
+    let body = (!bytes.is_empty()).then(|| SharedBody::new(bytes));
     exchange.set_body(body.clone());
     let request = NSMutableURLRequest::new();
     request.setURL(Some(&url));
@@ -316,7 +316,8 @@ struct State {
     error: Option<HttpError>,
     redirects_left: usize,
     redirect_policy: RedirectPolicy,
-    /// The body of the request that was sent, kept for a 307 or a 308 to send again.
+    /// The method of the request that was sent, and its body, kept for a redirect to send again.
+    method: String,
     body: Option<SharedBody>,
 }
 
@@ -326,17 +327,23 @@ struct State {
 #[derive(Clone)]
 struct SharedBody(Retained<NSData>);
 
-// SAFETY: an `NSData` cannot be changed after it is made; only its bytes are read, from whichever
-// queue the session sends the request on.
+impl SharedBody {
+    /// The bytes, as the immutable `NSData` the request sends and sends again.
+    fn new(bytes: Vec<u8>) -> SharedBody {
+        SharedBody(NSData::from_vec(bytes))
+    }
+}
+
+// SAFETY: this is the type's only constructor, and it makes an immutable `NSData`: only its bytes
+// are ever read, from whichever queue the session sends the request on.
 unsafe impl Send for SharedBody {}
-unsafe impl Sync for SharedBody {}
 
 /// How much a response's delivered but unread data may hold before its task is suspended: 256
 /// KiB, plus at most the piece the session was already delivering.
 const BUFFER_LIMIT: usize = 256 * 1024;
 
 impl Exchange {
-    fn new(options: &SendOptions) -> Exchange {
+    fn new(options: &SendOptions, method: &str) -> Exchange {
         let redirects_left = match options.redirects {
             RedirectPolicy::Follow { max } => max,
             RedirectPolicy::Never => 0,
@@ -355,6 +362,7 @@ impl Exchange {
                 error: None,
                 redirects_left,
                 redirect_policy: options.redirects,
+                method: method.to_owned(),
                 body: None,
             }),
         }
@@ -482,9 +490,10 @@ impl Exchange {
             RedirectPolicy::Follow { .. } => {
                 state.redirects_left -= 1;
                 // The session proposes the request that follows: a 303, or a 301 or 302, may
-                // switch it to GET or HEAD, which carry no body, so a later 307 must not bring
-                // the first request's body back.
-                if method.eq_ignore_ascii_case("GET") || method.eq_ignore_ascii_case("HEAD") {
+                // switch its method, and a request whose method changed carries no body of the
+                // old one. A method that did not change keeps it — even a GET sent with a body.
+                if method != state.method {
+                    state.method = method.to_owned();
                     state.body = None;
                 }
                 if status == 307 || status == 308 {
@@ -835,5 +844,32 @@ fn error_of(error: &NSError) -> HttpError {
         | NSURLErrorCannotDecodeRawData
         | NSURLErrorCannotDecodeContentData => HttpError::HttpProtocolError,
         _ => HttpError::Internal(Some(reason)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A redirect keeps a body only for the method the request was sent with: a method the
+    /// session switches drops it, and a 307 then sends none.
+    #[test]
+    fn a_redirect_keeps_a_body_only_for_the_method_it_was_sent_with() {
+        // A GET sent with a body keeps it: the method did not change.
+        let exchange = Exchange::new(&SendOptions::default(), "GET");
+        exchange.set_body(Some(SharedBody::new(vec![1, 2, 3])));
+        assert!(matches!(
+            exchange.redirect(307, "GET"),
+            Redirect::Resend(Some(_))
+        ));
+
+        // A 303 switches a POST to GET, and the POST's body goes with the method.
+        let exchange = Exchange::new(&SendOptions::default(), "POST");
+        exchange.set_body(Some(SharedBody::new(vec![1, 2, 3])));
+        assert!(matches!(exchange.redirect(303, "GET"), Redirect::Follow));
+        assert!(matches!(
+            exchange.redirect(307, "GET"),
+            Redirect::Resend(None)
+        ));
     }
 }

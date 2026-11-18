@@ -18,9 +18,10 @@ test-support = ["dep:pollster"]
 serde = ["dep:serde"]
 
 [dependencies]
+# A body's bytes, shared when it is sent again.
+bytes.workspace = true
 # The request and response values of HTTP: methods, URIs, statuses and headers, whose shapes
 # every platform's client and the framework's own users share.
-bytes.workspace = true
 http.workspace = true
 indexmap.workspace = true
 raw-window-handle.workspace = true
