@@ -119,6 +119,11 @@ pub mod appkit {
         window_titled(title).is_some()
     }
 
+    /// Whether the window titled `title` has a sheet on it, as a file dialog's panel shows there.
+    pub fn shows_a_sheet(title: &str) -> bool {
+        window_titled(title).is_some_and(|window| window.attachedSheet().is_some())
+    }
+
     /// The smallest content AppKit lets a window be resized to when it has no minimum.
     pub const NO_MIN_SIZE: [f64; 2] = [0.0, 0.0];
     /// The largest content AppKit lets a window be resized to when it has no maximum.

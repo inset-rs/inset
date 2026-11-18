@@ -25,6 +25,9 @@
 //! A dialog asks for the user's gesture: the app opens one while it handles the user's click or
 //! key, as the browser tells a page's own dialog from one a script forced. The initial folder and
 //! the confirming button's label have no counterpart in the browser's pickers.
+//!
+//! Neither picker can be closed: a dropped future leaves the browser's dialog up, and the answer
+//! it gives when the user is done goes nowhere, without an error.
 
 use std::cell::{Cell, OnceCell};
 

@@ -23,7 +23,9 @@
 //! folder pick is the document tree `ACTION_OPEN_DOCUMENT_TREE` answers (`document_tree`).
 //!
 //! The result arrives on Android's main thread, which only hands the documents' URIs on; they are
-//! opened on the app's thread, as the app awaits them.
+//! opened on the app's thread, as the app awaits them. A future dropped before the result comes
+//! finishes the picker it started, from Android's main thread, and a result that still arrives is
+//! ignored.
 
 // JNI hands the native method raw arguments, and a document arrives as a raw file descriptor;
 // that is the `unsafe` here.
@@ -31,11 +33,14 @@
 
 use std::collections::HashMap;
 use std::fs::File;
+use std::future::Future;
 use std::io::{Read, Seek};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::FileExt;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::task::{Context, Poll};
 
 use jni::errors::LogErrorAndDefault;
 use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
@@ -121,7 +126,10 @@ impl DocumentPickers {
             activity.clear_exception();
             return failed_pick(&format!("the picker did not start: {error}"));
         }
-        answered
+        UrisPicked {
+            answered,
+            showing: Some((request, activity)),
+        }
     }
 
     fn open(
@@ -702,11 +710,49 @@ impl FileStream for DocumentStream {
 /// The URIs a picker answers, on their way from Android's main thread to the app's.
 type Picked = Result<Vec<String>, FileDialogError>;
 
-/// The app's side of a pick: the URIs, once the result came.
-type UrisPicked = Answered<Picked>;
+/// The app's side of a pick: the URIs once the result came, and the picker, finished when the app
+/// drops the pick before the result.
+struct UrisPicked {
+    answered: Answered<Picked>,
+    /// The picker still waiting for its result: the request code it started by, and the activity
+    /// that started it.
+    showing: Option<(jint, Activity)>,
+}
+
+impl Future for UrisPicked {
+    type Output = Picked;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Picked> {
+        Pin::new(&mut self.answered).poll(cx)
+    }
+}
+
+impl Drop for UrisPicked {
+    fn drop(&mut self) {
+        let Some((request, activity)) = self.showing.take() else {
+            return;
+        };
+        // The result takes the answer as it comes; one that came already left the picker gone.
+        if locked(&PENDING).remove(&request).is_none() {
+            return;
+        }
+        activity.on_main_thread("finishing the picker", move |env, activity| {
+            let finished = env.call_method(
+                activity,
+                jni_str!("finishActivity"),
+                jni_sig!("(I)V"),
+                &[JValue::Int(request)],
+            );
+            if finished.is_err() {
+                env.exception_clear();
+            }
+            finished.map(|_| ())
+        });
+    }
+}
 
 /// A pick's answer, a failure if the picker ended without one.
-fn one_shot() -> (Answer<Picked>, UrisPicked) {
+fn one_shot() -> (Answer<Picked>, Answered<Picked>) {
     answer(Err(FileDialogError::Failed(
         "the picker ended without an answer".to_owned(),
     )))
@@ -716,7 +762,10 @@ fn one_shot() -> (Answer<Picked>, UrisPicked) {
 fn failed_pick(reason: &str) -> UrisPicked {
     let (failed, answered) = one_shot();
     failed.give(Err(FileDialogError::Failed(reason.to_owned())));
-    answered
+    UrisPicked {
+        answered,
+        showing: None,
+    }
 }
 
 fn locked<T>(shared: &Mutex<T>) -> MutexGuard<'_, T> {
