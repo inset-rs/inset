@@ -457,19 +457,15 @@ mod tests {
             move || vec![file.picked()]
         });
         let pick = || {
-            let Some(picked) = now(dialogs.open_file(None, OpenOptions::default())).unwrap() else {
-                panic!("a pick");
+            let Some(PickedFile::Handle(handle)) =
+                now(dialogs.open_file(None, OpenOptions::default())).unwrap()
+            else {
+                panic!("a handle");
             };
-            picked
+            handle
         };
-        assert_eq!(
-            now(pick().read_all(&crate::MemoryFiles::new())).unwrap(),
-            b"hello"
-        );
-        let picked = pick();
-        let PickedFile::Handle(handle) = &picked else {
-            panic!("a handle");
-        };
+        assert_eq!(now(pick().read_all()).unwrap(), b"hello");
+        let handle = pick();
         let mut writer = now(handle.open_write().expect("writable")).unwrap();
         now(writer.write_at(5, b", file")).unwrap();
         assert_eq!(file.contents(), b"hello", "not before it finishes");

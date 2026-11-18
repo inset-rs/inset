@@ -91,7 +91,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## file_dialogs.rs → `file_selector` `XFile`
 
-- Change: `PickedFile::read_all` takes the platform's `Files` and reads a path through it, where `XFile` reads a path itself.
+- Change: `XFile.readAsBytes` is split by who owns the read: a picked path is read by the platform's `Files` (`files.read(path)`), a handle or a stream by itself (`read_all` on `FileHandle` and `FileStream`). `XFile` reads itself because Dart's IO is ambient and it hides whether it holds a path or a blob; Waft has the enum and an explicit platform, so the pick stays an honest account of what the system gave.
   Reason: layering — a picked path is still a path, and the file system that reads it is the platform's.
   Affect: a caller passes `app.platform().files()`; a host with no file system cannot read a picked path.
 
@@ -494,7 +494,7 @@ Ported against Flutter `9c427b5d7b`.
   Reason: platform — there are no plugins and no method channels; the host trait is the channel.
   Affect: an app asks the platform for its dialogs, and a host without them answers `None`.
 
-- Change: a pick is a `PickedFile`: a path where the system gives one, the system's handle where it gives none (the web; Android where the document seeks), and a stream where the system gives a pipe (Android), where Flutter's `XFile` holds a path or a blob, reading only; `PickedFile::read_all` is `XFile.readAsBytes`.
+- Change: a pick is a `PickedFile`: a path where the system gives one, the system's handle where it gives none (the web; Android where the document seeks), and a stream where the system gives a pipe (Android), where Flutter's `XFile` holds a path or a blob, reading only; `XFile.readAsBytes` is `files.read(path)` for a path and `read_all` on a handle or a stream.
   Reason: platform — Android's documents and the web's files have no path, and a copy into the app's cache could not be written back.
   Affect: an app reads and writes a handle at any offset where the system gives no path, and reads a stream through once.
 
