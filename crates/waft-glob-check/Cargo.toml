@@ -1,0 +1,18 @@
+[package]
+name = "waft-glob-check"
+description = "Checks that waft::* and each kit's glob export no ambiguous name"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+waft.workspace = true
+waft-cupertino.workspace = true
+waft-material.workspace = true
+waft-winui.workspace = true
+
+[lints]
+workspace = true

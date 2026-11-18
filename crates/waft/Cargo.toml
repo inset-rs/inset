@@ -9,11 +9,6 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[dev-dependencies]
-waft-cupertino.workspace = true
-waft-material.workspace = true
-waft-winui.workspace = true
-
 [dependencies]
 waft-embedder.workspace = true
 waft-embedder-default.workspace = true

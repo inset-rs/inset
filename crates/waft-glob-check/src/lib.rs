@@ -2,8 +2,11 @@
 //!
 //! An app writes both globs: the facade for the framework, a kit for its controls. A name both
 //! export would be ambiguous at every use, so each glob pair is re-exported here with
-//! `ambiguous_glob_reexports` denied: a new clash in either crate fails this test's build, and
+//! `ambiguous_glob_reexports` denied: a new clash in either crate fails this crate's build, and
 //! names the item.
+//!
+//! Not published (`publish = false`): it is a workspace member only so that `cargo test
+//! --workspace` builds it, and the facade must not depend on the kits.
 #![deny(ambiguous_glob_reexports)]
 
 /// The facade and the WinUI kit.
