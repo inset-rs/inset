@@ -1010,12 +1010,6 @@ impl Paragraph {
         f64::from(self.inner.min_intrinsic_width())
     }
 
-    /// The font requests the last build could not satisfy: families no installed face
-    /// answered and characters no face covered, as the engine's unresolved codepoints.
-    pub fn font_demand(&self) -> &valo::FontDemand {
-        self.inner.demand()
-    }
-
     /// Returns the smallest width beyond which increasing the width never decreases the
     /// height.
     pub fn max_intrinsic_width(&self) -> f64 {

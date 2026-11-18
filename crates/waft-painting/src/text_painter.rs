@@ -932,13 +932,6 @@ impl TextPainter {
         Size::new(self.width(), self.height())
     }
 
-    /// The font requests the laid-out paragraph could not satisfy, or `None` before layout.
-    pub fn font_demand(&self) -> Option<&waft_embedder::valo::FontDemand> {
-        self.layout_cache
-            .as_ref()
-            .map(|cache| cache.layout.paragraph.font_demand())
-    }
-
     /// Returns the distance from the top of the text to the first baseline of the given
     /// type.
     ///
