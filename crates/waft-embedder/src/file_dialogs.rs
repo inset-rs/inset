@@ -273,14 +273,14 @@ impl PickedFile {
 
     /// The whole file, as Flutter's `XFile.readAsBytes` reads it: a path through the platform's
     /// file system, a handle from its start to its end, and a stream through, which uses it up.
-    pub fn read_all<'a>(
-        &'a mut self,
-        files: &'a dyn Files,
-    ) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>> + 'a>> {
+    /// It takes the pick, so the read can be awaited later, in a task, with nothing borrowed.
+    pub fn read_all(self, files: &dyn Files) -> Pin<Box<dyn Future<Output = io::Result<Vec<u8>>>>> {
         match self {
-            PickedFile::Path(path) => files.read(path),
-            PickedFile::Handle(handle) => Box::pin(read_handle(&**handle)),
-            PickedFile::Stream(stream) => Box::pin(read_stream(&mut **stream)),
+            PickedFile::Path(path) => files.read(&path),
+            PickedFile::Handle(handle) => Box::pin(async move { read_handle(&*handle).await }),
+            PickedFile::Stream(mut stream) => {
+                Box::pin(async move { read_stream(&mut *stream).await })
+            }
         }
     }
 }
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn a_handle_is_read_whole_in_pieces() {
-        let mut picked = PickedFile::Handle(Box::new(Bytes(RefCell::new(b"hello, file".to_vec()))));
+        let picked = PickedFile::Handle(Box::new(Bytes(RefCell::new(b"hello, file".to_vec()))));
         assert_eq!(now(picked.read_all(&Disk)).unwrap(), b"hello, file");
     }
 
@@ -416,10 +416,10 @@ mod tests {
     fn a_path_is_read_through_the_platforms_files() {
         let path = std::env::temp_dir().join(format!("waft-read-all-{}", std::process::id()));
         std::fs::write(&path, b"on disk").unwrap();
-        let mut picked = PickedFile::Path(path.clone());
+        let picked = PickedFile::Path(path.clone());
         assert_eq!(now(picked.read_all(&Disk)).unwrap(), b"on disk");
         std::fs::remove_file(path).unwrap();
-        let mut missing = PickedFile::Path(PathBuf::from("/no/such/waft/file"));
+        let missing = PickedFile::Path(PathBuf::from("/no/such/waft/file"));
         assert!(now(missing.read_all(&Disk)).is_err());
     }
 }
