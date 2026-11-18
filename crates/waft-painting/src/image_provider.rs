@@ -8,7 +8,7 @@
 use std::fmt::{self, Debug};
 use std::future::Future;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -334,8 +334,8 @@ impl ImageProvider for MemoryImage {
 ///
 /// The bytes come from the platform's HTTP client ([`Platform::http`](waft_embedder::Platform::http)),
 /// which is `NSURLSession` on Apple's systems and `fetch` in a browser; an app may give the
-/// request headers and a scale. The image is cached by URL and scale, so every widget showing
-/// the same picture shares one fetch and one decode.
+/// request headers and a scale. The image is cached by URL, scale and headers, so every widget
+/// showing the same picture shares one fetch and one decode.
 #[derive(Clone, Debug)]
 pub struct NetworkImage {
     /// The URL to fetch the image from.
@@ -369,17 +369,29 @@ impl NetworkImage {
     }
 }
 
-/// The URL and scale that name one fetched image in the cache.
+/// The URL, scale and headers that name one fetched image in the cache, as Dart's
+/// `NetworkImage ==` compares them: the same picture asked for with other headers, such as
+/// another user's credentials, is another image.
 #[derive(Clone, Debug, PartialEq)]
 struct NetworkImageKey {
     url: String,
     scale: f64,
+    headers: Option<http::HeaderMap>,
 }
 
 impl Hash for NetworkImageKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.url.hash(state);
         hash_scale(self.scale, state);
+        // Dart's `MapEquality.hash`: the same whatever order the headers were added in.
+        let mut headers: Vec<(&str, &[u8])> = self
+            .headers
+            .iter()
+            .flatten()
+            .map(|(name, value)| (name.as_str(), value.as_bytes()))
+            .collect();
+        headers.sort_unstable();
+        headers.hash(state);
     }
 }
 
@@ -388,6 +400,7 @@ impl ImageProvider for NetworkImage {
         ImageCacheKey::new(NetworkImageKey {
             url: self.url.clone(),
             scale: self.scale,
+            headers: self.headers.clone(),
         })
     }
 
@@ -414,7 +427,7 @@ impl ImageProvider for NetworkImage {
             return completer;
         };
         let mut request = http::Request::builder().method(http::Method::GET).uri(uri);
-        if let Some(headers) = &self.headers {
+        if let Some(headers) = &key.headers {
             for (name, value) in headers {
                 request = request.header(name, value);
             }
@@ -542,29 +555,27 @@ impl FileImage {
         self.scale = scale;
         self
     }
-
-    /// The path as a string, for an error that names the file.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
 }
 
-/// One file at one scale.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// One file at one scale, as Dart's `FileImage ==` compares them.
+#[derive(Clone, Debug, PartialEq)]
 struct FileImageKey {
     path: PathBuf,
-    scale_bits: u64,
+    scale: f64,
+}
+
+impl Hash for FileImageKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+        hash_scale(self.scale, state);
+    }
 }
 
 impl ImageProvider for FileImage {
     fn key(&self, _configuration: &ImageConfiguration) -> ImageCacheKey {
         ImageCacheKey::new(FileImageKey {
             path: self.path.clone(),
-            scale_bits: if self.scale == 0.0 {
-                0
-            } else {
-                self.scale.to_bits()
-            },
+            scale: self.scale,
         })
     }
 
@@ -584,7 +595,7 @@ impl ImageProvider for FileImage {
             return completer;
         };
         let reading = files.read(&key.path);
-        let scale = self.scale;
+        let scale = key.scale;
         let path = key.path.clone();
         let retained = completer.keep(app);
         let _reading = app.spawn(async move |async_app| {
@@ -1174,10 +1185,17 @@ mod tests {
         panic!("the image did not settle");
     }
 
+    /// The length of Flutter's `kTransparentImage` (`test/image_data.dart`), whose bytes the
+    /// codec here does not read.
+    const TRANSPARENT_IMAGE_LENGTH: usize = 126;
+
     #[test]
     fn a_network_image_reports_each_chunk_with_the_length_the_head_named() {
+        // Flutter's "Notifies listeners of chunk events".
+        const CHUNK_SIZE: usize = 8;
         let url = "https://example.test/photo.png";
-        let chunks = vec![b"abcd".to_vec(), b"efgh".to_vec(), b"ij".to_vec()];
+        let image_bytes = vec![0u8; TRANSPARENT_IMAGE_LENGTH];
+        let chunks: Vec<Vec<u8>> = image_bytes.chunks(CHUNK_SIZE).map(<[u8]>::to_vec).collect();
         let client =
             MockHttpClient::new().answering(url, MockResponse::new().chunks(chunks.clone()));
         let cell = app_with(Some(client), None);
@@ -1212,23 +1230,15 @@ mod tests {
         };
         settle(&cell, &done);
         assert!(failed.borrow().is_none(), "{:?}", failed.borrow());
-        assert_eq!(
-            events.borrow().as_slice(),
-            &[
-                ImageChunkEvent {
-                    cumulative_bytes_loaded: 4,
-                    expected_total_bytes: Some(10),
-                },
-                ImageChunkEvent {
-                    cumulative_bytes_loaded: 8,
-                    expected_total_bytes: Some(10),
-                },
-                ImageChunkEvent {
-                    cumulative_bytes_loaded: 10,
-                    expected_total_bytes: Some(10),
-                },
-            ]
-        );
+        let events = events.borrow();
+        assert_eq!(events.len(), chunks.len());
+        for (i, event) in events.iter().enumerate() {
+            assert_eq!(
+                event.cumulative_bytes_loaded,
+                ((i + 1) * CHUNK_SIZE).min(TRANSPARENT_IMAGE_LENGTH)
+            );
+            assert_eq!(event.expected_total_bytes, Some(TRANSPARENT_IMAGE_LENGTH));
+        }
         assert_eq!(image.borrow().as_ref().unwrap().scale, 2.0);
     }
 
@@ -1243,6 +1253,11 @@ mod tests {
             let mut app = cell.borrow_mut();
             provider.resolve(&mut app, &ImageConfiguration::EMPTY)
         };
+        {
+            let mut app = cell.borrow_mut();
+            let cache = ImageCache::instance(&mut app);
+            assert_eq!(cache.pending_image_count(&app), 1);
+        }
         let failed: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
         {
             let mut app = cell.borrow_mut();
@@ -1264,42 +1279,89 @@ mod tests {
         assert!(!cache.contains_key(&app, &provider.key(&ImageConfiguration::EMPTY)));
     }
 
+    /// Resolves `provider` and waits until its image is there.
+    fn resolve_until_drawn(
+        cell: &Rc<waft_foundation::AppCell>,
+        provider: &NetworkImage,
+    ) -> Option<Handle<ImageStreamCompleter>> {
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let completer = {
+            let app = cell.borrow();
+            stream.completer(&app)
+        };
+        settle(cell, &|| {
+            let app = cell.borrow();
+            completer.is_some_and(|completer| completer.current_image(&app).is_some())
+        });
+        completer
+    }
+
+    fn with_key_value() -> http::HeaderMap {
+        http::HeaderMap::from_iter([(
+            http::HeaderName::from_static("key"),
+            http::HeaderValue::from_static("value"),
+        )])
+    }
+
     #[test]
-    fn two_network_images_of_the_same_url_and_scale_share_one_request() {
+    fn network_images_with_the_same_arguments_share_one_request() {
+        // Flutter's "Network image with same arguments uses cache".
         let url = "https://example.test/photo.png";
         let client =
             MockHttpClient::new().answering(url, MockResponse::new().body(b"pixels".to_vec()));
         let cell = app_with(Some(client.clone()), None);
-        let first = {
-            let mut app = cell.borrow_mut();
-            NetworkImage::new(url)
-                .headers(http::HeaderMap::from_iter([(
-                    http::header::ACCEPT,
-                    http::HeaderValue::from_static("image/png"),
-                )]))
-                .resolve(&mut app, &ImageConfiguration::EMPTY)
-        };
-        let first_completer = {
-            let app = cell.borrow();
-            first.completer(&app)
-        };
-        settle(&cell, &|| {
-            let app = cell.borrow();
-            first_completer
-                .map(|completer| completer.current_image(&app).is_some())
-                .unwrap_or(false)
-        });
-        let second = {
-            let mut app = cell.borrow_mut();
-            NetworkImage::new(url).resolve(&mut app, &ImageConfiguration::EMPTY)
-        };
-        let second_completer = {
-            let app = cell.borrow();
-            second.completer(&app)
-        };
-        assert_eq!(first_completer, second_completer);
+        let first = resolve_until_drawn(&cell, &NetworkImage::new(url).headers(with_key_value()));
+        let second = resolve_until_drawn(&cell, &NetworkImage::new(url).headers(with_key_value()));
+        assert_eq!(first, second);
         assert_eq!(client.asked().len(), 1);
-        assert_eq!(client.asked()[0].headers[http::header::ACCEPT], "image/png");
+        assert_eq!(client.asked()[0].headers["key"], "value");
+    }
+
+    #[test]
+    fn network_images_with_other_headers_are_other_images() {
+        let url = "https://example.test/photo.png";
+        let client =
+            MockHttpClient::new().answering(url, MockResponse::new().body(b"pixels".to_vec()));
+        let cell = app_with(Some(client.clone()), None);
+        let first = resolve_until_drawn(&cell, &NetworkImage::new(url).headers(with_key_value()));
+        let second = resolve_until_drawn(&cell, &NetworkImage::new(url));
+        assert_ne!(first, second);
+        assert_eq!(client.asked().len(), 2);
+    }
+
+    #[test]
+    fn a_network_image_whose_client_fails_is_evicted() {
+        // Flutter's "NetworkImage is evicted from cache on SocketException": no answer is
+        // configured, so the client fails the connection.
+        let cell = app_with(Some(MockHttpClient::new()), None);
+        let provider = NetworkImage::new("https://example.test/testing.png");
+        let stream = {
+            let mut app = cell.borrow_mut();
+            provider.resolve(&mut app, &ImageConfiguration::EMPTY)
+        };
+        let failed: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        {
+            let mut app = cell.borrow_mut();
+            assert_eq!(ImageCache::instance(&mut app).pending_image_count(&app), 1);
+            let slot = Rc::clone(&failed);
+            stream.add_listener(
+                &mut app,
+                ImageStreamListener::new(Rc::new(|_app, _info, _| {})).on_error(Rc::new(
+                    move |_app, error| {
+                        *slot.borrow_mut() = Some(error.to_string());
+                    },
+                )),
+            );
+        }
+        settle(&cell, &|| failed.borrow().is_some());
+        assert!(failed.borrow().as_ref().unwrap().contains("connection"));
+        let mut app = cell.borrow_mut();
+        let cache = ImageCache::instance(&mut app);
+        assert_eq!(cache.pending_image_count(&app), 0);
+        assert!(!cache.contains_key(&app, &provider.key(&ImageConfiguration::EMPTY)));
     }
 
     #[test]

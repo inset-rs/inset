@@ -107,10 +107,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## image_provider.rs → `NetworkImage`
 
-- Change: a `NetworkImage` is cached by its URL and scale, so two providers with the same URL and scale share one entry whatever their headers, where Dart keys it by the URL, scale and headers.
-  Reason: design — the platform's HTTP client is the one shared source of a fetch, and the request headers a widget passes are not part of the picture's identity here (2026-11-18 platform IO design).
-  Affect: a request sent with other headers after the first can reuse the first fetch; change the URL or scale to fetch again with different headers.
-
 - Change: a status other than 200, a body that is empty, or a failure from the platform's client is reported as an `ImageDecodeError` whose message names the status, URL or reason, where Dart throws `NetworkImageLoadException`, `Exception` or the client's own error.
   Reason: language — image providers report through `ImageDecodeError` here.
   Affect: an `on_error` handler reads the message; there is no status code field to match on.
