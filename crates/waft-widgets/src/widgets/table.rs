@@ -246,8 +246,7 @@ impl Table {
         self
     }
 
-    /// The tree node: a render object widget with its own element, outside the `IntoWidget`
-    /// kinds.
+    /// The tree node: a `Table` is its own tree node, which [`IntoWidget`] converts.
     pub fn into_widget(self) -> WidgetRef {
         Rc::new(self)
     }
