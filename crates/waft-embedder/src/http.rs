@@ -28,9 +28,9 @@ pub trait HttpClient {
     /// Sends `request`. The answer arrives once the response's head has, with its body still to
     /// read; dropping the future before then cancels the request.
     ///
-    /// A redirect that resends the request's body — a 307 or a 308 — is followed only by a client
-    /// that can send the body again: one that holds it, or [`Body::try_clone`] answered `Some`
-    /// for it. A client that streams the body, as a WebAssembly component's does, answers the
+    /// A redirect that resends the request's body — a 307 or a 308, or a 301 or a 302 of any
+    /// method but POST — is followed only by a client that can send the body again: one that
+    /// holds it, or [`Body::try_clone`] answered `Some` for it. A client that streams the body, as a WebAssembly component's does, answers the
     /// redirect response instead, so the app can decide what to do with a body that is gone.
     fn send(&self, request: Request<Body>, options: SendOptions) -> HttpFuture;
 }
@@ -104,10 +104,12 @@ pub enum RedirectPolicy {
     /// Follow up to `max` redirects, then fail with [`HttpError::TooManyRedirects`]. Dart's
     /// `HttpClient` follows five by default.
     ///
-    /// A 307 or a 308 resends the request's method and body: a client follows it when it holds
-    /// the body, or [`Body::try_clone`] answers `Some` for it; otherwise it answers the redirect
-    /// response as it is, rather than sending a request whose body is missing, and leaves the
-    /// decision to the app.
+    /// A redirect that keeps the request's method resends its body too (a 307 or a 308, and a
+    /// 301 or a 302 of any method but POST, as fetch and RFC 9110 have it; a 303, and a 301 or a
+    /// 302 of a POST, become a GET with no body): a client follows it when it holds the body, or
+    /// [`Body::try_clone`] answers `Some` for it; otherwise it answers the redirect response as
+    /// it is, rather than sending a request whose body is missing, and leaves the decision to
+    /// the app.
     Follow {
         /// How many redirects may be followed.
         max: usize,
