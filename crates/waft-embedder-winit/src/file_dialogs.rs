@@ -5,15 +5,18 @@
 //! system.
 //!
 //! A dialog's future is answered once, with what the user chose, or with a failure when the system
-//! drops its answer (`answer.rs`).
+//! drops its answer (`answer.rs`); dropped before that, it closes its dialog.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use waft_embedder::{FileDialogError, FileDialogFuture, ViewId};
 use winit::window::Window;
 
-use crate::answer::{Answer, answer};
+use crate::answer::{Answer, Answered, answer};
 use crate::state::EmbedderState;
 
 /// Where the views' windows are, for a dialog shown on its parent's.
@@ -34,12 +37,48 @@ impl ParentWindows {
 /// unused (`answer.rs`).
 pub(crate) type DialogAnswer<T> = Answer<Result<T, FileDialogError>>;
 
-/// A dialog's answer: what the system gives, and the future the app awaits.
-pub(crate) fn dialog_answer<T: Send + 'static>() -> (DialogAnswer<T>, FileDialogFuture<T>) {
+/// A dialog's answer: what the system gives, and the future the app awaits. `close` closes the
+/// dialog when the app drops the future before the dialog has answered, so a panel the app has
+/// stopped waiting for does not stay on screen; it is never called once the system answered.
+pub(crate) fn dialog_answer<T: Send + 'static>(
+    close: impl FnOnce() + 'static,
+) -> (DialogAnswer<T>, FileDialogFuture<T>) {
     let (answer, answered) = answer(Err(FileDialogError::Failed(
         "the dialog closed without an answer".to_owned(),
     )));
-    (answer, Box::pin(answered))
+    (
+        answer,
+        Box::pin(Dialog {
+            answered,
+            close: Some(Box::new(close)),
+        }),
+    )
+}
+
+/// A dialog's future: the answer the system gives, and the dialog it belongs to, which the drop
+/// closes when the app stops waiting before the system answered.
+struct Dialog<T> {
+    answered: Answered<Result<T, FileDialogError>>,
+    close: Option<Box<dyn FnOnce()>>,
+}
+
+impl<T> Future for Dialog<T> {
+    type Output = Result<T, FileDialogError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.answered).poll(cx)
+    }
+}
+
+impl<T> Drop for Dialog<T> {
+    fn drop(&mut self) {
+        if self.answered.settled() {
+            return;
+        }
+        if let Some(close) = self.close.take() {
+            close();
+        }
+    }
 }
 
 /// Each type's extensions as the patterns a Windows dialog filters by, `*.txt;*.md`, with its
@@ -81,6 +120,8 @@ pub(crate) fn portal_filters(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use waft_embedder::FileType;
 
     use super::*;
@@ -117,6 +158,32 @@ mod tests {
                 ),
                 ("Images".to_owned(), vec![(1, "image/png".to_owned())]),
             ]
+        );
+    }
+
+    #[test]
+    fn a_dropped_dialog_closes_and_an_answered_one_does_not() {
+        let closed = Rc::new(Cell::new(false));
+        {
+            let closed = Rc::clone(&closed);
+            let (_answer, dialog) = dialog_answer::<()>(move || closed.set(true));
+            drop(dialog);
+        }
+        assert!(
+            closed.get(),
+            "the dialog closes when its future is dropped before an answer"
+        );
+
+        let closed = Rc::new(Cell::new(false));
+        let (answer, dialog) = dialog_answer::<()>({
+            let closed = Rc::clone(&closed);
+            move || closed.set(true)
+        });
+        answer.give(Ok(()));
+        drop(dialog);
+        assert!(
+            !closed.get(),
+            "a dialog the system answered closes nothing when its future is dropped"
         );
     }
 }

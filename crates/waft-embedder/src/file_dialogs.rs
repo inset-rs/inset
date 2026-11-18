@@ -16,6 +16,13 @@
 //! The platform answers `None` where its system has no file dialogs, and a dialog the system
 //! could not show is answered as a [`FileDialogError`]. Every answer comes through a future, once
 //! the user has chosen or cancelled: a cancelled dialog answers `None`, or no files.
+//!
+//! A future is the dialog it shows. Dropping it before the dialog answers closes the dialog, so an
+//! app that stops waiting leaves no panel on screen behind it; dropping one the dialog has already
+//! answered closes nothing. Each system closes its own way: macOS cancels its panel, Windows closes
+//! its dialog, the desktop portal closes its request, iOS dismisses its picker, and Android
+//! finishes the activity it started. The web cannot close a browser dialog: it stays on screen,
+//! and its answer, when it comes, is ignored without error.
 
 use std::fmt;
 use std::future::Future;
@@ -29,6 +36,11 @@ use crate::ViewId;
 
 /// The system's file dialogs. `parent` is the view whose window a dialog belongs to, which the
 /// system shows it on, as a sheet where it has them (macOS); without one it stands alone.
+///
+/// Each future is the dialog it shows: dropping it before the dialog answers closes the dialog
+/// on the thread the system requires, and a future the dialog has answered closes nothing when it
+/// is dropped. The web cannot close a browser dialog, which stays on screen; its answer is
+/// ignored.
 pub trait FileDialogs {
     /// Asks for one file to open; `None` if the user cancelled.
     fn open_file(

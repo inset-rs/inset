@@ -1,6 +1,6 @@
 //! The file dialogs: UIKit's `UIDocumentPickerViewController`, presented by the parent view's view
 //! controller, or that of a view in sight (`Views::presenter`), answering the paths of the
-//! documents picked.
+//! documents picked. A future dropped before the picker answers dismisses it.
 //!
 //! A document outside the app's sandbox is reached only while its security-scoped access lasts,
 //! between `startAccessingSecurityScopedResource` and its stop. A path carries no lifetime the app
@@ -21,9 +21,12 @@
 #![allow(unsafe_code)]
 
 use std::cell::RefCell;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -35,7 +38,7 @@ use waft_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileType, FolderOptions, OpenOptions,
     PickedFile, PickedFolder, SaveOptions, ViewId,
 };
-use waft_embedder_apple::answer::{Answer, answer};
+use waft_embedder_apple::answer::{Answer, Answered, answer};
 
 use crate::views::Views;
 
@@ -60,12 +63,57 @@ impl DocumentPickers {
 /// The system's side of a dialog's answer: given once, or a failure if dropped unused.
 type DialogAnswer<T> = Answer<Result<T, FileDialogError>>;
 
-/// A dialog's answer: what the system gives, and the future the app awaits.
-fn dialog_answer<T: Send + 'static>() -> (DialogAnswer<T>, FileDialogFuture<T>) {
-    let (answer, answered) = answer(Err(FileDialogError::Failed(
+/// A dialog's answer: what the system gives, and the answer the app awaits, in the picker's own
+/// future ([`PickerFuture`]).
+fn dialog_answer<T: Send + 'static>() -> (DialogAnswer<T>, Answered<Result<T, FileDialogError>>) {
+    answer(Err(FileDialogError::Failed(
         "the dialog closed without an answer".to_owned(),
-    )));
-    (answer, Box::pin(answered))
+    )))
+}
+
+/// A picker's future: the paths the picker answers, and the picker, dismissed when the app drops
+/// the future before the picker has answered.
+struct PickerFuture {
+    answered: Answered<Result<Vec<PathBuf>, FileDialogError>>,
+    /// The picker still presented and the delegate answering it, until either answers.
+    showing: Option<(
+        Retained<UIDocumentPickerViewController>,
+        Retained<PickerDelegate>,
+    )>,
+}
+
+impl Future for PickerFuture {
+    type Output = Result<Vec<PathBuf>, FileDialogError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.answered).poll(cx)
+    }
+}
+
+impl Drop for PickerFuture {
+    fn drop(&mut self) {
+        let Some((picker, delegate)) = self.showing.take() else {
+            return;
+        };
+        // UIKit is the main thread's alone, where the app drops its own future. A delegate the
+        // picker answered took itself out of the answering ones, and its picker is gone already.
+        if MainThreadMarker::new().is_none() {
+            return;
+        }
+        let showing = ANSWERING.with_borrow_mut(|answering| {
+            let Some(index) = answering
+                .iter()
+                .position(|answering| std::ptr::eq(&**answering, &*delegate))
+            else {
+                return false;
+            };
+            answering.remove(index);
+            true
+        });
+        if showing {
+            picker.dismissViewControllerAnimated_completion(true, None);
+        }
+    }
 }
 
 impl FileDialogs for DocumentPickers {
@@ -181,9 +229,12 @@ impl DocumentPickers {
         let (answer, answered) = dialog_answer();
         let delegate = PickerDelegate::new(presenter.mtm(), answer);
         picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-        ANSWERING.with_borrow_mut(|answering| answering.push(delegate));
+        ANSWERING.with_borrow_mut(|answering| answering.push(delegate.clone()));
         presenter.presentViewController_animated_completion(picker, true, None);
-        answered
+        Box::pin(PickerFuture {
+            answered,
+            showing: Some((picker.retain(), delegate)),
+        })
     }
 }
 

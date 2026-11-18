@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use block2::RcBlock;
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::{MainThreadMarker, Message};
 use objc2_app_kit::{
     NSModalResponse, NSModalResponseCancel, NSModalResponseOK, NSOpenPanel, NSSavePanel,
 };
@@ -154,14 +154,15 @@ impl Panels {
     }
 
     /// Shows `panel`, as a sheet on `parent`'s window where it has one, and answers what
-    /// `chosen` reads from it once the user confirms, or nothing once they cancel.
+    /// `chosen` reads from it once the user confirms, or nothing once they cancel. Dropping the
+    /// future before the user answers cancels the panel.
     fn present(
         &self,
         panel: &NSSavePanel,
         parent: Option<ViewId>,
         chosen: impl Fn() -> Vec<PathBuf> + 'static,
     ) -> FileDialogFuture<Vec<PathBuf>> {
-        let (answer, answered) = dialog_answer();
+        let (answer, answered) = dialog_answer(cancel_on_drop(panel.retain()));
         let answer = Cell::new(Some(answer));
         let handler = RcBlock::new(move |response: NSModalResponse| {
             if let Some(answer) = answer.take() {
@@ -177,6 +178,18 @@ impl Panels {
             None => panel.beginWithCompletionHandler(&handler),
         }
         answered
+    }
+}
+
+/// Cancels `panel` as the user's Cancel button does, for a future the app drops before the panel
+/// answers. AppKit runs on the main thread, which the app's own future is dropped on.
+fn cancel_on_drop(panel: Retained<NSSavePanel>) -> impl FnOnce() {
+    move || {
+        if MainThreadMarker::new().is_none() {
+            return;
+        }
+        // SAFETY: a live panel of this thread's, cancelled with no sender as the Cancel button is.
+        unsafe { panel.cancel(None) };
     }
 }
 

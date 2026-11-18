@@ -1,12 +1,13 @@
 //! The file dialogs: the shell's `IFileOpenDialog` and `IFileSaveDialog`, owned by the parent
 //! view's window where there is one, each answering paths once the user closes it. A dialog runs
 //! its own modal loop, so it shows from the hidden window's procedure once the framework's call
-//! has returned (`hidden_window`).
+//! has returned (`hidden_window`); a dropped future has the same procedure close it.
 //!
 //! A type's extensions become the dialog's filters, under its label; the shell filters by no MIME
 //! type, so a type with none of its extensions filters nothing here. Every pick is a path the app
 //! may read and write, as the shell grants, so `writable` asks nothing more here.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -117,13 +118,28 @@ fn open(options: OpenOptions, choose: Choose) -> Request {
 
 impl ShellDialogs {
     /// Shows the dialog `request` asks for once the current call has returned, owned by
-    /// `parent`'s window, and answers the paths chosen, none if the user cancelled.
+    /// `parent`'s window, and answers the paths chosen, none if the user cancelled. Dropping the
+    /// future before the user answers closes the dialog.
     fn show(&self, parent: Option<ViewId>, request: Request) -> FileDialogFuture<Vec<PathBuf>> {
         let owner = self
             .windows
             .window(parent)
             .and_then(|window| hwnd(&*window));
-        let (answer, answered) = dialog_answer();
+        let showing = Showing::default();
+        let close = {
+            let showing = Rc::clone(&showing);
+            move || {
+                run_soon(Box::new(move || {
+                    let Some(dialog) = showing.borrow_mut().take() else {
+                        return;
+                    };
+                    // SAFETY: the dialog showing, closed from the thread that made it, outside
+                    // every call into the app; it answers the app's future as if cancelled.
+                    let _ = unsafe { dialog.Close(HRESULT::from_win32(ERROR_CANCELLED.0)) };
+                }));
+            }
+        };
+        let (answer, answered) = dialog_answer(close);
         run_soon(Box::new(move || {
             let _apartment = Apartment::enter();
             let shown = match &request {
@@ -132,8 +148,15 @@ impl ShellDialogs {
                     initial_folder,
                     confirm_label,
                     choose,
-                } => show_open(owner, types, initial_folder, confirm_label, *choose),
-                Request::Save(options) => show_save(owner, options),
+                } => show_open(
+                    owner,
+                    types,
+                    initial_folder,
+                    confirm_label,
+                    *choose,
+                    &showing,
+                ),
+                Request::Save(options) => show_save(owner, options, &showing),
             };
             answer.give(match shown {
                 Ok(chosen) => Ok(chosen),
@@ -147,16 +170,39 @@ impl ShellDialogs {
     }
 }
 
+/// The dialog showing, which a dropped future closes: `None` once it has closed or before it
+/// shows. The main thread's alone, where the dialog is made and closed.
+type Showing = Rc<RefCell<Option<IFileDialog>>>;
+
+/// Notes `dialog` as showing, so a dropped future closes it, and answers it as showing no longer:
+/// dropped with the dialog's own call, after which nothing closes it.
+struct ShowingDialog<'a>(&'a Showing);
+
+impl ShowingDialog<'_> {
+    fn new(showing: &Showing, dialog: &IFileDialog) -> ShowingDialog<'_> {
+        *showing.borrow_mut() = Some(dialog.clone());
+        ShowingDialog(showing)
+    }
+}
+
+impl Drop for ShowingDialog<'_> {
+    fn drop(&mut self) {
+        *self.0.borrow_mut() = None;
+    }
+}
+
 fn show_open(
     owner: Option<HWND>,
     types: &[FileType],
     initial_folder: &Option<PathBuf>,
     confirm_label: &Option<String>,
     choose: Choose,
+    showing: &Showing,
 ) -> windows::core::Result<Vec<PathBuf>> {
     // SAFETY: the shell's own dialog class, made on this thread, which COM was entered on.
     let dialog: IFileOpenDialog =
         unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)? };
+    let _showing = ShowingDialog::new(showing, &dialog);
     // SAFETY: plain calls on the dialog made above, with values that outlive each call.
     unsafe {
         let mut options = dialog.GetOptions()? | FOS_FORCEFILESYSTEM;
@@ -184,10 +230,15 @@ fn show_open(
         .collect()
 }
 
-fn show_save(owner: Option<HWND>, options: &SaveOptions) -> windows::core::Result<Vec<PathBuf>> {
+fn show_save(
+    owner: Option<HWND>,
+    options: &SaveOptions,
+    showing: &Showing,
+) -> windows::core::Result<Vec<PathBuf>> {
     // SAFETY: the shell's own dialog class, made on this thread, which COM was entered on.
     let dialog: IFileSaveDialog =
         unsafe { CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)? };
+    let _showing = ShowingDialog::new(showing, &dialog);
     // SAFETY: plain calls on the dialog made above, with values that outlive each call.
     unsafe {
         dialog.SetOptions(dialog.GetOptions()? | FOS_FORCEFILESYSTEM)?;
