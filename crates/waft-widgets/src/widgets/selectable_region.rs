@@ -5874,6 +5874,230 @@ mod tests {
         });
     }
 
+    const K_TEST_HANDLE_SIZE: f64 = 22.0;
+
+    /// `selectable_region_test.dart`'s `_TestDraggableSelectionControls`: selection controls with
+    /// non-zero handle size for tests that need handle dragging.
+    ///
+    /// Does not mix in [`TextSelectionHandleControls`](crate::TextSelectionHandleControls).
+    struct TestDraggableSelectionControls;
+
+    #[allow(deprecated)]
+    impl TextSelectionControls for TestDraggableSelectionControls {
+        fn build_handle(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+            on_tap: Option<Listener>,
+        ) -> WidgetRef {
+            let mut detector = crate::widgets::gesture_detector::GestureDetector::new()
+                .behavior(HitTestBehavior::Translucent);
+            if let Some(on_tap) = on_tap {
+                detector = detector.on_tap(on_tap);
+            }
+            let handle = SizedBox::square(Some(K_TEST_HANDLE_SIZE))
+                .child(
+                    crate::widgets::basic::CustomPaint::new()
+                        .painter(TestHandlePainter)
+                        .child(detector),
+                )
+                .into_widget();
+            match handle_type {
+                TextSelectionHandleType::Left => {
+                    crate::widgets::basic::Transform::rotate(std::f64::consts::PI / 2.0)
+                        .child(handle)
+                        .into_widget()
+                }
+                TextSelectionHandleType::Right => handle,
+                TextSelectionHandleType::Collapsed => {
+                    crate::widgets::basic::Transform::rotate(std::f64::consts::PI / 4.0)
+                        .child(handle)
+                        .into_widget()
+                }
+            }
+        }
+
+        fn get_handle_anchor(
+            &self,
+            handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+        ) -> Offset {
+            match handle_type {
+                TextSelectionHandleType::Collapsed => Offset::new(K_TEST_HANDLE_SIZE / 2.0, -4.0),
+                TextSelectionHandleType::Left => Offset::new(K_TEST_HANDLE_SIZE, 0.0),
+                TextSelectionHandleType::Right => Offset::ZERO,
+            }
+        }
+
+        fn get_handle_size(&self, _text_line_height: f64) -> Size {
+            Size::new(K_TEST_HANDLE_SIZE, K_TEST_HANDLE_SIZE)
+        }
+
+        fn build_toolbar(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            _global_editable_region: Rect,
+            _text_line_height: f64,
+            _selection_midpoint: Offset,
+            _endpoints: &[waft_rendering::TextSelectionPoint],
+            _delegate: waft_services::AnyTextSelectionDelegate,
+            _clipboard_status: Option<Ref<crate::widgets::text_selection::ClipboardStatusNotifier>>,
+            _last_secondary_tap_down_position: Option<Offset>,
+        ) -> WidgetRef {
+            SizedBox::shrink().into_widget()
+        }
+    }
+
+    /// `selectable_region_test.dart`'s `_TestHandlePainter`.
+    struct TestHandlePainter;
+
+    impl waft_rendering::CustomPainter for TestHandlePainter {
+        fn paint(&self, _app: &mut App, canvas: &mut waft_embedder::Canvas, size: Size) {
+            let paint = waft_embedder::Paint {
+                color: waft_embedder::Color::new(0xFF000000).into(),
+                ..waft_embedder::Paint::default()
+            };
+            canvas.draw_rect(Offset::ZERO & size, &paint);
+        }
+
+        fn should_repaint(
+            &self,
+            _app: &App,
+            _old_delegate: &dyn waft_rendering::CustomPainter,
+        ) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// The handle cases' start: the three texts in `_materialDefaultTextStyle` under a region
+    /// with [`TestDraggableSelectionControls`], and a touch long press at the 'h' of the third,
+    /// which selects "thank".
+    fn long_press_thank(tester: &mut WidgetTester) -> (TestPointer, RenderHandle<RenderParagraph>) {
+        let material_default_text_style = waft_painting::TextStyle::new()
+            .font_size(48.0)
+            .font_family("monospace")
+            .font_weight(waft_embedder::FontWeight::W900);
+        tester.pump_widget(
+            TestWidgetsApp::new()
+                .text_style(material_default_text_style)
+                .home(SelectableRegion::new(
+                    Rc::new(TestDraggableSelectionControls),
+                    three_texts(),
+                )),
+        );
+        tester.pump_and_settle();
+        let paragraph_3 = paragraph_showing(tester, "Fine, thank you.");
+        let mut gesture = TestPointer::touch(tester.next_pointer());
+        // At the 'h'.
+        let at = text_offset_to_position(tester, paragraph_3, 7);
+        tester.down(&mut gesture, at);
+        tester.pump_by(Duration::from_millis(500));
+        tester.up(&gesture);
+        tester.pump_by(Duration::from_millis(500));
+        assert_eq!(paragraph_selection(tester, paragraph_3), (6, 11));
+        (gesture, paragraph_3)
+    }
+
+    /// The one box of `paragraph`'s selection, in global coordinates, as Dart's
+    /// `globalize(boxes[0].toRect().…, paragraph)` reads its corners.
+    fn selection_box(tester: &WidgetTester, paragraph: RenderHandle<RenderParagraph>) -> Rect {
+        tester.update(|app| {
+            let selection = paragraph.selections(app)[0];
+            let boxes = paragraph.get_boxes_for_selection(
+                app,
+                selection,
+                waft_embedder::BoxHeightStyle::Tight,
+                waft_embedder::BoxWidthStyle::Tight,
+            );
+            assert_eq!(boxes.len(), 1);
+            let rect = boxes[0].to_rect();
+            let to_global = |point| paragraph.as_box().local_to_global(app, point, None);
+            Rect::from_points(to_global(rect.top_left()), to_global(rect.bottom_right()))
+        })
+    }
+
+    /// `paragraph`'s height.
+    fn paragraph_height(tester: &WidgetTester, paragraph: RenderHandle<RenderParagraph>) -> f64 {
+        tester.update(|app| paragraph.as_box().size(app).height())
+    }
+
+    // selectable_region_test.dart 'can drag start selection handle'.
+    #[test]
+    fn can_drag_start_selection_handle() {
+        test_widgets(|tester| {
+            let (mut gesture, paragraph_3) = long_press_thank(tester);
+            let handle_pos = selection_box(tester, paragraph_3).bottom_left();
+            tester.down(&mut gesture, handle_pos);
+            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            let at = text_offset_to_position(tester, paragraph_2, 5)
+                + Offset::new(0.0, paragraph_height(tester, paragraph_2) / 2.0);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_3), (0, 11));
+            assert_eq!(paragraph_selection(tester, paragraph_2), (5, 14));
+
+            let paragraph_1 = paragraph_showing(tester, "How are you?");
+            let at = text_offset_to_position(tester, paragraph_1, 6)
+                + Offset::new(0.0, paragraph_height(tester, paragraph_1) / 2.0);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_3), (0, 11));
+            assert_eq!(paragraph_selection(tester, paragraph_2), (0, 14));
+            assert_eq!(paragraph_selection(tester, paragraph_1), (6, 12));
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'can drag start selection handle across end selection handle'.
+    #[test]
+    fn can_drag_start_selection_handle_across_end_selection_handle() {
+        test_widgets(|tester| {
+            let (mut gesture, paragraph_3) = long_press_thank(tester);
+            let handle_pos = selection_box(tester, paragraph_3).bottom_left();
+            tester.down(&mut gesture, handle_pos);
+            let half_height = paragraph_height(tester, paragraph_3) / 2.0;
+            let at =
+                text_offset_to_position(tester, paragraph_3, 14) + Offset::new(0.0, half_height);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_3), (14, 11));
+
+            let at =
+                text_offset_to_position(tester, paragraph_3, 4) + Offset::new(0.0, half_height);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_3), (4, 11));
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
+    // selectable_region_test.dart 'can drag end selection handle across start selection handle'.
+    #[test]
+    fn can_drag_end_selection_handle_across_start_selection_handle() {
+        test_widgets(|tester| {
+            let (mut gesture, paragraph_3) = long_press_thank(tester);
+            let handle_pos = selection_box(tester, paragraph_3).bottom_right();
+            tester.down(&mut gesture, handle_pos);
+            let half_height = paragraph_height(tester, paragraph_3) / 2.0;
+            let at =
+                text_offset_to_position(tester, paragraph_3, 4) + Offset::new(0.0, half_height);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_3), (6, 4));
+
+            let at =
+                text_offset_to_position(tester, paragraph_3, 12) + Offset::new(0.0, half_height);
+            tester.move_to(&mut gesture, at, true);
+            assert_eq!(paragraph_selection(tester, paragraph_3), (6, 12));
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
+        });
+    }
+
     /// The three texts most of `selectable_region_test.dart`'s cases select across.
     fn three_texts() -> Column {
         Column::new().children([
