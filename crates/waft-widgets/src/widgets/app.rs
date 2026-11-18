@@ -41,13 +41,12 @@ use crate::widgets::localizations::{
 };
 use crate::widgets::navigator::{
     NavigationNotification, Navigator, NavigatorObserverRef, NavigatorState, RouteFactory,
-    RouteRef, RouteSettings, RouteSettingsRef,
+    RouteRef, RouteSettings,
 };
 use crate::widgets::notification_listener::{NotificationListener, NotificationListenerCallback};
-use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
+use crate::widgets::pages::PageRouteRef;
 use crate::widgets::raw_tooltip::RawTooltip;
 use crate::widgets::restoration::RootRestorationScope;
-use crate::widgets::routes::RoutePageBuilder;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::shared_app_data::SharedAppData;
 use crate::widgets::shortcuts::{ShortcutMap, ShortcutRegistrar, Shortcuts};
@@ -358,8 +357,8 @@ pub struct WidgetsApp {
     ///
     /// If this property is not set, either the [`routes`](Self::routes) or
     /// [`home`](Self::home) properties must be set, so that the default handler knows what
-    /// routes to build; it builds them as plain [`PageRouteBuilder`]s with a jump cut, unless
-    /// [`page_route_builder`](Self::page_route_builder) gives the app's own.
+    /// routes to build, and [`page_route_builder`](Self::page_route_builder) must be set too, so
+    /// that handler knows what transition to build them with.
     pub on_generate_route: Option<RouteFactory>,
 
     /// The routes generator callback used for generating initial routes if
@@ -378,10 +377,9 @@ pub struct WidgetsApp {
     /// a route (e.g. which button a user selected in a modal dialog).
     ///
     /// This callback can be used, for example, to specify that a `MaterialPageRoute`
-    /// or a `CupertinoPageRoute` should be used for building page transitions. Without one,
-    /// the app builds plain [`PageRouteBuilder`]s with a jump cut, so a [`home`](Self::home) or
-    /// [`routes`](Self::routes) app works without naming a transition: a kit app sets this to
-    /// its kit's route.
+    /// or a `CupertinoPageRoute` should be used for building page transitions. It is required
+    /// when `home` or `routes` are used and neither `builder` nor `onGenerateRoute` is given,
+    /// as Flutter's assert checks; a kit app sets this to its kit's route.
     pub page_route_builder: Option<PageRouteFactory>,
 
     /// The widget for the default route of the app ([`Navigator::DEFAULT_ROUTE_NAME`],
@@ -411,8 +409,9 @@ pub struct WidgetsApp {
     /// [`Navigator`] (if any).
     ///
     /// If this property is set, the [`page_route_builder`](Self::page_route_builder) property
-    /// must also be set so that the default route handler will know what kind of `PageRoute`s
-    /// to build.
+    /// must also be set, unless a [`builder`](Self::builder) or
+    /// [`on_generate_route`](Self::on_generate_route) is, so that the default route handler
+    /// will know what kind of `PageRoute`s to build.
     pub home: Option<WidgetRef>,
 
     /// The application's top-level routing table.
@@ -441,8 +440,9 @@ pub struct WidgetsApp {
     /// [`builder`](Self::builder) must not be `None`.
     ///
     /// If the routes map is not empty, the [`page_route_builder`](Self::page_route_builder)
-    /// property must be set so that the default route handler will know what kind of
-    /// `PageRoute`s to build.
+    /// property must be set, unless a [`builder`](Self::builder) or
+    /// [`on_generate_route`](Self::on_generate_route) is, so that the default route handler
+    /// will know what kind of `PageRoute`s to build.
     pub routes: HashMap<String, WidgetBuilder>,
 
     /// Called when [`on_generate_route`](Self::on_generate_route) fails to generate a route,
@@ -760,21 +760,6 @@ pub struct WidgetsApp {
     pub use_inherited_media_query: bool,
 }
 
-/// The route `WidgetsApp` builds when the app gave no
-/// [`page_route_builder`](WidgetsApp::page_route_builder): a [`PageRouteBuilder`] with a jump
-/// cut, which a kit app overrides with its kit's transitions.
-fn default_page_route_builder(
-    app: &mut App,
-    settings: &RouteSettings,
-    builder: WidgetBuilder,
-) -> PageRouteRef {
-    let page_builder: RoutePageBuilder =
-        Rc::new(move |app, context, _animation, _secondary_animation| builder(app, context));
-    PageRouteBuilder::new(app, page_builder)
-        .settings(app, RouteSettingsRef::Settings(settings.clone()))
-        .into_erased()
-}
-
 impl WidgetsApp {
     /// Creates a widget that wraps a number of widgets that are commonly
     /// required for an application.
@@ -793,10 +778,10 @@ impl WidgetsApp {
     /// `"/"`.
     ///
     /// If [`home`](Self::home) or [`routes`](Self::routes) are set, the routing implementation
-    /// needs to know how to build `PageRoute`s. Supplying the
-    /// [`page_route_builder`](Self::page_route_builder) setter gives the app its own; without
-    /// one, routes are plain [`PageRouteBuilder`]s with a jump cut, which a kit app overrides
-    /// with its kit's transitions.
+    /// needs to know how to build `PageRoute`s, so the
+    /// [`page_route_builder`](Self::page_route_builder) setter must be given one too, unless a
+    /// [`builder`](Self::builder) or [`on_generate_route`](Self::on_generate_route) is; Flutter's
+    /// assert checks it when the widget is turned into a [`WidgetRef`], in a release build too.
     ///
     /// The [`builder`](Self::builder) setter is designed to provide the ability to wrap the
     /// visible content of the app in some other widget. It is recommended that you use
@@ -882,8 +867,9 @@ impl WidgetsApp {
         self
     }
 
-    /// Dart `WidgetsApp(pageRouteBuilder:)`; without it, a [`home`](Self::home) or
-    /// [`routes`](Self::routes) app builds plain [`PageRouteBuilder`]s with a jump cut.
+    /// Dart `WidgetsApp(pageRouteBuilder:)`, which a [`home`](Self::home) or
+    /// [`routes`](Self::routes) app must give unless it also gives a [`builder`](Self::builder)
+    /// or [`on_generate_route`](Self::on_generate_route).
     pub fn page_route_builder(
         mut self,
         page_route_builder: impl Fn(&mut App, &RouteSettings, WidgetBuilder) -> PageRouteRef + 'static,
@@ -1209,6 +1195,18 @@ impl StatefulWidget for WidgetsApp {
         );
     }
 
+    fn check_constructor(&self) {
+        self.debug_check_constructor();
+        assert!(
+            self.builder.is_some()
+                || self.on_generate_route.is_some()
+                || self.page_route_builder.is_some(),
+            "If neither builder nor onGenerateRoute are provided, the \
+             pageRouteBuilder must be specified so that the default handler \
+             will know what kind of PageRoute transition to build."
+        );
+    }
+
     fn create_state(&self) -> WidgetsAppState {
         WidgetsAppState {
             state: StateData::new(),
@@ -1422,11 +1420,10 @@ impl WidgetsAppState {
         };
 
         if let Some(page_content_builder) = page_content_builder {
-            let page_route_builder = self
-                .widget(app)
-                .page_route_builder
-                .clone()
-                .unwrap_or_else(|| Rc::new(default_page_route_builder));
+            let page_route_builder =
+                self.widget(app).page_route_builder.clone().expect(
+                    "WidgetsApp checks page_route_builder when it is turned into a WidgetRef",
+                );
             let route = page_route_builder(app, settings, page_content_builder);
             return Some(route.into_erased());
         }
@@ -2021,12 +2018,47 @@ mod tests {
         });
     }
 
-    /// A `home` app builds its page with no `page_route_builder`: the route is a plain
-    /// `PageRouteBuilder` with a jump cut, not a panic in a frame.
+    /// Flutter's assert that a `home` or `routes` app names the page transition it builds with:
+    /// checked when the widget is turned into a `WidgetRef`, as Dart's constructor checks it.
     #[test]
-    fn a_home_builds_without_a_page_route_builder() {
+    fn a_home_without_a_page_route_builder_panics_at_construction() {
+        let panic = std::panic::catch_unwind(|| WidgetsApp::new(COLOR).home(Marker).into_widget())
+            .expect_err("a home app needs a page route builder");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        assert!(
+            message.contains("pageRouteBuilder must be specified"),
+            "Flutter's message: {message}"
+        );
+        let panic = std::panic::catch_unwind(|| {
+            WidgetsApp::new(COLOR)
+                .routes([(
+                    String::from("/"),
+                    Rc::new(|_app: &mut App, _context: BuildContext| Marker.into_widget())
+                        as WidgetBuilder,
+                )])
+                .into_widget()
+        })
+        .expect_err("a routes app needs a page route builder");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        assert!(message.contains("pageRouteBuilder must be specified"));
+    }
+
+    #[test]
+    fn only_a_builder_needs_no_page_route_builder() {
         test_widgets(|tester| {
-            tester.pump_widget(WidgetsApp::new(COLOR).home(Marker).into_widget());
+            tester.pump_widget(
+                WidgetsApp::new(COLOR)
+                    .builder(|_app, _context, _child| Marker.into_widget())
+                    .into_widget(),
+            );
             tester.pump_and_settle();
             expect(tester, &built::<Marker>(), finds_widgets());
         });

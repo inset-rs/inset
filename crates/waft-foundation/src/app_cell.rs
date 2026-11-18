@@ -14,7 +14,7 @@ use waft_embedder::{InertPlatform, PlatformRef};
 
 use crate::app::App;
 use crate::executor::{ExecutorHandle, ForegroundExecutor, Task};
-use crate::timers::Timers;
+use crate::timers::{TimerMode, Timers};
 
 /// Round budget for one checkpoint: a microtask and a task feeding each other forever must
 /// fail loud, not starve the event loop; each round's own drain has its own budget.
@@ -115,22 +115,44 @@ impl AppCell {
         self.borrow_mut().update_timer_wakeup();
     }
 
-    /// Advances the App clock by `duration`, firing the timers that come due.
+    /// Advances the App clock by `duration`, firing every period of the timers that come due:
+    /// FakeAsync's `elapse`, which a test uses to see each tick of a periodic timer.
     ///
     /// A [`checkpoint`](Self::checkpoint) first, then each due timer in due order with a
     /// checkpoint after it, so a future awaiting one timer can schedule the next within the
-    /// same call — Dart's event-loop position for `Timer`, and FakeAsync's `elapse` for
-    /// tests. The shell calls this as platform time passes.
+    /// same call. A running app takes [`elapse_to`](Self::elapse_to) instead: its clock jumps
+    /// over a stall as Dart's VM does.
     ///
     /// # Panics
     ///
     /// While the `App` is borrowed.
     pub fn elapse(&self, duration: Duration) {
         let target = self.borrow().clock() + duration;
+        self.elapse_to_with(target, TimerMode::EachPeriod);
+    }
+
+    /// Moves the App clock to `target`, firing the timers that came due while the app was away
+    /// once each, their [`tick`](crate::Timer::tick) jumping over the periods that passed: what
+    /// Dart's VM timer queue does when the event loop reaches a timer late (`timer_impl.dart`,
+    /// `_runTimers`). The shell calls this as platform time passes; a test that wants each period
+    /// calls [`elapse`](Self::elapse).
+    ///
+    /// # Panics
+    ///
+    /// While the `App` is borrowed.
+    pub fn elapse_to(&self, target: Duration) {
+        self.elapse_to_with(target, TimerMode::CatchUp);
+    }
+
+    fn elapse_to_with(&self, target: Duration, mode: TimerMode) {
+        if mode == TimerMode::CatchUp && target <= self.borrow().clock() {
+            return;
+        }
         self.checkpoint();
+        self.borrow_mut().begin_timer_turn();
         let mut fired = 0usize;
         loop {
-            let fired_one = self.borrow_mut().fire_next_due(target);
+            let fired_one = self.borrow_mut().fire_next_due(target, mode);
             if !fired_one {
                 break;
             }

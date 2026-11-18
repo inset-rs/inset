@@ -9,10 +9,26 @@ use crate::app::App;
 use crate::change_notifier::Listener;
 use crate::completer::{Completer, CompleterFuture};
 
-/// Drain budget for one [`App::elapse`](crate::App::elapse): a callback that
+/// Drain budget for one [`AppCell::elapse`](crate::AppCell::elapse): a callback that
 /// keeps scheduling an already-due timer must fail loud, not spin. Not a Dart
 /// constant.
 const TIMER_BUDGET: usize = 100_000;
+
+/// How a due periodic timer accounts for the periods that passed before it ran.
+///
+/// Dart's VM has one rule: the event loop collects the timers that are due when it reaches
+/// them, so a timer the loop has not seen since before a stall fires once and its
+/// [`tick`](Timer::tick) jumps over the periods it missed (`timer_impl.dart`,
+/// `_runTimers`). A test's fake clock instead walks every period, as FakeAsync's `elapse`
+/// does, so a test sees each fire. A running app takes [`CatchUp`](TimerMode::CatchUp); a test
+/// takes [`EachPeriod`](TimerMode::EachPeriod).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TimerMode {
+    /// A running app's: each due periodic timer fires once and its tick jumps.
+    CatchUp,
+    /// A test's fake clock: every period fires in turn.
+    EachPeriod,
+}
 
 /// A scheduled callback — `dart:async` `Timer(duration, callback)` and
 /// `Timer.periodic(duration, callback)`, which is handed its timer.
@@ -33,6 +49,11 @@ impl Timer {
     /// Dart's `Timer.periodic(duration, callback)`, which fires every `duration` from when it
     /// was made until it is cancelled, and hands `callback` the timer, whose [`tick`](Self::tick)
     /// counts the periods that passed.
+    ///
+    /// A running app that was away for several periods fires once when it runs again and
+    /// `tick` jumps over them, as Dart's VM does ([`AppCell::elapse_to`](crate::AppCell::elapse_to));
+    /// a test's [`elapse`](crate::AppCell::elapse) fires each period in turn, as FakeAsync does.
+    /// A zero `duration` fires once per turn of either clock.
     pub fn periodic(
         app: &mut App,
         duration: Duration,
@@ -82,6 +103,9 @@ struct ScheduledTimer {
     period: Option<Duration>,
     /// The fires it has had, which [`Timer::tick`] answers.
     tick: u64,
+    /// For a zero-period timer, the turn of the event loop it last fired in: it fires once a
+    /// turn, never in a loop of its own.
+    zero_turn: Option<u64>,
     callback: TimerCallback,
 }
 
@@ -95,6 +119,8 @@ pub(crate) struct Timers {
     /// [`timer_wakeup_if_changed`](Self::timer_wakeup_if_changed) writes it: a value kept
     /// in two places is a value that can disagree with itself.
     host_timer_wakeup: Option<Duration>,
+    /// The event-loop turn, counted so a zero-period timer fires once a turn.
+    turn: u64,
 }
 
 impl Timers {
@@ -126,9 +152,17 @@ impl Timers {
             due,
             period,
             tick: 0,
+            // A zero-period timer made during a turn waits for the next one, as Dart's timer
+            // queue enqueues a timer made in a callback for its next spin.
+            zero_turn: (period == Some(Duration::ZERO)).then_some(self.turn),
             callback,
         });
         Timer { id }
+    }
+
+    /// Begins an event-loop turn: a zero-period timer may fire once in it.
+    pub(crate) fn begin_turn(&mut self) {
+        self.turn += 1;
     }
 
     /// How far off the earliest waiting timer is, when that is not what the host was last
@@ -166,33 +200,69 @@ impl Timers {
         !self.queue.is_empty()
     }
 
-    /// Removes and returns the next timer due at or before `target`, advancing
-    /// the clock to that timer's due time, and arms a periodic timer for its
-    /// next fire. `None` when none are due.
-    pub(crate) fn pop_next_due(&mut self, target: Duration) -> Option<(Timer, TimerCallback)> {
+    /// Removes and returns the next timer due at or before `target`, advancing the clock to that
+    /// timer's due time, and arms a periodic timer for its next fire. `None` when none are due.
+    ///
+    /// A periodic timer that is behind by more than a period fires once and its tick jumps, under
+    /// [`TimerMode::CatchUp`]; under [`TimerMode::EachPeriod`] one call fires one period, as
+    /// FakeAsync walks them. A zero-period timer fires at most once a turn either way.
+    pub(crate) fn pop_next_due(
+        &mut self,
+        target: Duration,
+        mode: TimerMode,
+    ) -> Option<(Timer, TimerCallback)> {
         let index = self
             .queue
             .iter()
             .enumerate()
-            .filter(|(_, scheduled)| scheduled.due <= target)
+            .filter(|(_, scheduled)| {
+                scheduled.due <= target
+                    && !(scheduled.period == Some(Duration::ZERO)
+                        && scheduled.zero_turn == Some(self.turn))
+            })
             .min_by_key(|(_, scheduled)| (scheduled.due, scheduled.id))
             .map(|(index, _)| index)?;
         let mut scheduled = self.queue.remove(index);
         if scheduled.due > self.now {
             self.now = scheduled.due;
         }
-        scheduled.tick += 1;
-        if let Some(period) = scheduled.period {
-            let due = scheduled.due + period;
+        let Some(period) = scheduled.period else {
+            scheduled.tick += 1;
+            return Some((Timer { id: scheduled.id }, scheduled.callback));
+        };
+        if period == Duration::ZERO {
+            scheduled.tick += 1;
             let next = ScheduledTimer {
                 id: scheduled.id,
-                due,
+                due: self.now,
                 period: scheduled.period,
                 tick: scheduled.tick,
+                zero_turn: Some(self.turn),
                 callback: Rc::clone(&scheduled.callback),
             };
             self.queue.push(next);
+            return Some((Timer { id: scheduled.id }, scheduled.callback));
         }
+        if mode == TimerMode::CatchUp {
+            let overdue = target.saturating_sub(scheduled.due);
+            if overdue > period {
+                let missed = overdue.as_nanos() / period.as_nanos();
+                let missed = u64::try_from(missed).unwrap_or(u64::MAX);
+                scheduled.tick = scheduled.tick.saturating_add(missed);
+                let jumped = period.as_nanos().saturating_mul(u128::from(missed));
+                scheduled.due += Duration::from_nanos(u64::try_from(jumped).unwrap_or(u64::MAX));
+            }
+        }
+        scheduled.tick += 1;
+        let next = ScheduledTimer {
+            id: scheduled.id,
+            due: scheduled.due + period,
+            period: scheduled.period,
+            tick: scheduled.tick,
+            zero_turn: None,
+            callback: Rc::clone(&scheduled.callback),
+        };
+        self.queue.push(next);
         Some((Timer { id: scheduled.id }, scheduled.callback))
     }
 
@@ -294,6 +364,48 @@ mod tests {
         cell.elapse(Duration::from_millis(50));
         assert_eq!(*seen.borrow(), [1], "the callback's cancel stopped it");
         assert!(!started.is_active(&cell.borrow()));
+    }
+
+    #[test]
+    fn a_running_apps_timer_catches_up_with_one_fire_after_a_stall() {
+        let cell = AppCell::new();
+        let seen = ticks();
+        let sink = Rc::clone(&seen);
+        let timer = Timer::periodic(&mut cell.borrow_mut(), Duration::from_millis(1), {
+            let seen = Rc::clone(&sink);
+            move |app, timer| seen.borrow_mut().push(timer.tick(app))
+        });
+
+        cell.elapse_to(Duration::from_secs(100));
+        assert_eq!(
+            *seen.borrow(),
+            [100_000],
+            "one fire, its tick jumping over the 100 s of periods"
+        );
+        assert_eq!(timer.tick(&cell.borrow()), 100_000);
+
+        cell.elapse_to(Duration::from_millis(100_001));
+        assert_eq!(*seen.borrow(), [100_000, 100_001]);
+    }
+
+    #[test]
+    fn a_zero_period_timer_fires_once_a_turn_and_never_spins() {
+        let cell = AppCell::new();
+        let seen = ticks();
+        let sink = Rc::clone(&seen);
+        Timer::periodic(&mut cell.borrow_mut(), Duration::ZERO, {
+            let seen = Rc::clone(&sink);
+            move |app, timer| seen.borrow_mut().push(timer.tick(app))
+        });
+
+        cell.elapse(Duration::from_millis(100));
+        assert_eq!(
+            *seen.borrow(),
+            [1],
+            "one fire in the turn, not 100 ms of them"
+        );
+        cell.elapse(Duration::ZERO);
+        assert_eq!(*seen.borrow(), [1, 2], "the next turn fires once more");
     }
 
     #[test]

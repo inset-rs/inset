@@ -4,7 +4,6 @@ mod catalog;
 mod sections;
 pub use catalog::Feature;
 
-use std::rc::Rc;
 use waft_embedder::{Color, WindowConfig};
 use waft_foundation::{App, Handle, ValueKey};
 use waft_painting::{Axis, EdgeInsetsGeometry, PaintingBinding};
@@ -30,9 +29,9 @@ fn gallery_window() -> WindowConfig {
 /// The gallery switches directly between expanded and minimal navigation.
 const GALLERY_NAVIGATION_BREAKPOINT: f64 = 800.0;
 
-/// Registers the bundled Selawik faces under the kit's font family.
+/// Registers the bundled Selawik faces under the kit's font family. The Fluent icon font is
+/// [`FluentApp`]'s own, installed when it mounts.
 pub fn install_fonts(app: &mut App) {
-    install_icon_font(app);
     let painting = PaintingBinding::instance(app);
     for bytes in [
         &include_bytes!("../fonts/selawk.ttf")[..],
@@ -45,7 +44,8 @@ pub fn install_fonts(app: &mut App) {
     }
 }
 
-/// The kit needs only the widgets layer: `WidgetsApp` supplies the view, media query, focus and text direction, and the gallery is its one page.
+/// The kit needs only the widgets layer: [`FluentApp`] supplies the view, media query, focus,
+/// text direction, theme and page entrance, and the gallery is its one page.
 pub fn run(app: &mut App) {
     run_feature(app, Feature::Button);
 }
@@ -55,17 +55,9 @@ pub fn run_feature(app: &mut App, feature: Feature) {
     install_fonts(app);
     run_app_with(
         app,
-        WidgetsApp::new(AccentPalette::default().base)
+        FluentApp::new()
             .title("WinUI Gallery")
             .debug_show_checked_mode_banner(false)
-            .page_route_builder(|app, settings, builder| {
-                let route = PageRouteBuilder::new(
-                    app,
-                    Rc::new(move |app, context, _, _| builder(app, context)),
-                )
-                .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                route.into_erased()
-            })
             .home(Gallery {
                 initial_feature: feature,
             })

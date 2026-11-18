@@ -20,7 +20,7 @@ use crate::entity::EntityMap;
 use crate::executor::{ExecutorHandle, ForegroundExecutor, Task};
 use crate::handle_map::HandleMap;
 pub use crate::handle_map::{AnyRef, OptionRetained, Ref, Retained};
-use crate::timers::{Timer, Timers};
+use crate::timers::{Timer, TimerMode, Timers};
 
 /// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
 /// each other forever must fail loud, not starve the event loop. Not a Dart
@@ -558,13 +558,19 @@ impl App {
         self.debug_flags.insert(std::any::TypeId::of::<F>(), value);
     }
 
-    /// Fires the next timer due by `target`, if any.
-    pub(crate) fn fire_next_due(&mut self, target: Duration) -> bool {
-        let Some((timer, callback)) = self.timers.pop_next_due(target) else {
+    /// Fires the next timer due by `target`, if any, accounting for missed periods as `mode`
+    /// says.
+    pub(crate) fn fire_next_due(&mut self, target: Duration, mode: TimerMode) -> bool {
+        let Some((timer, callback)) = self.timers.pop_next_due(target, mode) else {
             return false;
         };
         callback(self, timer);
         true
+    }
+
+    /// Begins an event-loop turn, in which a zero-period timer may fire once.
+    pub(crate) fn begin_timer_turn(&mut self) {
+        self.timers.begin_turn();
     }
 
     pub(crate) fn advance_clock_to(&mut self, target: Duration) {

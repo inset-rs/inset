@@ -348,6 +348,17 @@ pub trait StatefulWidget: Debug + 'static {
     /// See [`StatelessWidget::debug_check_constructor`].
     fn debug_check_constructor(&self) {}
 
+    /// Dart's constructor asserts that must hold in every build, not only a debug one.
+    ///
+    /// [`into_widget`](IntoWidget::into_widget) calls this always, where
+    /// [`debug_check_constructor`](Self::debug_check_constructor) runs only in a debug build.
+    /// Its default is that debug check, so a widget that has one need not know this exists.
+    fn check_constructor(&self) {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
+    }
+
     /// See [`StatelessWidget::as_preferred_size_widget`].
     fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
         None
@@ -378,9 +389,7 @@ pub struct Stateful<W: StatefulWidget>(pub W);
 
 impl<W: StatefulWidget> IntoWidget<StatefulKind> for W {
     fn into_widget(self) -> WidgetRef {
-        if cfg!(debug_assertions) {
-            self.debug_check_constructor();
-        }
+        self.check_constructor();
         Rc::new(Stateful(self))
     }
 }
