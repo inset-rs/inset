@@ -439,15 +439,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: Dart's two classes are traits over their field bags, the bodies an override reaches as `super` live on `MultiSelectableSelectionContainerDelegateBase` and `StaticSelectionContainerDelegateBase`, `PlainStaticSelectionContainerDelegate` is Dart's instantiable `StaticSelectionContainerDelegate()`, and a leaf writes the `*_accessors!`, `static_selection_container_delegate_overrides!` and `SelectionHandler` / `SelectionRegistrar` macros.
   Reason: language — no class inheritance, and a trait and a struct cannot share a name.
-  Affect: an app that extends `StaticSelectionContainerDelegate` implements the trait over its own bags and forwards the inherited members with the macros, where Dart writes `extends StaticSelectionContainerDelegate`; `SelectableRegion` will build `PlainStaticSelectionContainerDelegate` where Dart writes `StaticSelectionContainerDelegate()`.
+  Affect: an app that extends `StaticSelectionContainerDelegate` implements the trait over its own bags and forwards the inherited members with the macros, where Dart writes `extends StaticSelectionContainerDelegate`; `SelectableRegion` builds `PlainStaticSelectionContainerDelegate` where Dart writes `StaticSelectionContainerDelegate()`.
 
 - Change: `compareOrder` is a method taking the app, not a getter returning a `Comparator<Selectable>`.
   Reason: language — a selectable's bounding boxes are read through `&mut App`, which the comparator a getter returned could not carry.
   Affect: a subclass overrides `compare_order(self, app, a, b)` where Dart overrides `compareOrder`.
-
-- Change: a selectable with no finite screen rectangle — a kept-alive sliver child the list no longer paints — sorts before the others, where it would sort after them here.
-  Reason: language — `transform_rect` keeps the infinities a zero transform maps to, where Dart's `transformRect` turns them into NaN, whose comparisons then order it first.
-  Affect: a selection scrolled through a list orders the kept-alive selected children where Flutter orders them, so the items revealed at the end stay in the range.
 
 ## widgets/selectable_region.rs → selectable_region.dart (`SelectableRegion`)
 
@@ -467,7 +463,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 - Change: the text delegate records where each fragment of the paragraph after its first starts in it when the selectables change, where Dart reads it from the fragment's first box while it computes the range.
   Reason: language — `Selectable::bounding_boxes` and `RenderParagraph::get_position_for_offset` take `&mut App` here, and `SelectionHandler::selection` has `&App`.
-  Affect: a paragraph split by a `WidgetSpan` reports the range its selectables had when they last changed; a re-layout that moves a fragment without changing the selectables does not recompute where the fragment starts.
+  Affect: none in left-to-right text: a fragment's first box starts at its first character whatever the layout, and the paragraph rebuilds its fragments, and so the record, whenever its text changes; a right-to-left fragment re-wrapped by a relayout may report the start Dart read before the relayout.
 
 ## widgets/scrollable.rs → scrollable.dart (selection)
 

@@ -125,7 +125,7 @@ fn notify_selectable_geometry_change<T: MultiSelectableSelectionContainerDelegat
     this: Handle<T>,
     app: &mut App,
 ) {
-    MultiSelectableSelectionContainerDelegate::handle_selectable_geometry_change(this, app);
+    MultiSelectableSelectionContainerDelegateBase::handle_selectable_geometry_change(this, app);
 }
 
 /// The microtask that folds this frame's added selectables in, for Dart's `runScheduledTask`
@@ -148,7 +148,7 @@ fn run_scheduled_task_tearoff<T: MultiSelectableSelectionContainerDelegate>(
     this: Handle<T>,
     app: &mut App,
 ) {
-    MultiSelectableSelectionContainerDelegate::run_scheduled_task(this, app);
+    MultiSelectableSelectionContainerDelegateBase::run_scheduled_task(this, app);
 }
 
 /// The body of [`scheduled_update_frame_callback`].
@@ -157,7 +157,7 @@ fn post_frame_run_scheduled_task_tearoff<T: MultiSelectableSelectionContainerDel
     app: &mut App,
     _time_stamp: std::time::Duration,
 ) {
-    MultiSelectableSelectionContainerDelegate::run_scheduled_task(this, app);
+    MultiSelectableSelectionContainerDelegateBase::run_scheduled_task(this, app);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -277,7 +277,7 @@ pub trait MultiSelectableSelectionContainerDelegate:
 
     /// Notifies this delegate that layout of the container has changed.
     fn layout_did_change(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegate::update_selection_geometry(self, app);
+        MultiSelectableSelectionContainerDelegateBase::update_selection_geometry(self, app);
     }
 
     /// Called when this delegate finishes updating the selectables.
@@ -398,31 +398,6 @@ pub trait MultiSelectableSelectionContainerDelegate:
             self, app, selectable, event,
         )
     }
-
-    /// Dart's `_scheduleSelectableUpdate`.
-    fn schedule_selectable_update(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegateBase::schedule_selectable_update(self, app);
-    }
-
-    /// Dart's `_updateSelectables`.
-    fn update_selectables(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegateBase::update_selectables(self, app);
-    }
-
-    /// Dart's `_updateSelectionGeometry`.
-    fn update_selection_geometry(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegateBase::update_selection_geometry(self, app);
-    }
-
-    /// Dart's `_handleSelectableGeometryChange`.
-    fn handle_selectable_geometry_change(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegateBase::handle_selectable_geometry_change(self, app);
-    }
-
-    /// Dart's `runScheduledTask`, as the microtask and the frame callback both run it.
-    fn run_scheduled_task(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegateBase::run_scheduled_task(self, app);
-    }
 }
 
 /// The bodies of Dart's `MultiSelectableSelectionContainerDelegate`, over
@@ -442,7 +417,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
         debug_assert!(!data.selectables.contains(&selectable));
         let data = self.multi_selectable_selection_container_delegate_data_mut(app);
         set_add(&mut data.additions, selectable);
-        MultiSelectableSelectionContainerDelegate::schedule_selectable_update(self, app);
+        MultiSelectableSelectionContainerDelegateBase::schedule_selectable_update(self, app);
     }
 
     /// Dart's `MultiSelectableSelectionContainerDelegate.remove`.
@@ -458,7 +433,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
             return;
         }
         self.remove_selectable(app, selectable);
-        MultiSelectableSelectionContainerDelegate::schedule_selectable_update(self, app);
+        MultiSelectableSelectionContainerDelegateBase::schedule_selectable_update(self, app);
     }
 
     /// Dart's `dispatchSelectionEventToChild`: send the event to the selectable.
@@ -503,7 +478,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
         }
         self.multi_selectable_selection_container_delegate_data_mut(app)
             .scheduled_selectable_update = false;
-        MultiSelectableSelectionContainerDelegate::update_selectables(self, app);
+        MultiSelectableSelectionContainerDelegateBase::update_selectables(self, app);
     }
 
     /// Dart's `_updateSelectables`: fold the selectables added since the last frame in, then let
@@ -640,7 +615,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
 
     /// Dart's `didChangeSelectables`.
     fn did_change_selectables(self: Handle<Self>, app: &mut App) {
-        MultiSelectableSelectionContainerDelegate::update_selection_geometry(self, app);
+        MultiSelectableSelectionContainerDelegateBase::update_selection_geometry(self, app);
     }
 
     /// Dart's `value`: the combined geometry of the selectables.
@@ -655,7 +630,11 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
     fn update_selection_geometry(self: Handle<Self>, app: &mut App) {
         let new_value =
             MultiSelectableSelectionContainerDelegate::get_selection_geometry(self, app);
-        if SelectionHandler::value(self, app) != new_value {
+        if self
+            .multi_selectable_selection_container_delegate_data(app)
+            .selection_geometry
+            != new_value
+        {
             self.multi_selectable_selection_container_delegate_data_mut(app)
                 .selection_geometry = new_value;
             self.notify_listeners(app);
@@ -673,7 +652,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
         {
             return;
         }
-        MultiSelectableSelectionContainerDelegate::update_selection_geometry(self, app);
+        MultiSelectableSelectionContainerDelegateBase::update_selection_geometry(self, app);
     }
 
     /// Dart's `getSelectionGeometry`: one geometry covering the selectables from the start edge
@@ -1781,7 +1760,7 @@ pub trait MultiSelectableSelectionContainerDelegateBase:
         };
         self.multi_selectable_selection_container_delegate_data_mut(app)
             .is_handling_selection_event = false;
-        MultiSelectableSelectionContainerDelegate::update_selection_geometry(self, app);
+        MultiSelectableSelectionContainerDelegateBase::update_selection_geometry(self, app);
         result
     }
 

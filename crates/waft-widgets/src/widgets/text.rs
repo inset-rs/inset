@@ -1080,10 +1080,13 @@ impl SelectableTextContainerDelegate {
             .multi_selectable_selection_container_delegate_data(app)
             .selectables
             .clone();
-        let paragraph = self.paragraph(app);
         let mut starts = Vec::new();
         for (index, selectable) in selectables.iter().enumerate() {
-            if index == 0 || !paragraph.selectable_belongs_to_paragraph(app, *selectable) {
+            if index == 0 {
+                continue;
+            }
+            let paragraph = self.paragraph(app);
+            if !paragraph.selectable_belongs_to_paragraph(app, *selectable) {
                 continue;
             }
             let Some(first_box) = selectable.bounding_boxes(app).into_iter().next() else {
@@ -1433,7 +1436,6 @@ impl SelectableTextContainerDelegate {
                 .expect("the selectable holding both edges has a selection");
             forward_selection = range.end_offset >= range.start_offset;
         }
-        let paragraph = self.paragraph(app);
         for (index, selectable) in selectables.iter().enumerate() {
             let Some(range) = selectable.selection(app) else {
                 if found_start {
@@ -1459,10 +1461,13 @@ impl SelectableTextContainerDelegate {
             if !found_start {
                 // A `RenderParagraph` may split its content into several selectables, so a
                 // fragment that is not the paragraph's first starts partway through it.
-                let should_consider_content_start =
-                    index > 0 && paragraph.selectable_belongs_to_paragraph(app, *selectable);
+                let should_consider_content_start = index > 0
+                    && self
+                        .paragraph(app)
+                        .selectable_belongs_to_paragraph(app, *selectable);
                 let selectable_content_start = if should_consider_content_start {
-                    self.selectable_content_start(app, *selectable).unwrap_or(0)
+                    self.selectable_content_start(app, *selectable)
+                        .expect("a fragment's start is recorded when the selectables change")
                 } else {
                     0
                 };
