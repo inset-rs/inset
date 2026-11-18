@@ -451,9 +451,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the overlay's own toolbar asks the deprecated `TextSelectionDelegate` members (`textEditingValue`, `cutSelection`, `pasteText`, …), which the region does not implement.
   Affect: `contextMenuBuilder` is a region's only toolbar; the platform controls, which are handle controls, and Material's `SelectionArea` are unaffected.
 
-- Change: the browser's context menu (`BrowserContextMenu`, `PlatformSelectableRegionContextMenu` attaching the region) and the process-text and share items of a menu are absent.
-  Reason: platform — the host is not a browser, and it has no text-processing service or share sheet.
-  Affect: a region's menu holds Copy and Select All, where a web host would show its own menu and an Android host a Share item.
+- Change: the process-text and share items of a region's menu are absent.
+  Reason: platform — the host has no text-processing service or share sheet.
+  Affect: a region's menu holds Copy and Select All, where an Android host would add a Share item.
 
 - Change: the deprecated `TextSelectionDelegate` implementation, `_updateSelectionStatus`'s `textEditingValue`, `SelectionListener`, `SelectionDetails` and `SelectionListenerNotifier` are not ported.
   Reason: language — the delegate's members exist only for the deprecated toolbar and the platform's text input channel, which the port does not use; the listener classes wait for their tests' needs.

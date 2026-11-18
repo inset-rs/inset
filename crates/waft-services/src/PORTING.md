@@ -17,9 +17,9 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
 
 ## browser_context_menu.rs → browser_context_menu.dart
 
-- Change: `BrowserContextMenu` keeps the enabled flag in a process-wide atomic, and enabling or disabling it returns a ready `Task`.
-  Reason: platform — Waft has no browser platform channel, so the flag changes without telling a browser's DOM.
-  Affect: `SelectableRegion` reads the same default and flag; a web host would still show the browser's own menu.
+- Change: `BrowserContextMenu` keeps its flag in an app singleton and sets it at once, and enabling or disabling it returns a ready `Task`.
+  Reason: platform — Waft has no browser platform channel to send `enableContextMenu` / `disableContextMenu` over.
+  Affect: the flag `SelectableRegion` reads on the web changes without the browser being told; a web host would still show the browser's own menu.
 
 ## binding.rs → binding.dart
 
