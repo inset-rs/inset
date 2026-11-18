@@ -465,15 +465,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `Selectable::bounding_boxes` and `RenderParagraph::get_position_for_offset` take `&mut App` here, and `SelectionHandler::selection` has `&App`.
   Affect: none in left-to-right text: a fragment's first box starts at its first character whatever the layout, and the paragraph rebuilds its fragments, and so the record, whenever its text changes; a right-to-left fragment re-wrapped by a relayout may report the start Dart read before the relayout.
 
-## widgets/scrollable.rs → scrollable.dart (selection)
-
-- Change: `ScrollPhysics::allow_selection_edge_scrolling` is a trait method whose default is its parent's answer or `true`; `PageScrollPhysics` answers `false`.
-  Reason: platform — the scrollable's selection delegate asks the physics before edge scrolling, as Dart's does; `PageScrollPhysics` is the only class Dart has that refuses it.
-
-- Change: these `scrollable_selection_test.dart` cases are not ported: the horizontal forward and backward drags (the same delegate path as the vertical ones), the double- and triple-click drags and the handle drags (the selection overlay and its handles), the keyboard auto-scroll cases (the region's keyboard actions), the `PageView` and nested-scrollable cases (a selectable region over a page view and nested selection containers), and 'selection starts outside of the scrollable' (a drag from outside the list, which the region sends).
-  Reason: platform — each needs `SelectableRegion`, its overlay or its key actions, none ported yet.
-  Affect: the kept-alive selection, the forward and backward edge scrolls, and the physics that refuses edge scrolling are covered; a page view's or a nested scrollable's edge behavior is not.
-
 ## widgets/scroll_view.rs → scroll_view.dart
 
 - Change: the physics a primary scroll view implies is substituted in `build`, not stored on the widget.
@@ -795,8 +786,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Affect: a tag is a shared trait object; two tags of different types never match, as two Dart objects of different classes do not.
 
 ## Deferred
-- platform_selectable_region_context_menu_web.dart: the web context menu, a registered platform view over a DOM element. Trigger: a web host.
 
+- platform_selectable_region_context_menu_web.dart: the web context menu, a registered platform view over a DOM element. Trigger: a web host.
+- scrollable.rs: scrollable_selection_test.dart's horizontal and reversed variants, double- and triple-click drags, handle-drag scrolls, the two padding cases and the 'Complex cases' after 'selection starts outside of the scrollable'. Trigger: the next edit of the scrollable's selection delegate.
+- selectable_region.rs: selectable_region_test.dart's cases beyond the mouse, spy, keyboard-granular and handle-drag ones ported (double- and triple-click drags, shift-click, directional extension, the toolbar and magnifier cases, onSelectionChanged, SelectionListener). Trigger: the next edit of `SelectableRegion`'s gestures or actions; `SelectionListener`.
 - page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
 - raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
 - form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).
