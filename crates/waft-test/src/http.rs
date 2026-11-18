@@ -44,6 +44,9 @@ pub struct SentRequest {
     pub uri: Uri,
     pub headers: HeaderMap,
     pub body: Vec<u8>,
+    /// The fields the request was made to send after its body, which a test's client has
+    /// nowhere to send and so keeps.
+    pub trailers: Option<HeaderMap>,
     pub options: SendOptions,
 }
 
@@ -142,11 +145,13 @@ impl HttpClient for MockHttpClient {
         Box::pin(async move {
             let body = request.body_mut();
             let bytes = body.read_all().await?;
+            let trailers = body.trailers().await?;
             kept.keep(SentRequest {
                 method,
                 uri: uri.clone(),
                 headers,
                 body: bytes,
+                trailers,
                 options,
             });
             let response = response.ok_or_else(|| {
@@ -212,7 +217,7 @@ impl BodyStream for MockBodyStream {
     }
 
     fn trailers(&mut self) -> BodyTrailersFuture<'_> {
-        Box::pin(std::future::ready(Ok(self.trailers.take())))
+        Box::pin(std::future::ready(Ok(self.trailers.clone())))
     }
 
     fn length(&self) -> Option<u64> {
@@ -261,6 +266,53 @@ mod tests {
             client.asked()[0].uri,
             "https://example.test/photo.png".parse::<Uri>().unwrap()
         );
+    }
+
+    #[test]
+    fn a_responses_trailers_answer_again_the_same() {
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", 7u32.into());
+        let client = MockHttpClient::new().answering(
+            "https://example.test/chunked",
+            MockResponse::new()
+                .body(b"the bytes".to_vec())
+                .trailers(trailers.clone()),
+        );
+        let request = Request::builder()
+            .uri("https://example.test/chunked")
+            .body(Body::empty())
+            .unwrap();
+        let mut response = now(client.send(request, SendOptions::default())).unwrap();
+        assert_eq!(
+            now(response.body_mut().read_all()).unwrap(),
+            b"the bytes".to_vec()
+        );
+        assert_eq!(
+            now(response.body_mut().trailers()).unwrap(),
+            Some(trailers.clone())
+        );
+        assert_eq!(
+            now(response.body_mut().trailers()).unwrap(),
+            Some(trailers),
+            "a second asking answers the same fields"
+        );
+    }
+
+    #[test]
+    fn a_request_with_trailers_is_kept_with_them() {
+        let client =
+            MockHttpClient::new().answering("https://example.test/put", MockResponse::new());
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", 7u32.into());
+        let request = Request::builder()
+            .method("PUT")
+            .uri("https://example.test/put")
+            .body(Body::from(b"the bytes".to_vec()).with_trailers(trailers.clone()))
+            .unwrap();
+        let mut response = now(client.send(request, SendOptions::default())).unwrap();
+        now(response.body_mut().read_all()).unwrap();
+        assert_eq!(client.asked()[0].body, b"the bytes".to_vec());
+        assert_eq!(client.asked()[0].trailers, Some(trailers));
     }
 
     #[test]

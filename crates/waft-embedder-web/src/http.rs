@@ -1,6 +1,9 @@
 //! HTTP in a browser: `fetch`, whose promise the app's executor awaits and whose response body
 //! streams out of a `ReadableStream`. The browser's own fetch does the redirects, applies the
 //! page's cookies and its CORS rules, and uses its proxy; a request dropped aborts the fetch.
+//! A request's body is read whole before the fetch, so the browser holds it and resends it on a
+//! 307 or a 308 by the fetch spec's own rules. A body made with trailers to send fails here with
+//! [`HttpError::HttpRequestTrailerSectionSize`], as `fetch` sends none.
 //!
 //! A browser's `fetch` does not expose trailers, and hides a redirect response from the page: it
 //! follows redirects up to its own limit, or with `redirect: "manual"` answers an opaque response
@@ -74,6 +77,11 @@ impl HttpClient for BrowserHttpClient {
             let url = request.uri().to_string();
             let headers = request.headers().clone();
             let bytes = request.body_mut().read_all().await?;
+            // `fetch` sends no request trailers, so a body that carries them fails here with the
+            // one case that says a trailer section must be empty, rather than losing them.
+            if request.body_mut().trailers().await?.is_some() {
+                return Err(HttpError::HttpRequestTrailerSectionSize(Some(0)));
+            }
 
             let init = RequestInit::new();
             init.set_method(&method);
