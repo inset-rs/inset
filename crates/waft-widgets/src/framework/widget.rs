@@ -210,7 +210,8 @@ pub fn short_type_name<W: ?Sized>() -> &'static str {
 /// The conversion of a widget value into a tree node.
 ///
 /// Every widget kind gets a blanket implementation, told apart by the phantom `Kind` so the
-/// implementations do not overlap; a call site infers it. A [`WidgetRef`] converts to itself.
+/// implementations do not overlap; a call site infers it. A [`WidgetRef`] converts to itself, and
+/// a widget that is its own tree node converts as itself ([`TreeNodeKind`]).
 pub trait IntoWidget<Kind> {
     fn into_widget(self) -> WidgetRef;
 }
@@ -221,6 +222,19 @@ pub struct WidgetRefKind;
 impl IntoWidget<WidgetRefKind> for WidgetRef {
     fn into_widget(self) -> WidgetRef {
         self
+    }
+}
+
+/// The kind tag of [`IntoWidget`] for a widget that is its own tree node: one implementing
+/// [`Widget`] directly, whose element is its own rather than a wrapper's — a render object
+/// widget that builds a child during layout (`LayoutBuilder`), a table (`Table`), a proxy widget
+/// (`NotificationListener`), a collection of views (`ViewCollection`). It converts to itself,
+/// which is what its inherent `into_widget` answers.
+pub struct TreeNodeKind;
+
+impl<W: Widget> IntoWidget<TreeNodeKind> for W {
+    fn into_widget(self) -> WidgetRef {
+        Rc::new(self)
     }
 }
 

@@ -101,3 +101,83 @@ fn the_facade_names_the_timers_and_the_awaitable_delay() {
     periodic.cancel(&mut app);
     assert!(!periodic.is_active(&app));
 }
+
+/// The types an app-facing widget setter takes, reached by the glob an app writes: `use
+/// waft::*`.
+mod glob {
+    use std::rc::Rc;
+
+    use waft::*;
+
+    #[test]
+    fn use_waft_reaches_what_widget_setters_take() {
+        let _: Option<HitTestBehavior> = None;
+        let _: Option<Locale> = None;
+        let _: Option<PointerDeviceKind> = None;
+        let _: Option<TextSelection> = None;
+        let _: Option<TextEditingValue> = None;
+        let _: Option<TextPosition> = None;
+        let _: Option<TextRange> = None;
+        let _: Option<TextInputType> = None;
+        let _: Option<TextInputAction> = None;
+        let _: Option<TextCapitalization> = None;
+        let _: Option<SmartDashesType> = None;
+        let _: Option<SmartQuotesType> = None;
+        let _: Option<BoxHeightStyle> = None;
+        let _: Option<BoxWidthStyle> = None;
+        let _: Option<ImageFilter> = None;
+        let _: Option<FilterQuality> = None;
+        let _: Option<PlaceholderAlignment> = None;
+        let _: Option<RRect> = None;
+        let _: Option<RSuperellipse> = None;
+        let _: Option<Rc<dyn CustomClipper<Rect>>> = None;
+        let _: Option<BoxConstraintsTransform> = None;
+        let _: Option<CacheExtentStyle> = None;
+        let _: Option<ScrollCacheExtent> = None;
+        let _: Option<ScrollDirection> = None;
+        let _: Option<SliverPaintOrder> = None;
+        let _: Option<ItemExtentBuilder> = None;
+        let _: Option<Rc<dyn SliverGridDelegate>> = None;
+        let _: Option<Rc<dyn MultiChildLayoutDelegate>> = None;
+        let _: Option<Rc<dyn SingleChildLayoutDelegate>> = None;
+        let _: Option<RelativeRect> = None;
+        let _: Option<Ref<LayerLink>> = None;
+        let _: Option<DecorationPosition> = None;
+        let _: Option<OverflowBoxFit> = None;
+        let _: Option<WrapAlignment> = None;
+        let _: Option<WrapCrossAlignment> = None;
+        let _: Option<FloatingHeaderSnapConfiguration> = None;
+        let _: Option<OverScrollHeaderStretchConfiguration> = None;
+        let _: Option<PersistentHeaderShowOnScreenConfiguration> = None;
+        let _: Option<ImageFilterConfig> = None;
+        let _: Option<SelectedContent> = None;
+        let _: Option<SelectionRegistrarRef> = None;
+        let _: Option<TextSelectionPoint> = None;
+        let _: Option<AnyBoxConstraints> = None;
+        let _: Option<TickerProviderRef> = None;
+        let _: Option<ViewRef> = None;
+        let _: Option<ViewId> = None;
+        let _: Option<ViewFocusEvent> = None;
+        let _: Option<Rc<dyn CompositionLayer>> = None;
+        let _: Option<CaptionStyle> = None;
+        let _: Option<Cue> = None;
+        let _: Option<SeekTolerance> = None;
+        let _: Option<Rc<dyn VideoFrameReader>> = None;
+        let _: Option<VideoOutput> = None;
+        let _: Option<Camera> = None;
+        let _: Option<Rc<dyn CameraDevice>> = None;
+        let _: Option<CameraFormat> = None;
+        let _: Option<CameraOutputs> = None;
+        let _: Option<CheckState> = None;
+        let _: Option<ClipboardEvent> = None;
+        let _: Option<EditCommand> = None;
+        let _: Option<IconImage> = None;
+        let _: Option<MenuItemCheck> = None;
+        let _: Option<RestorationData> = None;
+        let _: Option<SystemUiOverlayStyle> = None;
+        let _: Option<TrayIconEvent> = None;
+        let _: Option<TrayIconId> = None;
+
+        assert_eq!(HitTestBehavior::Opaque, HitTestBehavior::Opaque);
+    }
+}

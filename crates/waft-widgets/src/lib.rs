@@ -37,8 +37,15 @@ pub use waft_animation::{
 };
 pub use waft_painting::*;
 pub use waft_rendering::{
-    BoxConstraints, CrossAxisAlignment, CustomPainter, FlexFit, MainAxisAlignment, MainAxisSize,
-    StackFit,
+    AnyBoxConstraints, BoxConstraints, BoxConstraintsTransform, CacheExtentStyle,
+    CrossAxisAlignment, CustomClipper, CustomPainter, DecorationPosition, FlexFit,
+    FloatingHeaderSnapConfiguration, HitTestBehavior, ImageFilterConfig, ItemExtentBuilder,
+    LayerLink, MainAxisAlignment, MainAxisSize, MultiChildLayoutDelegate,
+    OverScrollHeaderStretchConfiguration, OverflowBoxFit,
+    PersistentHeaderShowOnScreenConfiguration, RelativeRect, ScrollCacheExtent, ScrollDirection,
+    SelectedContent, SelectionRegistrarRef, SingleChildLayoutDelegate, SliverGridDelegate,
+    SliverPaintOrder, StackFit, TextSelectionPoint, TickerProviderRef, WrapAlignment,
+    WrapCrossAlignment,
 };
 // The widget, not dart:ui's `Image` that painting carries: Flutter's `widgets.dart` makes
 // the same choice, leaving the other as `ui.Image`.
