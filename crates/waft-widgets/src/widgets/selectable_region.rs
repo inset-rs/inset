@@ -4740,11 +4740,14 @@ impl State for SelectableRegionState {
 /// extend actions) are the `invoke_action` closures `SelectableRegionState::build_actions` gives.
 struct NonOverrideAction<T: Intent> {
     action: ActionData,
-    invoke_action: Rc<dyn Fn(&mut App, &T)>,
+    invoke_action: InvokeAction<T>,
 }
 
+/// Dart's `_NonOverrideAction.invokeAction`, as a subclass implements it.
+type InvokeAction<T> = Rc<dyn Fn(&mut App, &T)>;
+
 impl<T: Intent> NonOverrideAction<T> {
-    fn new(app: &mut App, invoke_action: Rc<dyn Fn(&mut App, &T)>) -> Ref<NonOverrideAction<T>> {
+    fn new(app: &mut App, invoke_action: InvokeAction<T>) -> Ref<NonOverrideAction<T>> {
         app.create(NonOverrideAction {
             action: ActionData::new(),
             invoke_action,
@@ -4819,7 +4822,9 @@ mod tests {
     use std::time::Duration;
     use waft_scheduler::{FrameTarget, SchedulerBinding};
 
-    use crate::testing::{TestPointer, WidgetTester, find, test_widgets};
+    use crate::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, find, test_widgets, test_widgets_variant,
+    };
     use crate::widgets::basic::{Builder, Center, Column, SizedBox};
     use crate::widgets::selection_container::{SelectionContainer, SelectionRegistrarScope};
     use crate::widgets::text::Text;
@@ -4832,17 +4837,20 @@ mod tests {
             .into_widget()
     }
 
-    /// The offset in the view of the caret at `offset` in `paragraph`, five pixels down from the
-    /// top of the line, as flutter_test's `textOffsetToPosition` and Flutter's selection tests
-    /// place a point inside a line.
-    fn global_offset(
-        app: &mut App,
-        paragraph: waft_rendering::RenderHandle<RenderParagraph>,
+    /// `selectable_region_test.dart`'s `textOffsetToPosition`: the global position just above
+    /// the bottom of the line at the caret at `offset` in `paragraph`.
+    fn text_offset_to_position(
+        tester: &WidgetTester,
+        paragraph: RenderHandle<RenderParagraph>,
         offset: i32,
     ) -> Offset {
-        let local = paragraph.get_offset_for_caret(app, TextPosition::new(offset), Rect::ZERO)
-            + Offset::new(0.0, 5.0);
-        transform_point(&paragraph.as_object().get_transform_to(app, None), local)
+        tester.update(|app| {
+            let caret = Rect::from_ltwh(0.0, 0.0, 2.0, 20.0);
+            let local_offset =
+                paragraph.get_offset_for_caret(app, TextPosition::new(offset), caret)
+                    + Offset::new(0.0, paragraph.preferred_line_height(app));
+            paragraph.as_box().local_to_global(app, local_offset, None) + Offset::new(0.0, -2.0)
+        })
     }
 
     /// `paragraph_test.dart`'s and `selectable_region_test.dart`'s `TestSelectionRegistrar`: it
@@ -5105,20 +5113,6 @@ mod tests {
 
     use crate::testing::TestWidgetsApp;
 
-    /// The global position of the caret at `offset` in `paragraph`, five pixels down from the
-    /// top of the line.
-    fn paragraph_position(
-        tester: &mut WidgetTester,
-        paragraph: RenderHandle<RenderParagraph>,
-        offset: i32,
-    ) -> Offset {
-        tester.update(|app| {
-            let local = paragraph.get_offset_for_caret(app, TextPosition::new(offset), Rect::ZERO)
-                + Offset::new(0.0, 5.0);
-            transform_point(&paragraph.as_object().get_transform_to(app, None), local)
-        })
-    }
-
     /// The paragraph showing `text`.
     fn paragraph_showing(tester: &WidgetTester, text: &str) -> RenderHandle<RenderParagraph> {
         let paragraphs = tester.all::<RenderParagraph>();
@@ -5142,141 +5136,149 @@ mod tests {
         })
     }
 
-    /// A region over `child` whose context menu is empty, with the selected content of each
-    /// change it reports as returned.
-    fn pump_region<K: 'static>(
-        tester: &mut WidgetTester,
-        child: impl IntoWidget<K>,
-    ) -> Rc<RefCell<Vec<Option<String>>>> {
-        let selections = Rc::new(RefCell::new(Vec::new()));
-        let log = Rc::clone(&selections);
-        tester.pump_widget(
-            TestWidgetsApp::new().home(
-                SelectableRegion::new(crate::testing::test_text_selection_handle_controls(), child)
-                    .context_menu_builder(Rc::new(|_app, _context, _state| {
-                        crate::widgets::basic::SizedBox::shrink().into_widget()
-                    }))
-                    .on_selection_changed(Rc::new(move |_app, content| {
-                        log.borrow_mut()
-                            .push(content.map(|content| content.plain_text));
-                    })),
-            ),
-        );
-        tester.pump_and_settle();
-        selections
+    /// `selectable_region_test.dart`'s `_selectableRegion`: a region with an empty context menu
+    /// and `testTextSelectionHandleControls`.
+    fn selectable_region<K: 'static>(child: impl IntoWidget<K>) -> SelectableRegion {
+        SelectableRegion::new(crate::testing::test_text_selection_handle_controls(), child)
+            .context_menu_builder(Rc::new(|_app, _context, _state| {
+                SizedBox::shrink().into_widget()
+            }))
     }
 
-    // selectable_region_test.dart 'mouse can select multiple widgets', for one text.
-    #[test]
-    fn a_mouse_drag_selects_text_and_reports_the_content() {
-        test_widgets(|tester| {
-            let selections = pump_region(tester, Text::new("How are you?"));
-            let paragraph = paragraph_showing(tester, "How are you?");
-            let start = paragraph_position(tester, paragraph, 2);
-            let end = paragraph_position(tester, paragraph, 6);
+    /// Pumps `TestWidgetsApp(home: _selectableRegion(child: child))`.
+    fn pump_region<K: 'static>(tester: &mut WidgetTester, child: impl IntoWidget<K>) {
+        tester.pump_widget(TestWidgetsApp::new().home(selectable_region(child)));
+    }
 
-            let mut pointer = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
-            tester.down(&mut pointer, start);
-            tester.pump_by(Duration::from_millis(200));
-            tester.move_to(&mut pointer, end, true);
+    // selectable_region_test.dart 'mouse can select single text on desktop platforms'.
+    #[test]
+    fn mouse_can_select_single_text_on_desktop_platforms() {
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            pump_region(tester, Center::new().child(Text::new("How are you")));
+            let paragraph = paragraph_showing(tester, "How are you");
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph, 2);
+            tester.down(&mut gesture, at);
             tester.pump();
-            tester.up(&pointer);
+
+            let at = text_offset_to_position(tester, paragraph, 4);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            assert_eq!(paragraph_selection(tester, paragraph), (2, 4));
+
+            let at = text_offset_to_position(tester, paragraph, 6);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            assert_eq!(paragraph_selection(tester, paragraph), (2, 6));
+
+            // Check backward selection.
+            let at = text_offset_to_position(tester, paragraph, 1);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            assert_eq!(paragraph_selection(tester, paragraph), (2, 1));
+
+            // Start a new drag.
+            tester.up(&gesture);
             tester.pump_and_settle();
 
-            assert_eq!(paragraph_selection(tester, paragraph), (2, 6));
-            assert_eq!(
-                selections.borrow().last().cloned().flatten(),
-                Some("w ar".to_string())
-            );
+            let at = text_offset_to_position(tester, paragraph, 5);
+            tester.down(&mut gesture, at);
+            tester.pump_and_settle();
+            assert_eq!(paragraph_selection(tester, paragraph), (5, 5));
+
+            // Selecting across line should select to the end.
+            let at = text_offset_to_position(tester, paragraph, 5) + Offset::new(0.0, 200.0);
+            tester.move_to(&mut gesture, at, true);
+            tester.pump();
+            assert_eq!(paragraph_selection(tester, paragraph), (5, 11));
+
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
         });
     }
 
     // selectable_region_test.dart 'mouse can select multiple widgets'.
     #[test]
-    fn a_mouse_drag_selects_across_texts() {
+    fn mouse_can_select_multiple_widgets() {
         test_widgets(|tester| {
-            pump_region(
-                tester,
-                crate::widgets::basic::Column::new().children([
-                    Text::new("How are you?").into_widget(),
-                    Text::new("Good, and you?").into_widget(),
-                    Text::new("Fine, thank you.").into_widget(),
-                ]),
-            );
+            pump_region(tester, three_texts());
             let paragraph_1 = paragraph_showing(tester, "How are you?");
-            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
-            let paragraph_3 = paragraph_showing(tester, "Fine, thank you.");
-            let start = paragraph_position(tester, paragraph_1, 2);
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_1, 2);
+            tester.down(&mut gesture, at);
+            tester.pump();
 
-            let mut pointer = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
-            tester.down(&mut pointer, start);
-            tester.pump_by(Duration::from_millis(200));
-
-            let end = paragraph_position(tester, paragraph_1, 4);
-            tester.move_to(&mut pointer, end, true);
+            let at = text_offset_to_position(tester, paragraph_1, 4);
+            tester.move_to(&mut gesture, at, true);
             tester.pump();
             assert_eq!(paragraph_selection(tester, paragraph_1), (2, 4));
 
-            let end = paragraph_position(tester, paragraph_2, 5);
-            tester.move_to(&mut pointer, end, true);
-            tester.pump();
+            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            let at = text_offset_to_position(tester, paragraph_2, 5);
+            tester.move_to(&mut gesture, at, true);
+            // Should select the rest of paragraph 1.
             assert_eq!(paragraph_selection(tester, paragraph_1), (2, 12));
             assert_eq!(paragraph_selection(tester, paragraph_2), (0, 5));
 
-            let end = paragraph_position(tester, paragraph_3, 6);
-            tester.move_to(&mut pointer, end, true);
-            tester.pump();
+            let paragraph_3 = paragraph_showing(tester, "Fine, thank you.");
+            let at = text_offset_to_position(tester, paragraph_3, 6);
+            tester.move_to(&mut gesture, at, true);
             assert_eq!(paragraph_selection(tester, paragraph_1), (2, 12));
             assert_eq!(paragraph_selection(tester, paragraph_2), (0, 14));
             assert_eq!(paragraph_selection(tester, paragraph_3), (0, 6));
-            tester.up(&pointer);
+
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
         });
     }
 
     // selectable_region_test.dart 'mouse can reverse selection'.
     #[test]
-    fn a_mouse_drag_selects_backwards_across_texts() {
+    fn mouse_can_reverse_selection() {
         test_widgets(|tester| {
-            pump_region(
-                tester,
-                crate::widgets::basic::Column::new().children([
-                    Text::new("How are you?").into_widget(),
-                    Text::new("Good, and you?").into_widget(),
-                    Text::new("Fine, thank you.").into_widget(),
-                ]),
-            );
-            let paragraph_1 = paragraph_showing(tester, "How are you?");
-            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            pump_region(tester, three_texts());
             let paragraph_3 = paragraph_showing(tester, "Fine, thank you.");
-            let start = paragraph_position(tester, paragraph_3, 10);
+            let mut gesture = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
+            let at = text_offset_to_position(tester, paragraph_3, 10);
+            tester.down(&mut gesture, at);
+            tester.pump();
 
-            let mut pointer = TestPointer::mouse(tester.next_pointer(), K_PRIMARY_BUTTON);
-            tester.down(&mut pointer, start);
-            tester.pump_by(Duration::from_millis(200));
-
-            let end = paragraph_position(tester, paragraph_3, 4);
-            tester.move_to(&mut pointer, end, true);
+            let at = text_offset_to_position(tester, paragraph_3, 4);
+            tester.move_to(&mut gesture, at, true);
             tester.pump();
             assert_eq!(paragraph_selection(tester, paragraph_3), (10, 4));
 
-            let end = paragraph_position(tester, paragraph_2, 5);
-            tester.move_to(&mut pointer, end, true);
-            tester.pump();
+            let paragraph_2 = paragraph_showing(tester, "Good, and you?");
+            let at = text_offset_to_position(tester, paragraph_2, 5);
+            tester.move_to(&mut gesture, at, true);
             assert_eq!(paragraph_selection(tester, paragraph_3), (10, 0));
             assert_eq!(paragraph_selection(tester, paragraph_2), (14, 5));
 
-            let end = paragraph_position(tester, paragraph_1, 6);
-            tester.move_to(&mut pointer, end, true);
-            tester.pump();
+            let paragraph_1 = paragraph_showing(tester, "How are you?");
+            let at = text_offset_to_position(tester, paragraph_1, 6);
+            tester.move_to(&mut gesture, at, true);
             assert_eq!(paragraph_selection(tester, paragraph_3), (10, 0));
             assert_eq!(paragraph_selection(tester, paragraph_2), (14, 0));
             assert_eq!(paragraph_selection(tester, paragraph_1), (12, 6));
-            tester.up(&pointer);
+
+            tester.up(&gesture);
+            tester.remove_pointer(&gesture);
         });
     }
 
+    /// The three texts most of `selectable_region_test.dart`'s cases select across.
+    fn three_texts() -> Column {
+        Column::new().children([
+            Text::new("How are you?").into_widget(),
+            Text::new("Good, and you?").into_widget(),
+            Text::new("Fine, thank you.").into_widget(),
+        ])
+    }
+
     // selectable_region_test.dart 'can select all from toolbar': a touch long press selects the
-    // word and shows the toolbar, whose select-all button selects every text.
+    // word and shows the toolbar, whose select-all button selects every text. Dart's controls
+    // build the toolbar through the deprecated `buildToolbar`, which the port leaves out (see
+    // PORTING.md), so the same two buttons come from the region's context menu builder here.
     #[test]
     fn a_touch_long_press_shows_the_toolbar_and_its_select_all_selects_everything() {
         test_widgets(|tester| {
@@ -5322,17 +5324,17 @@ mod tests {
             tester.pump_and_settle();
 
             let paragraph_3 = paragraph_showing(tester, "Fine, thank you.");
-            let at = paragraph_position(tester, paragraph_3, 7);
+            let at = text_offset_to_position(tester, paragraph_3, 7);
             let mut pointer = TestPointer::touch(tester.next_pointer());
             tester.down(&mut pointer, at);
-            tester.pump_by(Duration::from_millis(600));
+            tester.pump_by(Duration::from_millis(500));
             tester.up(&pointer);
-            tester.pump_and_settle();
+            tester.pump_by(Duration::from_millis(500));
 
             assert_eq!(paragraph_selection(tester, paragraph_3), (6, 11));
             assert!(types.borrow().contains(&ContextMenuButtonType::SelectAll));
             tester.tap(find::text("Select all"));
-            tester.pump_and_settle();
+            tester.pump();
 
             assert_eq!(paragraph_selection(tester, paragraph_3), (0, 16));
             assert_eq!(
@@ -5626,16 +5628,6 @@ mod tests {
         })
     }
 
-    /// The global position of the caret at `offset` in the `which`th paragraph.
-    fn position_of(
-        tester: &mut WidgetTester,
-        paragraphs: &[waft_rendering::RenderHandle<RenderParagraph>],
-        which: usize,
-        offset: i32,
-    ) -> Offset {
-        tester.update(|app| global_offset(app, paragraphs[which], offset))
-    }
-
     // selectable_region_test.dart 'Can extend StaticSelectionContainerDelegate': a delegate that
     // puts a new line between the selectables' selected contents.
     #[test]
@@ -5653,8 +5645,8 @@ mod tests {
 
             let paragraphs = tester.all::<RenderParagraph>();
             assert_eq!(paragraphs.len(), 2);
-            let start = position_of(tester, &paragraphs, 0, 4);
-            let end = position_of(tester, &paragraphs, 1, 10);
+            let start = text_offset_to_position(tester, paragraphs[0], 4);
+            let end = text_offset_to_position(tester, paragraphs[1], 10);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5699,8 +5691,8 @@ mod tests {
 
             let paragraphs = tester.all::<RenderParagraph>();
             assert_eq!(paragraphs.len(), 2);
-            let start = position_of(tester, &paragraphs, 0, 4);
-            let end = position_of(tester, &paragraphs, 1, 10);
+            let start = text_offset_to_position(tester, paragraphs[0], 4);
+            let end = text_offset_to_position(tester, paragraphs[1], 10);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5744,7 +5736,7 @@ mod tests {
 
             let paragraphs = tester.all::<RenderParagraph>();
             assert_eq!(paragraphs.len(), 3);
-            let start = position_of(tester, &paragraphs, 0, 4);
+            let start = text_offset_to_position(tester, paragraphs[0], 4);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5752,7 +5744,7 @@ mod tests {
             );
 
             // Selection on paragraph 1.
-            let end = position_of(tester, &paragraphs, 0, 7);
+            let end = text_offset_to_position(tester, paragraphs[0], 7);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5766,7 +5758,7 @@ mod tests {
             );
 
             // Selection on paragraph 1.
-            let end = position_of(tester, &paragraphs, 0, 10);
+            let end = text_offset_to_position(tester, paragraphs[0], 10);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5780,7 +5772,7 @@ mod tests {
             );
 
             // Selection on paragraphs 1 and 2.
-            let end = position_of(tester, &paragraphs, 1, 10);
+            let end = text_offset_to_position(tester, paragraphs[1], 10);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5794,7 +5786,7 @@ mod tests {
             );
 
             // Selection on paragraphs 1, 2 and 3.
-            let end = position_of(tester, &paragraphs, 2, 10);
+            let end = text_offset_to_position(tester, paragraphs[2], 10);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5809,7 +5801,7 @@ mod tests {
 
             // Collapsed selection.
             dispatch(tester, delegate.handle(), SelectionEvent::Clear);
-            let point = position_of(tester, &paragraphs, 0, 3);
+            let point = text_offset_to_position(tester, paragraphs[0], 3);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5829,8 +5821,8 @@ mod tests {
 
             // Backwards selection.
             dispatch(tester, delegate.handle(), SelectionEvent::Clear);
-            let start = position_of(tester, &paragraphs, 2, 4);
-            let end = position_of(tester, &paragraphs, 0, 0);
+            let start = text_offset_to_position(tester, paragraphs[2], 4);
+            let end = text_offset_to_position(tester, paragraphs[0], 0);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5850,7 +5842,7 @@ mod tests {
 
             // Collapsed selection at the first character.
             dispatch(tester, delegate.handle(), SelectionEvent::Clear);
-            let point = position_of(tester, &paragraphs, 0, 0);
+            let point = text_offset_to_position(tester, paragraphs[0], 0);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5891,8 +5883,8 @@ mod tests {
 
             pump(tester, &["AAA", "CCC"]);
             let paragraphs = tester.all::<RenderParagraph>();
-            let start = position_of(tester, &paragraphs, 0, 0);
-            let end = position_of(tester, &paragraphs, 1, 2);
+            let start = text_offset_to_position(tester, paragraphs[0], 0);
+            let end = text_offset_to_position(tester, paragraphs[1], 2);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5958,7 +5950,7 @@ mod tests {
             });
 
             let paragraphs = tester.all::<RenderParagraph>();
-            let word = position_of(tester, &paragraphs, 1, 5);
+            let word = text_offset_to_position(tester, paragraphs[1], 5);
             dispatch(
                 tester,
                 delegate.handle(),
@@ -5977,7 +5969,7 @@ mod tests {
                 SelectionStatus::Uncollapsed,
             );
 
-            let paragraph = position_of(tester, &paragraphs, 1, 5);
+            let paragraph = text_offset_to_position(tester, paragraphs[1], 5);
             dispatch(
                 tester,
                 delegate.handle(),
