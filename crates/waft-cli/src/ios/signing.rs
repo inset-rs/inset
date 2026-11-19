@@ -119,10 +119,10 @@ fn sign_for_development(
     out: &Path,
     device: Option<&IosDevice>,
 ) -> Result<()> {
-    let identity = apple::development_identity(project.ios.team.as_deref())?;
+    let (identity, team) = apple::development_identity(project.ios.team.as_deref())?;
     let signed = Signed {
         bundle_id: &project.identifier,
-        team: &identity.team,
+        team: &team,
         device: device.map(|device| device.udid.as_str()),
     };
     let profile = match profiles::stored_profile(&signed) {
@@ -147,7 +147,7 @@ fn sign_for_development(
     let entitlements = out.join("entitlements.plist");
     plist::to_file_xml(
         &entitlements,
-        &development_entitlements(&project.identifier, &identity.team),
+        &development_entitlements(&project.identifier, &team),
     )?;
     println!("signing with {} ({})", identity.name, profile.name);
     apple::sign(

@@ -37,6 +37,8 @@ serde_json = "1"
 tar = "0.4"
 ureq = "3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# A signing certificate's team, read from the certificate itself.
+x509-parser = "0.18"
 
 [lints]
 workspace = true

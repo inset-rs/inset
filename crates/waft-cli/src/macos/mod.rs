@@ -136,7 +136,9 @@ fn signing_identity(project: &Project) -> Result<SigningIdentity> {
         Some(named) if named == "-" => SigningIdentity::AdHoc,
         Some(named) => SigningIdentity::Keychain(apple::keychain_identity(&named)?),
         None => apple::development_identity(project.macos.team.as_deref())
-            .map_or(SigningIdentity::AdHoc, SigningIdentity::Keychain),
+            .map_or(SigningIdentity::AdHoc, |(identity, _)| {
+                SigningIdentity::Keychain(identity)
+            }),
     };
     match &identity {
         SigningIdentity::Keychain(identity) => println!("signing with {}", identity.name),

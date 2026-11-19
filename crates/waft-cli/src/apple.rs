@@ -2,9 +2,8 @@
 //! `Info.plist` has, the identities the keychain holds to sign one with, and signing with
 //! `codesign`.
 
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use anyhow::{Result, bail};
 use plist::{Dictionary, Value};
@@ -14,11 +13,11 @@ use crate::tools;
 use crate::usage_descriptions;
 
 /// A code signing identity in the keychain, as `security find-identity` lists it, with the team
-/// its certificate is issued to.
+/// its certificate is issued to where the certificate names one.
 pub struct Identity {
     pub hash: String,
     pub name: String,
-    pub team: String,
+    pub team: Option<String>,
 }
 
 /// What a bundle is signed with: ad hoc, which needs no certificate and vouches for nothing but
@@ -58,16 +57,21 @@ pub fn info_plist(project: &Project) -> Dictionary {
     info
 }
 
-/// The keychain's Apple Development certificate, of `team` when a machine has several.
-pub fn development_identity(team: Option<&str>) -> Result<Identity> {
+/// The keychain's Apple Development certificate, of `team` when a machine has several, with the
+/// team it is issued to.
+pub fn development_identity(team: Option<&str>) -> Result<(Identity, String)> {
     let development = keychain_identities()?
         .into_iter()
         .filter(|i| {
             i.name.starts_with("Apple Development") || i.name.starts_with("iPhone Developer")
         })
-        .find(|i| team.is_none_or(|team| i.team == team));
+        .find_map(|i| {
+            let issued = i.team.clone()?;
+            team.is_none_or(|team| issued == team)
+                .then_some((i, issued))
+        });
     match development {
-        Some(identity) => Ok(identity),
+        Some(chosen) => Ok(chosen),
         None => bail!(
             "no Apple Development certificate{}; sign in to Xcode once (Settings > Accounts) to create one",
             team.map(|t| format!(" for team {t}")).unwrap_or_default()
@@ -81,7 +85,7 @@ pub fn team(team: Option<&str>) -> Result<String> {
     if let Some(team) = team {
         return Ok(team.to_owned());
     }
-    let identity = keychain_identities()?.into_iter().find(|i| {
+    let team = keychain_identities()?.into_iter().find_map(|i| {
         [
             "Apple Development",
             "Apple Distribution",
@@ -90,9 +94,10 @@ pub fn team(team: Option<&str>) -> Result<String> {
         ]
         .iter()
         .any(|kind| i.name.starts_with(kind))
+        .then_some(i.team)?
     });
-    match identity {
-        Some(identity) => Ok(identity.team),
+    match team {
+        Some(team) => Ok(team),
         None => bail!(
             "no Apple team: name it as `team` in the metadata, or sign in to Xcode once (Settings > Accounts) to create a certificate"
         ),
@@ -146,7 +151,9 @@ pub fn sign(path: &Path, settings: &SigningSettings) -> Result<()> {
     tools::run(command.arg(path), "codesign")
 }
 
-/// Every valid code signing identity in the keychain whose certificate names its team.
+/// Every valid code signing identity in the keychain, with its certificate's team where it names
+/// one. Signing with an identity needs only its hash or name; the team matters only where one is
+/// chosen for a team, so an identity whose team cannot be read is kept, without it.
 fn keychain_identities() -> Result<Vec<Identity>> {
     let listing = tools::output(
         Command::new("security").args(["find-identity", "-v", "-p", "codesigning"]),
@@ -155,9 +162,9 @@ fn keychain_identities() -> Result<Vec<Identity>> {
     Ok(listing
         .lines()
         .filter_map(parse_identity)
-        .filter_map(|(hash, name)| {
-            let team = certificate_team(&hash, &name)?;
-            Some(Identity { hash, name, team })
+        .map(|(hash, name)| {
+            let team = certificate_team(&hash, &name);
+            Identity { hash, name, team }
         })
         .collect())
 }
@@ -177,8 +184,7 @@ fn certificate_team(hash: &str, name: &str) -> Option<String> {
         .output()
         .ok()?;
     let listing = String::from_utf8(listing.stdout).ok()?;
-    let subject = certificate_subject(certificate_pem(&listing, hash)?)?;
-    subject_team(&subject)
+    pem_team(certificate_pem(&listing, hash)?)
 }
 
 /// The PEM of the certificate `hash` names in `security find-certificate -Z -p`'s listing, each
@@ -192,31 +198,14 @@ fn certificate_pem<'a>(listing: &'a str, hash: &str) -> Option<&'a str> {
     after.get(start..end)
 }
 
-/// `openssl x509 -subject` of `pem`.
-fn certificate_subject(pem: &str) -> Option<String> {
-    let mut openssl = Command::new("openssl")
-        .args(["x509", "-noout", "-subject"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    openssl.stdin.take()?.write_all(pem.as_bytes()).ok()?;
-    let output = openssl.wait_with_output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// The organizational unit of `subject= /UID=…/CN=…/OU=A1B2C3D4E5/O=…/C=US`.
-fn subject_team(subject: &str) -> Option<String> {
-    let unit = subject.split_once("OU=")?.1;
-    let team: String = unit
-        .chars()
-        .take_while(char::is_ascii_alphanumeric)
-        .collect();
-    (!team.is_empty()).then_some(team)
+/// The organizational unit of the subject of the certificate `pem`, read from the certificate
+/// itself rather than from a tool's text of it, whose shape differs between OpenSSL and LibreSSL.
+fn pem_team(pem: &str) -> Option<String> {
+    let (_, pem) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
+    let certificate = pem.parse_x509().ok()?;
+    let unit = certificate.subject().iter_organizational_unit().next()?;
+    let team = unit.as_str().ok()?;
+    (!team.is_empty()).then(|| team.to_owned())
 }
 
 #[cfg(test)]
@@ -232,11 +221,34 @@ mod tests {
         assert_eq!(name, "Apple Development: Jane Doe (HOLDER1234)");
     }
 
+    /// A certificate whose subject names its holder `HOLDER1234` and its team `TEAM123456`, as an
+    /// Apple Development certificate does.
+    const DEVELOPMENT_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----
+MIIC7jCCApQCCQC0YtLWr8vmrDAKBggqhkjOPQQDAjCBhDEaMBgGCgmSJomT8ixk
+AQEMCkhPTERFUjEyMzQxMTAvBgNVBAMMKEFwcGxlIERldmVsb3BtZW50OiBKYW5l
+IERvZSAoSE9MREVSMTIzNCkxEzARBgNVBAsMClRFQU0xMjM0NTYxETAPBgNVBAoM
+CEphbmUgRG9lMQswCQYDVQQGEwJVUzAeFw0yNjExMTkwMTI1MjRaFw0zNjExMTYw
+MTI1MjRaMIGEMRowGAYKCZImiZPyLGQBAQwKSE9MREVSMTIzNDExMC8GA1UEAwwo
+QXBwbGUgRGV2ZWxvcG1lbnQ6IEphbmUgRG9lIChIT0xERVIxMjM0KTETMBEGA1UE
+CwwKVEVBTTEyMzQ1NjERMA8GA1UECgwISmFuZSBEb2UxCzAJBgNVBAYTAlVTMIIB
+SzCCAQMGByqGSM49AgEwgfcCAQEwLAYHKoZIzj0BAQIhAP////8AAAABAAAAAAAA
+AAAAAAAA////////////////MFsEIP////8AAAABAAAAAAAAAAAAAAAA////////
+///////8BCBaxjXYqjqT57PrvVV2mIa8ZR0GsMxTsPY7zjw+J9JgSwMVAMSdNgiG
+5wSTamZ44ROdJreBn36QBEEEaxfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiY
+wpZP40Li/hp/m47n60p8D54WK84zV2sxXs7LtkBoN79R9QIhAP////8AAAAA////
+//////+85vqtpxeehPO5ysL8YyVRAgEBA0IABARl3/bvu2QlfdWsb59U/kJA0344
+9oaLvc6hPjzuPZrpZuN6dncO65P8z2JjtRiKAH8ozC+Gg4SV08bnkIalEB4wCgYI
+KoZIzj0EAwIDSAAwRQIgBOUObMYD7AdIsEWJGtn2LiWGoV3jziFCk6htyDNuZuMC
+IQCtfNYiTNwYOPJac/n8W7tCPXcMZiPItUXB6O3KTahd+w==
+-----END CERTIFICATE-----";
+
     #[test]
     fn the_team_is_the_subjects_organizational_unit_not_the_holders_id() {
-        let subject = "subject= /UID=HOLDER1234/CN=Apple Development: Jane Doe (HOLDER1234)/OU=TEAM123456/O=Jane Doe/C=US";
-        assert_eq!(subject_team(subject).as_deref(), Some("TEAM123456"));
-        assert_eq!(subject_team("subject= /CN=Someone"), None);
+        assert_eq!(
+            pem_team(DEVELOPMENT_CERTIFICATE).as_deref(),
+            Some("TEAM123456")
+        );
+        assert_eq!(pem_team("not a certificate"), None);
     }
 
     #[test]
