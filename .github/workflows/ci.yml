@@ -48,7 +48,9 @@ jobs:
       # hold them to it), so macOS's run answers for them.
       - name: Tests
         shell: bash
-        run: cargo test $(.github/platform-test-packages.sh) --no-fail-fast
+        run: |
+          packages=$(.github/platform-test-packages.sh)
+          cargo test $packages --no-fail-fast
 
   linux:
     runs-on: ubuntu-latest
@@ -79,7 +81,8 @@ jobs:
         # parallel runs of it segfaulted before that and have not been retried on this host. Run
         # one test at a time until a Linux run says parallel is safe.
         run: |
-          cargo test $(.github/platform-test-packages.sh winui_gallery) --no-fail-fast
+          packages=$(.github/platform-test-packages.sh winui_gallery)
+          cargo test $packages --no-fail-fast
           RUST_TEST_THREADS=1 cargo test -p winui_gallery --no-fail-fast --test all
           cargo test -p winui_gallery --no-fail-fast \
             --lib --bins --test anchored_flyout --test navigation_scroll_viewport --test scroll_tab_viewer
