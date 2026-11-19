@@ -201,7 +201,7 @@ fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         "zipalign",
     )?;
     let apk = out.join(format!("{}.apk", project.package));
-    Signing::for_build(project, profile).sign(&sdk, java, &aligned, &apk)?;
+    Signing::for_build(project, profile)?.sign(&sdk, java, &aligned, &apk)?;
     Ok(Apk { path: apk, package })
 }
 
