@@ -156,6 +156,8 @@ try {
   const context = await newContext(browser, { permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   const consoleErrors = [];
+  await page.route('https://*.inset.rs/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body></body></html>' }));
+  await page.route('https://*.pages.dev/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body></body></html>' }));
   page.on('console', (message) => message.type() === 'error' && consoleErrors.push(message.text()));
   page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
 

@@ -23,20 +23,34 @@ const KITS: KitSpec[] = [
     crateName: 'waft-winui',
     galleryUrl: galleryUrls.winui,
     galleryLabel: 'WinUI Gallery',
-    code: `use waft::{App, BuildContext, IntoWidget, StatelessWidget, WidgetRef, run_app};
-use waft_winui::{Button, FluentApp, NavigationView, ToggleSwitch};
+    code: `use waft_foundation::{App, Handle};
+use waft_widgets::*;
+use waft_winui::*;
 
 #[waft::main]
 fn main(app: &mut App) {
-    run_app(app, FluentApp::new().home(Studio).into_widget());
+    winui_gallery::run(app);
 }
 
-impl StatelessWidget for Studio {
-    fn build(&self, _app: &mut App, _cx: BuildContext) -> WidgetRef {
-        NavigationView::new()
-            .pane_title("Atlas Studio")
-            .content(ToggleSwitch::new(true, |app, on| { /* ... */ }))
-            .footer(Button::accent("Export Build", Listener::new(|app| {})))
+impl State for GalleryRootState {
+    type Widget = GalleryRoot;
+    waft_widgets::state_accessors!();
+
+    fn build(
+        self: Handle<Self>,
+        app: &mut App,
+        _cx: BuildContext,
+    ) -> WidgetRef {
+        let feature = self.widget(app).initial_feature;
+        let mode = if app.get(self).dark {
+            FluentThemeMode::Dark
+        } else {
+            FluentThemeMode::Light
+        };
+        FluentApp::new()
+            .theme_mode(mode)
+            .title("WinUI Gallery")
+            .home(Gallery::new(feature))
             .into_widget()
     }
 }`,
@@ -47,21 +61,30 @@ impl StatelessWidget for Studio {
     crateName: 'waft-cupertino',
     galleryUrl: galleryUrls.cupertino,
     galleryLabel: 'Cupertino Gallery',
-    code: `use waft::{App, BuildContext, CustomScrollView, IntoWidget, StatelessWidget, WidgetRef, run_app};
-use waft_cupertino::{CupertinoApp, CupertinoSliverNavigationBar, CupertinoSwitch};
+    code: `use std::rc::Rc;
+use waft_cupertino::{CupertinoApp, CupertinoPageRoute};
+use waft_foundation::App;
+use waft_widgets::*;
 
 #[waft::main]
 fn main(app: &mut App) {
-    run_app(app, CupertinoApp::new().home(Studio).into_widget());
+    cupertino_gallery::run_gallery(app, None);
 }
 
-impl StatelessWidget for Studio {
-    fn build(&self, _app: &mut App, _cx: BuildContext) -> WidgetRef {
-        CustomScrollView::new()
-            .sliver(CupertinoSliverNavigationBar::new("Atlas Studio"))
-            .sliver(CupertinoSwitch::new(true, |app, on| { /* ... */ }))
-            .into_widget()
-    }
+pub fn gallery() -> CupertinoApp {
+    CupertinoApp::new()
+        .title("Cupertino Gallery")
+        .on_generate_route(|app, settings| {
+            let root = settings.name.as_deref() == Some("/");
+            root.then(|| {
+                let page: WidgetBuilder = Rc::new(|_, _| {
+                    pages::home::Home.into_widget()
+                });
+                CupertinoPageRoute::new(app, page)
+                    .title(app, "Gallery".to_owned())
+                    .into_erased()
+            })
+        })
 }`,
   },
   {
@@ -70,20 +93,37 @@ impl StatelessWidget for Studio {
     crateName: 'waft-material',
     galleryUrl: galleryUrls.material,
     galleryLabel: 'Material Gallery',
-    code: `use waft::{App, BuildContext, IntoWidget, StatelessWidget, WidgetRef, run_app};
-use waft_material::{AppBar, Card, FilledButton, MaterialApp, Scaffold, Switch};
+    code: `use waft_embedder::Brightness;
+use waft_foundation::{App, Handle};
+use waft_material::{Colors, MaterialApp, ThemeData};
+use waft_widgets::*;
 
 #[waft::main]
 fn main(app: &mut App) {
-    run_app(app, MaterialApp::new().home(Studio).into_widget());
+    material_gallery::run_gallery(app, None, None);
 }
 
-impl StatelessWidget for Studio {
-    fn build(&self, _app: &mut App, _cx: BuildContext) -> WidgetRef {
-        Scaffold::new()
-            .app_bar(AppBar::new("Atlas Studio"))
-            .body(Card::elevated().child(Switch::new(true)))
-            .floating_action(FilledButton::new("Export Build"))
+impl State for GalleryState {
+    type Widget = Gallery;
+    waft_widgets::state_accessors!();
+
+    fn build(
+        self: Handle<Self>,
+        app: &mut App,
+        _cx: BuildContext,
+    ) -> WidgetRef {
+        let seed = Colors::DEEP_PURPLE.primary();
+        let light = ThemeData::builder()
+            .color_scheme_seed(seed)
+            .build(app);
+        let dark = ThemeData::builder()
+            .brightness(Brightness::Dark)
+            .build(app);
+        MaterialApp::new()
+            .title("Material Gallery")
+            .theme(light)
+            .dark_theme(dark)
+            .home(Home::new(self.widget(app).opening))
             .into_widget()
     }
 }`,
@@ -92,10 +132,6 @@ impl StatelessWidget for Studio {
 
 export function HeroStudio() {
   const [activeKit, setActiveKit] = useState<KitId>('winui');
-  const [lowLatency, setLowLatency] = useState(true);
-  const [spatialDsp, setSpatialDsp] = useState(true);
-  const [midiSync, setMidiSync] = useState(false);
-  const [activeNav, setActiveNav] = useState<'audio' | 'shortcuts' | 'targets'>('audio');
   const [copiedCmd, setCopiedCmd] = useState(false);
 
   const spec = KITS.find((k) => k.id === activeKit) ?? KITS[0];
@@ -162,7 +198,7 @@ export function HeroStudio() {
               href={spec.galleryUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium transition hover:opacity-80"
+              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:opacity-80"
               style={{
                 background: 'var(--site-card)',
                 borderColor: 'var(--site-hairline-strong)',
@@ -172,284 +208,72 @@ export function HeroStudio() {
               <span>{spec.galleryLabel}</span>
               <ExternalLink className="size-3" />
             </a>
+
             <button
               type="button"
               onClick={copyCli}
               className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 font-mono text-[11.5px] transition hover:opacity-85"
               style={{
-                background: 'var(--site-card)',
+                background: 'var(--site-surface-strong)',
                 borderColor: 'var(--site-hairline-strong)',
                 color: 'var(--site-ink)',
               }}
-              title="Copy quickstart command"
+              title="Copy cargo waft quickstart command"
             >
               <span style={{ color: 'var(--site-accent)' }}>$</span>
               <span>cargo waft new notes</span>
-              {copiedCmd ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3 opacity-60" />}
+              {copiedCmd ? (
+                <Check className="size-3.5 text-emerald-700" />
+              ) : (
+                <Copy className="size-3.5" style={{ color: 'var(--site-subtle)' }} />
+              )}
             </button>
           </div>
         </div>
 
-        {/* Split body: Left 7 cols Rust Source, Right 5 cols Live Kit Preview */}
+        {/* Main Split: Rust Code Left (5 cols) | Live WebGPU Gallery Right (7 cols) */}
         <div className="grid grid-cols-1 lg:grid-cols-12">
-          {/* Left: Rust Code Pane */}
+          {/* Left: Rust Code View */}
           <div
-            className="border-b p-4 sm:p-6 lg:col-span-7 lg:border-r lg:border-b-0"
+            className="flex flex-col justify-between border-b p-5 sm:p-6 lg:col-span-5 lg:border-r lg:border-b-0"
             style={{
-              background: '#fcfbf9',
+              background: 'var(--site-code-bg)',
               borderColor: 'var(--site-hairline)',
             }}
           >
-            <RustCodeBlock
-              code={spec.code}
-              showLineNumbers
-              className="!rounded-none !border-0 !bg-transparent !p-0"
-            />
+            <RustCodeBlock code={spec.code} className="!border-0 !bg-transparent !p-0" />
           </div>
 
-          {/* Right: Interactive UI Kit Preview Surface */}
+          {/* Right: Real Live WebGPU Gallery Embed */}
           <div
-            className="site-dot-matrix flex flex-col justify-center p-5 sm:p-6 lg:col-span-5"
-            style={{ background: 'var(--site-surface)' }}
+            className="relative flex min-h-[580px] flex-col overflow-hidden lg:col-span-7"
+            style={{
+              background: activeKit === 'cupertino' ? 'var(--site-surface)' : '#ffffff',
+            }}
           >
-            {activeKit === 'winui' ? (
-              <div
-                className="overflow-hidden rounded-xl border bg-white text-[#18181b] shadow-[0_14px_34px_-14px_rgba(0,0,0,0.16)]"
-                style={{ borderColor: 'rgba(20,20,19,0.14)' }}
-              >
-                <div className="flex items-center justify-between border-b border-black/[0.07] bg-[#f6f6f7] px-3.5 py-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="size-2.5 rounded-full bg-[#ff5f57]" />
-                    <span className="size-2.5 rounded-full bg-[#febc2e]" />
-                    <span className="size-2.5 rounded-full bg-[#28c840]" />
-                    <span className="ml-2 text-[11.5px] font-semibold text-zinc-800">Atlas Studio</span>
-                  </div>
-                  <span className="rounded bg-[#005fb8]/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#005fb8]">
-                    FluentApp
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-12">
-                  <div className="col-span-4 border-r border-black/[0.06] bg-[#fafafa] p-2 text-[11.5px]">
-                    {(
-                      [
-                        ['audio', 'Audio Engine'],
-                        ['shortcuts', 'Shortcuts'],
-                        ['targets', 'Build Targets'],
-                      ] as const
-                    ).map(([id, title]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setActiveNav(id)}
-                        className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left font-medium transition"
-                        style={{
-                          background: activeNav === id ? 'rgba(0, 95, 184, 0.1)' : 'transparent',
-                          color: activeNav === id ? '#005fb8' : '#52525b',
-                        }}
-                      >
-                        <span
-                          className="h-3 w-0.5 rounded-full"
-                          style={{ background: activeNav === id ? '#005fb8' : 'transparent' }}
-                        />
-                        {title}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="col-span-8 space-y-2.5 p-3.5">
-                    <div className="flex items-center justify-between rounded-lg border border-black/[0.07] bg-[#fcfcfd] px-3 py-2">
-                      <div>
-                        <div className="text-[12px] font-semibold">Low-Latency Audio</div>
-                        <div className="text-[10.5px] text-zinc-500">Exclusive 48 kHz CoreAudio / WASAPI</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setLowLatency(!lowLatency)}
-                        aria-label="Toggle Low-Latency Audio"
-                        className="relative h-5 w-9 rounded-full transition"
-                        style={{ background: lowLatency ? '#005fb8' : '#d4d4d8' }}
-                      >
-                        <span
-                          className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                          style={{ left: lowLatency ? '18px' : '2px' }}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-lg border border-black/[0.07] bg-[#fcfcfd] px-3 py-2">
-                      <div>
-                        <div className="text-[12px] font-semibold">Spatial Binaural DSP</div>
-                        <div className="text-[10.5px] text-zinc-500">wgpu compute shader convolution</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSpatialDsp(!spatialDsp)}
-                        aria-label="Toggle Spatial Binaural DSP"
-                        className="relative h-5 w-9 rounded-full transition"
-                        style={{ background: spatialDsp ? '#005fb8' : '#d4d4d8' }}
-                      >
-                        <span
-                          className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                          style={{ left: spatialDsp ? '18px' : '2px' }}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="font-mono text-[10.5px] text-zinc-500">
-                        {lowLatency && spatialDsp ? 'DSP buffer: 2.6 ms' : 'DSP buffer: 5.3 ms'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setMidiSync(!midiSync)}
-                        className="rounded-md bg-[#005fb8] px-3 py-1 text-[11.5px] font-medium text-white shadow-xs transition hover:bg-[#00529e]"
-                      >
-                        {midiSync ? 'Build Exported ✓' : 'Export Build'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : activeKit === 'cupertino' ? (
-              <div
-                className="mx-auto w-full max-w-[300px] overflow-hidden rounded-[24px] border bg-[#f2f2f7] text-[#1c1c1e] shadow-[0_14px_34px_-14px_rgba(0,0,0,0.18)]"
-                style={{ borderColor: 'rgba(20,20,19,0.16)' }}
-              >
-                <div className="border-b border-black/[0.07] bg-white/90 px-4 pt-2.5 pb-2 backdrop-blur">
-                  <div className="flex items-center justify-between text-[10.5px] font-semibold text-zinc-500">
-                    <span>9:41</span>
-                    <span className="font-mono text-[10px] text-[#007aff]">CupertinoApp</span>
-                    <span>100%</span>
-                  </div>
-                  <div className="mt-2 flex items-baseline justify-between">
-                    <span className="text-[19px] font-bold tracking-tight text-black">Atlas Studio</span>
-                    <span className="text-[12px] font-medium text-[#007aff]">Done</span>
-                  </div>
-                </div>
-
-                <div className="p-3.5">
-                  <div className="divide-y divide-black/[0.07] overflow-hidden rounded-xl bg-white shadow-xs">
-                    <div className="flex items-center justify-between px-3 py-2.5">
-                      <div>
-                        <div className="text-[12.5px] font-medium">Low-Latency Audio</div>
-                        <div className="text-[10.5px] text-zinc-500">48 kHz AAudio / CoreAudio</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setLowLatency(!lowLatency)}
-                        className="relative h-5 w-9 rounded-full transition"
-                        style={{ background: lowLatency ? '#34c759' : '#e5e5ea' }}
-                      >
-                        <span
-                          className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                          style={{ left: lowLatency ? '18px' : '2px' }}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between px-3 py-2.5">
-                      <div>
-                        <div className="text-[12.5px] font-medium">Spatial Binaural</div>
-                        <div className="text-[10.5px] text-zinc-500">Metal / Vulkan compute</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSpatialDsp(!spatialDsp)}
-                        className="relative h-5 w-9 rounded-full transition"
-                        style={{ background: spatialDsp ? '#34c759' : '#e5e5ea' }}
-                      >
-                        <span
-                          className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                          style={{ left: spatialDsp ? '18px' : '2px' }}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between px-3 py-2.5">
-                      <div>
-                        <div className="text-[12.5px] font-medium">MIDI Clock Sync</div>
-                        <div className="text-[10.5px] text-zinc-500">Sheet & gesture navigation</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setMidiSync(!midiSync)}
-                        className="relative h-5 w-9 rounded-full transition"
-                        style={{ background: midiSync ? '#34c759' : '#e5e5ea' }}
-                      >
-                        <span
-                          className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                          style={{ left: midiSync ? '18px' : '2px' }}
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex justify-center">
-                    <div className="h-1 w-24 rounded-full bg-black/25" />
-                  </div>
+            {activeKit === 'cupertino' ? (
+              <div className="flex flex-1 items-center justify-center p-4 sm:p-6">
+                <div
+                  className="h-[540px] w-full max-w-[390px] overflow-hidden rounded-[32px] border bg-white shadow-[0_18px_45px_-18px_rgba(20,20,19,0.22)]"
+                  style={{ borderColor: 'rgba(20,20,19,0.14)' }}
+                >
+                  <iframe
+                    key={spec.galleryUrl}
+                    src={spec.galleryUrl}
+                    title={spec.galleryLabel}
+                    className="h-full w-full border-0"
+                    allow="clipboard-read; clipboard-write"
+                  />
                 </div>
               </div>
             ) : (
-              <div
-                className="overflow-hidden rounded-2xl border bg-[#fef7ff] text-[#1d1b20] shadow-[0_14px_34px_-14px_rgba(0,0,0,0.16)]"
-                style={{ borderColor: 'rgba(0,0,0,0.12)' }}
-              >
-                <div className="flex items-center justify-between bg-[#f3edf7] px-4 py-3">
-                  <div>
-                    <div className="text-[14px] font-semibold text-[#1d1b20]">Atlas Studio</div>
-                    <div className="font-mono text-[10.5px] text-[#6750a4]">MaterialApp</div>
-                  </div>
-                  <span className="rounded-full bg-[#eaddff] px-2.5 py-0.5 text-[11px] font-semibold text-[#21005d]">
-                    48 kHz
-                  </span>
-                </div>
-                <div className="space-y-2.5 p-4">
-                  <div className="flex items-center justify-between rounded-xl bg-[#f3edf7] px-3.5 py-2.5">
-                    <div>
-                      <div className="text-[12.5px] font-medium">Low-Latency Audio Pipeline</div>
-                      <div className="text-[10.5px] text-zinc-600">Direct GPU & audio callbacks</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setLowLatency(!lowLatency)}
-                      className="relative h-5 w-9 rounded-full transition"
-                      style={{ background: lowLatency ? '#6750a4' : '#cac4d0' }}
-                    >
-                      <span
-                        className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                        style={{ left: lowLatency ? '18px' : '2px' }}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl bg-[#f3edf7] px-3.5 py-2.5">
-                    <div>
-                      <div className="text-[12.5px] font-medium">Spatial Binaural Compute</div>
-                      <div className="text-[10.5px] text-zinc-600">Pure Rust valo + wgpu</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSpatialDsp(!spatialDsp)}
-                      className="relative h-5 w-9 rounded-full transition"
-                      style={{ background: spatialDsp ? '#6750a4' : '#cac4d0' }}
-                    >
-                      <span
-                        className="absolute top-0.5 size-4 rounded-full bg-white shadow transition-all"
-                        style={{ left: spatialDsp ? '18px' : '2px' }}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex justify-end pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setMidiSync(!midiSync)}
-                      className="rounded-full bg-[#6750a4] px-4 py-1.5 text-[12px] font-medium text-white shadow-xs"
-                    >
-                      Export Build
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <iframe
+                key={spec.galleryUrl}
+                src={spec.galleryUrl}
+                title={spec.galleryLabel}
+                className="h-[580px] w-full flex-1 border-0"
+                allow="clipboard-read; clipboard-write"
+              />
             )}
           </div>
         </div>

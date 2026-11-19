@@ -85,20 +85,7 @@ export default function HomePage() {
                 >
                   <span>Documentation</span>
                 </Link>
-                <a
-                  href={githubUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-10 items-center gap-1.5 rounded-xl border px-4 text-[13.5px] font-medium transition hover:opacity-80"
-                  style={{
-                    background: 'var(--site-card)',
-                    borderColor: 'var(--site-hairline-strong)',
-                    color: 'var(--site-ink)',
-                  }}
-                >
-                  <span>GitHub</span>
-                  <ExternalLink className="size-3.5" />
-                </a>
+
               </div>
             </div>
           </div>
