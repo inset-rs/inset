@@ -134,7 +134,7 @@ async function checkHome(page) {
   const links = await page.locator('#nd-home-layout a').evaluateAll((els) => els.map((el) => el.getAttribute('href')));
   check('links WinUI Gallery', links.includes('https://winui-gallery.inset.rs'));
   check('links Cupertino Gallery', links.includes('https://cupertino-gallery.inset.rs'));
-  check('links Material Gallery', links.includes('https://material-gallery.inset.rs'));
+  check('links Material Gallery', links.includes('https://material-gallery.pages.dev'));
   await page.getByRole('button', { name: /Cupertino\s+waft-cupertino/ }).click();
   const cupertinoCode = await page.locator('pre').first().innerText();
   check('switching to Cupertino updates the studio code', cupertinoCode.includes('CupertinoApp::new()'));

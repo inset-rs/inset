@@ -18,7 +18,7 @@ export const cratesIoUrl = 'https://crates.io/crates/waft';
 export const docsRsUrl = 'https://docs.rs/waft';
 export const winuiGalleryUrl = 'https://winui-gallery.inset.rs';
 export const cupertinoGalleryUrl = 'https://cupertino-gallery.inset.rs';
-export const materialGalleryUrl = 'https://material-gallery.inset.rs';
+export const materialGalleryUrl = 'https://material-gallery.pages.dev';
 export const edgedUrl = 'https://edged2.app';
 export const waosUrl = 'https://waos.app';
 
