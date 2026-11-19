@@ -12,6 +12,7 @@ mod cargo;
 mod carried;
 mod devices;
 mod doctor;
+mod environment;
 mod file_associations;
 mod icons;
 mod ios;

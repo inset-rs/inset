@@ -156,7 +156,7 @@ fn target(installed: &[String], triple: &str) {
 }
 
 fn env_present(name: &str, effect: &str) {
-    if std::env::var_os(name).is_some() {
+    if crate::environment::var_os(name).is_some() {
         ok(&format!("{name} set: {effect}"));
     } else {
         note(&format!("{name} unset: {effect} when set"));

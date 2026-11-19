@@ -35,7 +35,7 @@ struct Submission {
 impl Notarization {
     /// The credentials the environment holds; `None` where it holds none.
     pub fn from_env() -> Result<Option<Notarization>> {
-        let credentials = credentials(|name| std::env::var_os(name))?;
+        let credentials = credentials(crate::environment::var_os)?;
         Ok(credentials.map(|credentials| Notarization { credentials }))
     }
 
