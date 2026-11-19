@@ -4,6 +4,7 @@ import { ArchitectureExplorer } from '@/components/architecture-explorer';
 import { RustCodeBlock, ShellCodeBlock } from '@/components/code-highlight';
 import { DesktopMobileParity } from '@/components/desktop-mobile-parity';
 import { HeroStudio } from '@/components/hero-studio';
+import { RichInterfaces } from '@/components/rich-interfaces';
 import {
   description,
   edgedUrl,
@@ -167,6 +168,9 @@ export default function HomePage() {
 
       {/* 3. Desktop & Mobile First-Class Kits + valo/wgpu Performance */}
       <DesktopMobileParity />
+
+      {/* 4. Rich Media, Zero-Copy Compositing & Built-in Desktop/Platform Interfaces */}
+      <RichInterfaces />
 
       {/* 4. Headless Testing & cargo waft CLI */}
       <section className="px-4 py-16 sm:px-6 sm:py-20">
