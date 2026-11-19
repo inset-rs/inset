@@ -132,10 +132,10 @@ impl Signing {
 /// `APPLE_SIGNING_IDENTITY`'s identity, `-` meaning ad hoc; else the keychain's Apple
 /// Development certificate; else ad hoc.
 fn signing_identity(project: &Project) -> Result<SigningIdentity> {
-    let identity = match std::env::var("APPLE_SIGNING_IDENTITY") {
-        Ok(named) if named == "-" => SigningIdentity::AdHoc,
-        Ok(named) => SigningIdentity::Keychain(apple::keychain_identity(&named)?),
-        Err(_) => apple::development_identity(project.macos.team.as_deref())
+    let identity = match crate::environment::var("APPLE_SIGNING_IDENTITY") {
+        Some(named) if named == "-" => SigningIdentity::AdHoc,
+        Some(named) => SigningIdentity::Keychain(apple::keychain_identity(&named)?),
+        None => apple::development_identity(project.macos.team.as_deref())
             .map_or(SigningIdentity::AdHoc, SigningIdentity::Keychain),
     };
     match &identity {
@@ -146,7 +146,7 @@ fn signing_identity(project: &Project) -> Result<SigningIdentity> {
 }
 
 fn named_identity_is_set() -> bool {
-    std::env::var("APPLE_SIGNING_IDENTITY").is_ok_and(|named| named != "-")
+    crate::environment::var("APPLE_SIGNING_IDENTITY").is_some_and(|named| named != "-")
 }
 
 /// The `.app` for distribution, notarized and stapled when `signing` holds credentials.
