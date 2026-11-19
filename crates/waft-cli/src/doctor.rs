@@ -97,6 +97,10 @@ pub fn report() -> Result<()> {
     );
 
     section("Android");
+    env_present(
+        "WAFT_ANDROID_KEYSTORE",
+        "signs release .apks with WAFT_ANDROID_KEY_ALIAS and WAFT_ANDROID_STORE_PASSWORD_FILE",
+    );
     match android::sdk() {
         Ok(sdk) => {
             ok(&format!("SDK: {}", sdk.root.display()));

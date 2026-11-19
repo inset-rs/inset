@@ -196,7 +196,7 @@ pub struct AndroidMetadata {
 
 /// An Android app's release key: a key in a keystore, whose passwords the metadata only says where
 /// to find, for apksigner to read.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReleaseKey {
     /// The keystore, relative to the package root.
@@ -210,7 +210,7 @@ pub struct ReleaseKey {
 
 /// Where a password is: `{ env = "NAME" }`, an environment variable, or `{ file = "path" }`, a
 /// file's first line, the path relative to the package root. Never the password itself.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase", deny_unknown_fields)]
 pub enum Secret {
     Env(String),
