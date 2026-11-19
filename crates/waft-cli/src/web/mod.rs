@@ -35,7 +35,15 @@ pub fn build(project: &Project, profile: Profile) -> Result<PathBuf> {
         profile,
         triple: Some(WASM_TARGET),
         artifact: Artifact::Wasm(library),
-        env: Vec::new(),
+        env: if profile.is_release() {
+            vec![
+                ("CARGO_PROFILE_RELEASE_LTO", "thin".to_owned()),
+                ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "s".to_owned()),
+                ("CARGO_PROFILE_RELEASE_STRIP", "symbols".to_owned()),
+            ]
+        } else {
+            Vec::new()
+        },
         link_inputs: Vec::new(),
     })?;
 
@@ -98,6 +106,7 @@ fn optimize(module: &Path) -> Result<()> {
         Command::new(wasm_opt)
             .args([
                 "-Os",
+                "--strip-debug",
                 "--enable-bulk-memory",
                 "--enable-nontrapping-float-to-int",
                 "-o",

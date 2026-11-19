@@ -18,6 +18,7 @@ export const cratesIoUrl = 'https://crates.io/crates/waft';
 export const docsRsUrl = 'https://docs.rs/waft';
 export const winuiGalleryUrl = 'https://winui-gallery.inset.rs';
 export const cupertinoGalleryUrl = 'https://cupertino-gallery.inset.rs';
+export const materialGalleryUrl = 'https://material-gallery.inset.rs';
 export const edgedUrl = 'https://edged2.app';
 export const waosUrl = 'https://waos.app';
 
@@ -28,4 +29,8 @@ export function agentPrompt(idea?: string, origin = siteOrigin()): string {
 }
 
 export const githubUrl = repositoryUrl;
-export const galleryUrls = { winui: winuiGalleryUrl, cupertino: cupertinoGalleryUrl } as const;
+export const galleryUrls = {
+  winui: winuiGalleryUrl,
+  cupertino: cupertinoGalleryUrl,
+  material: materialGalleryUrl,
+} as const;

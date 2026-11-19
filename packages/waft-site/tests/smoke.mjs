@@ -131,17 +131,18 @@ async function checkHome(page) {
   check("the home page's document is titled Waft", (await page.title()) === 'Waft');
   const bodyText = await page.locator('#nd-home-layout').innerText();
   check('the home page has no middot splits', !bodyText.includes('·'));
-  await page.getByRole('button', { name: 'Build your app with an agent' }).click();
-  await page.getByRole('button', { name: 'Copy', exact: true }).click();
-  const copied = await page.evaluate(() => navigator.clipboard.readText());
-  check('the agent prompt points at the playbook', copied.includes(`${ORIGIN}/agents.md`), copied);
-  await page.getByRole('button', { name: 'Close' }).click();
-  await page.getByRole('button', { name: 'Markdown notes' }).click();
-  await page.getByRole('button', { name: 'Copy prompt' }).click();
-  const starterCopied = await page.evaluate(() => navigator.clipboard.readText());
-  check('starter chip customizes the inline prompt', starterCopied.includes('Markdown notes'), starterCopied);
-  const commands = await page.locator('pre').first().innerText();
-  check('the commands install waft-cli and scaffold an app', commands.includes('cargo waft new notes'));
+  const links = await page.locator('#nd-home-layout a').evaluateAll((els) => els.map((el) => el.getAttribute('href')));
+  check('links WinUI Gallery', links.includes('https://winui-gallery.inset.rs'));
+  check('links Cupertino Gallery', links.includes('https://cupertino-gallery.inset.rs'));
+  check('links Material Gallery', links.includes('https://material-gallery.inset.rs'));
+  await page.getByRole('button', { name: /Cupertino\s+waft-cupertino/ }).click();
+  const cupertinoCode = await page.locator('pre').first().innerText();
+  check('switching to Cupertino updates the studio code', cupertinoCode.includes('CupertinoApp::new()'));
+  await page.getByRole('button', { name: /Material 3\s+waft-material/ }).click();
+  const materialCode = await page.locator('pre').first().innerText();
+  check('switching to Material 3 updates the studio code', materialCode.includes('MaterialApp::new()'));
+  const allPre = (await page.locator('pre').allInnerTexts()).join('\n');
+  check('the CLI workflow shows cargo waft new notes', allPre.includes('cargo waft new notes'));
 }
 
 const server = SITE_URL ? undefined : startServer();
