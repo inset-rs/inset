@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Waft logo</title>
+  <desc>Three solid rounded layers drifting up and to the right, from the back to the front.</desc>
+  <rect x="64" y="240" width="240" height="192" rx="48" fill="#3D3D3D"/>
+  <rect x="136" y="160" width="240" height="192" rx="48" fill="#8C8C8C"/>
+  <rect x="208" y="80" width="240" height="192" rx="48" fill="#F2F2F2"/>
+</svg>

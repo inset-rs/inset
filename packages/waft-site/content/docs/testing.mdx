@@ -1,0 +1,37 @@
+---
+title: Testing
+description: Test logic, Entity state, and widget trees headlessly with AppCell and waft-test.
+---
+## Testing Logic and Entity State with `AppCell`
+
+The logic and state layers ([Architecture](/docs/architecture#logic-state-and-ui)) are tested with `cargo test` on your machine, with no display: the logic as plain Rust, and the state under an `AppCell`, which holds an `App`. `cell.checkpoint()` runs the tasks and posts that are ready, and `cell.elapse(duration)` moves the app's clock forward, firing the timers that come due and running what they start:
+
+```rust
+#[test]
+fn a_timer_adds_one() {
+    let cell = AppCell::new();
+    let tally = cell.borrow_mut().new_entity(|_cx| Tally::default());
+    let adding = tally.clone();
+    Timer::new(
+        &mut cell.borrow_mut(),
+        Duration::from_secs(3),
+        Listener::new(move |app| adding.update(app, |tally, _cx| tally.add())),
+    );
+    cell.elapse(Duration::from_secs(3));
+    assert_eq!(tally.read(&cell.borrow()).count, 1);
+}
+```
+
+## Full Widget and Host Testing with `waft-test`
+
+For testing widget trees, menus, file dialogs, clipboard, media, and rendering without opening a real OS window, add [`waft-test`](https://docs.rs/waft-test) to `[dev-dependencies]`:
+
+```toml
+[dev-dependencies]
+waft-test = "0.8"
+```
+
+`waft-test` provides:
+- `TestPlatform`, `TestDispatcher`, `TestView`, and `TestViewHost` (modeled after `flutter_test`'s `TestPlatformDispatcher` and `TestFlutterView`)
+- Mock host services: `MockClipboard`, `MockMenuBar`, `MockPopupMenus`, `MockDockMenu`, `MockTrayIcons`, `MockFileDialogs` (`MemoryFile`, `MemoryFolder`), `MockHttpClient`, `MockNotifications`, `MockOpener`, `MockCompositor`, `MockPlayers`, `MockCameras`, and `MockImageCodecs`
+- `object_snapshot` and `assert_no_new_objects` (in debug builds) to verify that widget lifecycles leave no leaked objects in the `App` arena.

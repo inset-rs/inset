@@ -1,0 +1,40 @@
+---
+title: Reference
+description: All published Waft crates on docs.rs and crates.io.
+---
+Every Waft crate is a standard Rust package published on [crates.io](https://crates.io/crates/waft) with full API documentation on [docs.rs](https://docs.rs/waft). You can also run `cargo doc --open` inside your app's folder to browse offline documentation for the exact versions in your `Cargo.lock`.
+
+## Main Crates and UI Kits
+
+| Crate | docs.rs | Role |
+| --- | --- | --- |
+| `waft` | [docs.rs/waft](https://docs.rs/waft/latest/waft/) | Top-level re-export crate: `App`, `Entity`, `Ref`, `Handle`, core widgets, and `#[waft::main]` |
+| `waft-winui` | [docs.rs/waft-winui](https://docs.rs/waft-winui/latest/waft_winui/) | Microsoft WinUI 3 / Fluent controls, themes, dialogs, flyouts, and navigation |
+| `waft-cupertino` | [docs.rs/waft-cupertino](https://docs.rs/waft-cupertino/latest/waft_cupertino/) | iOS / Cupertino widgets, sliver navigation bars, sheets, alerts, and scroll physics |
+| `waft-material` | [docs.rs/waft-material](https://docs.rs/waft-material/latest/waft_material/) | Material Design 3 widgets, scaffolds, app bars, and dynamic color schemes |
+| `waft-markdown` | [docs.rs/waft-markdown](https://docs.rs/waft-markdown/latest/waft_markdown/) | Markdown parser and scrollable / inline Markdown widgets |
+| `waft-cli` | [crates.io/crates/waft-cli](https://crates.io/crates/waft-cli) | The `cargo waft` CLI for scaffolding, running on devices, and building signed packages |
+| `waft-test` | [docs.rs/waft-test](https://docs.rs/waft-test/latest/waft_test/) | Headless `TestPlatform`, `TestView`, mock host services, and arena leak checks |
+
+## Framework Layer Crates
+
+| Crate | docs.rs | Role |
+| --- | --- | --- |
+| `waft-embedder` | [docs.rs/waft-embedder](https://docs.rs/waft-embedder/latest/waft_embedder/) | `dart:ui` value types and host embedder traits |
+| `waft-foundation` | [docs.rs/waft-foundation](https://docs.rs/waft-foundation/latest/waft_foundation/) | `App`, `AppCell`, `Entity<T>`, `Ref<T>`, `Handle<T>`, `Timer`, and `ChangeNotifier` |
+| `waft-scheduler` | [docs.rs/waft-scheduler](https://docs.rs/waft-scheduler/latest/waft_scheduler/) | Frame callbacks, tickers, and animation scheduling |
+| `waft-animation` | [docs.rs/waft-animation](https://docs.rs/waft-animation/latest/waft_animation/) | `AnimationController`, curves, tweens, and status listeners |
+| `waft-physics` | [docs.rs/waft-physics](https://docs.rs/waft-physics/latest/waft_physics/) | Spring, friction, gravity, and scroll simulations |
+| `waft-gestures` | [docs.rs/waft-gestures](https://docs.rs/waft-gestures/latest/waft_gestures/) | Pointer routing, tap, drag, pan, scale, and velocity trackers |
+| `waft-services` | [docs.rs/waft-services](https://docs.rs/waft-services/latest/waft_services/) | Keyboard keys (`LogicalKeyboardKey`), text input, clipboard, and asset bundles |
+| `waft-painting` | [docs.rs/waft-painting](https://docs.rs/waft-painting/latest/waft_painting/) | `TextStyle`, `TextPainter`, `EdgeInsets`, `BoxDecoration`, gradients, and image cache |
+| `waft-rendering` | [docs.rs/waft-rendering](https://docs.rs/waft-rendering/latest/waft_rendering/) | `RenderObject`, box and sliver layout protocols, hit testing, and composited layers |
+| `waft-widgets` | [docs.rs/waft-widgets](https://docs.rs/waft-widgets/latest/waft_widgets/) | `StatelessWidget`, `StatefulWidget`, `Element`, flex/stack/scroll widgets, `Navigator`, and `Focus` |
+| `waft-shell` | [docs.rs/waft-shell](https://docs.rs/waft-shell/latest/waft_shell/) | Bridges an embedder `Platform` to an `App` instance and render pipeline |
+| `waft-single-instance` | [docs.rs/waft-single-instance](https://docs.rs/waft-single-instance/latest/waft_single_instance/) | Forwards second-launch command-line arguments to the running desktop instance |
+
+## Look further
+
+- What a core widget does: [Flutter's API documentation](https://api.flutter.dev)
+- What a WinUI control does: [Microsoft WinUI 3 Controls](https://learn.microsoft.com/windows/apps/design/controls/)
+- Source repository: [github.com/waos-dev/waft](https://github.com/waos-dev/waft)

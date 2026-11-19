@@ -1,0 +1,71 @@
+---
+title: Start
+description: Install cargo-waft, scaffold a Rust app, run it on desktop or simulator, and package it.
+---
+`cargo waft` scaffolds, runs, and packages a Waft app for desktop, iOS, Android, the web, and WASI hosts from one standard Rust library crate.
+
+## 1. Install `cargo waft`
+
+```sh
+cargo install waft-cli
+cargo waft doctor
+```
+
+`cargo waft doctor` checks which platforms this machine can build for (macOS, iOS, Android SDK/NDK/JDK, Windows, Linux, and Web) and tells you how to install any missing toolchains.
+
+## 2. Create an app
+
+```sh
+cargo waft new myapp --template winui    # or --template cupertino (default)
+cd myapp
+```
+
+This writes a standard Cargo package whose app lives in `src/lib.rs` (compiled as both `rlib` and `cdylib` so Android and the browser can load it) alongside a thin `src/main.rs` desktop entry point and a `rust-toolchain.toml` pinning nightly Rust (required for `arbitrary_self_types` on `Handle<Self>`).
+
+```rust
+#![feature(arbitrary_self_types)]
+
+use waft::{App, BuildContext, Center, IntoWidget, StatelessWidget, Text, WidgetRef, run_app};
+use waft_cupertino::{CupertinoApp, CupertinoPageScaffold};
+
+#[waft::main]
+fn main(app: &mut App) {
+    run_app(app, CupertinoApp::new().home(Home).into_widget());
+}
+
+#[derive(Debug)]
+struct Home;
+
+impl StatelessWidget for Home {
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        CupertinoPageScaffold::new(Center::new().child(Text::new("Hello, Waft"))).into_widget()
+    }
+}
+```
+
+## 3. Run on a device
+
+`cargo waft devices` lists every target available on your machine. Pass `-d` to `cargo waft run`:
+
+```sh
+cargo waft run                        # this desktop (macOS, Windows, or Linux)
+cargo waft run -d ios                 # an iOS simulator or connected iPhone
+cargo waft run -d android             # an Android emulator or connected device
+cargo waft run -d web                 # a browser (WebGPU / WebGL2)
+```
+
+## 4. Build a distributable
+
+`cargo waft build <target>` produces an optimized native bundle or installer under `target/waft/`:
+
+```sh
+cargo waft build dmg                  # macOS .dmg (or `macos` for the .app bundle)
+cargo waft build msi                  # Windows WiX .msi (or `nsis` / `windows`)
+cargo waft build deb                  # Linux .deb (or `appimage` / `linux`)
+cargo waft build ipa                  # iOS .ipa (or `ios --simulator`)
+cargo waft build apk                  # Android 64-bit ARM .apk
+cargo waft build web                  # Static web folder (index.html, app.js, app_bg.wasm)
+cargo waft build wasm                 # wasm32-wasip2 component (<package>.wasm)
+```
+
+For `[package.metadata.waft]` configuration, icons, file associations, Android `.aar` libraries, and code signing, see [CLI and packaging](/docs/cli).

@@ -1,0 +1,139 @@
+---
+title: Architecture
+description: "Flutter's widget model and GPUI's Entity state in pure Rust: logic, state, and UI."
+---
+Waft is Flutter's framework ported to Rust, with three kits of controls: WinUI's ([`waft-winui`](https://docs.rs/waft-winui)), Cupertino's ([`waft-cupertino`](https://docs.rs/waft-cupertino)) and Material's ([`waft-material`](https://docs.rs/waft-material)). Its widgets have Flutter's names and behave as Flutter's do, so Flutter's documentation tells what a widget does. These pages explain how a Waft app is put together and where Waft differs.
+
+**`Ref` models Flutter's objects and their relations; `Entity` is for writing the app's logic.** A text field's controller, a focus node, a route or an animation is a Flutter object, made by Waft and kept by a `Ref` in the `App`'s arena ([Handles and ownership](/docs/handles)). The app's own data, and the code that changes it, live in `Entity<T>` handles, which widgets read in `build`. Most widgets are therefore thin `StatelessWidget`s. A `StatefulWidget` is only for a widget that owns a Flutter object of its own, such as a text field's controller ([State](/docs/state)).
+
+## Logic, state and UI
+
+An app is structured into three layers:
+
+- **Logic:** the app's rules as plain Rust, which names neither `App` nor `Entity`, so it runs and is tested on its own.
+- **State:** entities over the logic, where `App`, `Entity`, tasks and timers are used. Reading an entity in `build` subscribes the widget to it, and `cx.notify()` rebuilds every widget that read it. This layer depends only on `waft-foundation`, so it is tested headlessly with `AppCell` and no display ([Testing](/docs/testing)).
+- **UI:** thin widgets, which read entities in `build` and call the state's methods from callbacks.
+
+A clock that ticks each second and loads a quote in an async task:
+
+```rust
+use std::time::Duration;
+use waft::*;
+use waft_winui::*;
+
+/// Logic: plain Rust.
+#[derive(Default)]
+struct Clock {
+    seconds: u64,
+    quote: Option<String>,
+}
+
+/// State: an entity over the logic, and the work that changes it.
+#[derive(Clone, Debug)]
+struct ClockModel {
+    clock: Entity<Clock>,
+}
+
+impl ClockModel {
+    fn new(app: &mut App) -> ClockModel {
+        let model = ClockModel { clock: app.new_entity(|_cx| Clock::default()) };
+        let clock = model.clock.clone();
+        Timer::periodic(app, Duration::from_secs(1), move |app, _each| {
+            clock.update(app, |clock, cx| {
+                clock.seconds += 1;
+                cx.notify();
+            });
+        });
+        model
+    }
+
+    /// Loads a quote in a task, while the window goes on drawing.
+    fn load_quote(&self, app: &mut App) {
+        let clock = self.clock.clone();
+        app.spawn(async move |cx| {
+            let quote = "Simple things should be simple.".to_owned();
+            cx.update(|app| {
+                clock.update(app, |clock, cx| {
+                    clock.quote = Some(quote);
+                    cx.notify();
+                });
+            });
+        });
+    }
+}
+
+/// UI: reads the entity in build, calls the model from callbacks.
+#[derive(Debug)]
+struct Home {
+    model: ClockModel,
+}
+
+impl StatelessWidget for Home {
+    fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let (seconds, quote) = {
+            let clock = self.model.clock.read(app);
+            (clock.seconds, clock.quote.clone())
+        };
+        let seconds = Text::new(format!("{seconds} seconds"));
+        let quote = Text::new(quote.unwrap_or_else(|| "No quote yet".to_owned()));
+        let model = self.model.clone();
+        let load = Button::text("Load a quote", Listener::new(move |app| model.load_quote(app)));
+        Column::new()
+            .spacing(12.0)
+            .children([seconds.into_widget(), quote.into_widget(), load.into_widget()])
+            .into_widget()
+    }
+}
+```
+
+The app creates its model once in `main` and hands it to the root widget:
+
+```rust
+#[waft::main]
+fn main(app: &mut App) {
+    let model = ClockModel::new(app);
+    let window = WindowConfig { size: [1080.0, 780.0], ..WindowConfig::default() };
+    run_app_with(
+        app,
+        FluentApp::new()
+            .debug_show_checked_mode_banner(false)
+            .home(Home { model })
+            .into_widget(),
+        window,
+    );
+}
+```
+
+> Each closure that keeps a handle takes a clone of its own: `let model = self.model.clone();` before `move`. A `Listener` may be called many times, so it cannot move out of what it captured.
+
+## Async work
+
+An app runs on one main thread, and its async work runs there as tasks:
+
+- `app.spawn(async move |cx| …)` starts a task, which awaits any future and reaches the app again through `cx.update(|app| …)`. It starts once the current event is handled.
+- `Timer::periodic(app, duration, |app, timer| …)` repeats every `duration`; `Timer::new(app, duration, listener)` fires once after `duration`. Call `cancel(app)` to stop either.
+- `app.run_in_background(work)` runs blocking or CPU-heavy work on a background thread and answers a task with the result.
+- A callback from outside the app, such as a system observer, hands work back to the main thread with `post` on the `AsyncApp` that `app.to_async()` returns.
+
+## Names that differ from Flutter
+
+Waft keeps Flutter's names; what changes is what Rust needs:
+
+| Flutter | Waft |
+| --- | --- |
+| `Text('Hi', maxLines: 1)` | `Text::new("Hi").max_lines(1)`: a required argument is `new`'s, each named one a builder method |
+| `Expanded(child: list)` | `Expanded::new(list)`: a required child is `new`'s argument; an optional one is `.child(…)`, as `Padding::new(insets).child(text)` |
+| `children: [a, b]` | `.children([a.into_widget(), b.into_widget()])`: a child is a `WidgetRef`, which `.into_widget()` makes of any widget |
+| `EdgeInsets.all(12)`, `EdgeInsets.symmetric(vertical: 8, horizontal: 16)` | `EdgeInsetsGeometry::all(12.0)`, `EdgeInsetsGeometry::symmetric(8.0, 16.0)`, vertical first: `Padding` and `Container::padding` take an `EdgeInsetsGeometry`, and an `EdgeInsets` becomes one with `.into()` |
+| `size.width`, `offset.dx` | `size.width()`, `offset.dx()`: a Dart getter is a method |
+| `FontWeight.w600`, `FontWeight.bold`, `Alignment.center` | `FontWeight::W600`, `FontWeight::BOLD`, `Alignment::CENTER`: a constant is in capitals |
+| `Color(0xFF2196F3)` | `Color::new(0xFF2196F3)`, or `Color::from_argb(255, 33, 150, 243)` |
+| `onPressed: () { … }` | `Listener::new(…)` of a closure taking `app`; a callback handed a value, as a switch's, is a closure taking `app` and the value, not an `Rc` |
+| `Theme.of(context)` | `ThemeResources::of(app, context)`: every call is passed `app`, which holds all state |
+| `setState(() { … })` | `self.set_state(app, …)`, with a closure that changes the state |
+| a widget class | a struct that derives `Debug`, which every widget must, and implements `StatelessWidget` or `StatefulWidget` |
+| the `Listener` widget, for raw pointer events | `waft_widgets::Listener`, from the `waft-widgets` crate; `waft::Listener` is the callback |
+
+## Not in Waft
+
+`FutureBuilder` and `StreamBuilder` (a task and an entity do their work), `AnimatedList`, `InteractiveViewer`, the `Router`, and accessibility. A panic in `build` ends the program, where Flutter paints its red error box.

@@ -1,0 +1,38 @@
+---
+title: Embedder and hosts
+description: How Waft separates the Flutter framework from platform hosts with dart:ui traits.
+---
+Waft splits cleanly into two layers so the entire framework runs unchanged in headless tests, on desktop and mobile OS hosts, in browsers, and inside WebAssembly runtimes like WaOS:
+
+1. **Embedder interface (`waft-embedder`)**: `dart:ui` modeled as Rust value types (`Offset`, `Size`, `Rect`, `Color`, `Shadow`, `RRect`, `Matrix4`) and host traits (`Platform`, `View`, `ViewHost`, `HttpClient`, `Clipboard`, `FileDialogs`, `Menus`, `Notifications`, `Compositor`, `Players`, `Cameras`). The framework depends only on `waft-embedder`, never on a concrete host crate.
+2. **Framework (`waft-*`)**: a faithful Rust port of Flutter sitting above `waft-embedder` in strict crate order:
+   `waft-embedder` → `waft-foundation` → `waft-scheduler` → `waft-gestures` → `waft-services` → `waft-painting` → `waft-rendering` → `waft-widgets` → `waft-winui` / `waft-cupertino` / `waft-material`. Lower crates never depend on higher crates.
+
+## Built-in Host Embedders
+
+| Crate | Target platform |
+| --- | --- |
+| `waft-embedder-apple` | macOS native AppKit host, Metal / `valo` rendering, system menu bar, file dialogs, AVFoundation media, and composition layers |
+| `waft-embedder-ios` | iOS UIKit host, touch gestures, keyboard insets, security-scoped document opening, and Metal rendering |
+| `waft-embedder-android` | Android 12+ (API 31+) Activity host, `SurfaceControl` composition layers, IME text input, and Vulkan/GLES rendering |
+| `waft-embedder-winit` | Windows and Linux desktop host (Wayland & X11), system font discovery, clipboard, and Vulkan/DX12 rendering |
+| `waft-embedder-web` | Browser host on `<canvas id="waft">` via WebGPU / WebGL2 |
+| `waft-embedder-default` | Picks the current target's default native embedder and powers `#[waft::main]` |
+| `waft-test` | Headless test embedder (`TestPlatform`, `TestView`) with deterministic mock services and no display |
+
+## Custom Embedders
+
+If you are porting Waft to a new host (such as an embedded display, a game engine overlay, or a custom sandboxed runtime like [WaOS](https://waos.app)), implement the traits in `waft-embedder` and drive the shell:
+
+```rust
+use waft::{DefaultEmbedder, IntoWidget, Shell, run_app};
+use waft_cupertino::CupertinoApp;
+
+fn main() {
+    DefaultEmbedder::default().run(|platform| {
+        Shell::new(platform, |app| {
+            run_app(app, CupertinoApp::new().home(Counter).into_widget());
+        })
+    });
+}
+```
