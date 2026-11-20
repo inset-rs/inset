@@ -143,8 +143,11 @@ impl Theme {
         let category = localizations
             .map(|localizations| localizations.script_category())
             .unwrap_or(ScriptCategory::EnglishLike);
+        // Depended on either way, as Dart's; its data is read only when there is no material
+        // theme, so it is not copied otherwise.
         let inherited_cupertino_theme = context
             .depend_on_inherited_widget_of_exact_type::<InheritedCupertinoTheme>(app)
+            .filter(|_| inherited_theme.is_none())
             .map(|inherited_cupertino_theme| inherited_cupertino_theme.theme.data.clone());
         let theme = match (inherited_theme, inherited_cupertino_theme) {
             (Some(theme), _) => theme,
