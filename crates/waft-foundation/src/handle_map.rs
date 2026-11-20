@@ -398,6 +398,17 @@ impl HandleMap {
 
     #[track_caller]
     pub(crate) fn create<T: 'static>(&mut self, state: T) -> Ref<T> {
+        let (id, keep) = self.insert(type_name::<T>(), Box::new(state));
+        Retained {
+            handle: Handle::new(id),
+            keep,
+        }
+    }
+
+    /// [`create`](Self::create) past boxing the object: one body for every type, so creating an
+    /// object costs no copy of the arena's insert per type.
+    #[track_caller]
+    fn insert(&mut self, type_name: &'static str, state: Box<dyn Any>) -> (HandleId, Rc<Keep>) {
         #[cfg(debug_assertions)]
         let created_at = Location::caller();
         let dropped = &self.dropped;
@@ -408,8 +419,8 @@ impl HandleMap {
                 dropped: dropped.clone(),
             });
             let entry = HandleEntry {
-                type_name: type_name::<T>(),
-                state: Box::new(state),
+                type_name,
+                state,
                 keep: Rc::downgrade(&strong),
                 tree_owner: None,
                 disposed: false,
@@ -421,10 +432,7 @@ impl HandleMap {
             keep = Some(strong);
             entry
         });
-        Retained {
-            handle: Handle::new(id),
-            keep: keep.expect("the entry was inserted"),
-        }
+        (id, keep.expect("the entry was inserted"))
     }
 
     /// A [`Ref`] to the entry while something still keeps it; `None` once it is freed or its
@@ -647,14 +655,10 @@ impl HandleMap {
     /// If the object is freed.
     pub(crate) fn get<T: 'static>(&self, handle: Handle<T>) -> &T {
         let entry = self.resolve(handle.id());
-        entry.state.downcast_ref::<T>().unwrap_or_else(|| {
-            panic!(
-                "handle {:?} holds `{}`, not `{}`",
-                handle.id(),
-                entry.type_name,
-                type_name::<T>()
-            )
-        })
+        match entry.state.downcast_ref::<T>() {
+            Some(state) => state,
+            None => wrong_type(handle.id(), entry.type_name, type_name::<T>()),
+        }
     }
 
     pub(crate) fn get_mut<T: 'static>(&mut self, handle: Handle<T>) -> &mut T {
@@ -741,12 +745,18 @@ impl HandleMap {
 
 fn downcast_entry_mut<T: 'static>(entry: &mut HandleEntry, id: HandleId) -> &mut T {
     let type_name_in_entry = entry.type_name;
-    entry.state.downcast_mut::<T>().unwrap_or_else(|| {
-        panic!(
-            "handle {id:?} holds `{type_name_in_entry}`, not `{}`",
-            type_name::<T>()
-        )
-    })
+    match entry.state.downcast_mut::<T>() {
+        Some(state) => state,
+        None => wrong_type(id, type_name_in_entry, type_name::<T>()),
+    }
+}
+
+/// The panic of a typed read of an entry that holds another type: one body for every type, out
+/// of the reads' way.
+#[cold]
+#[inline(never)]
+fn wrong_type(id: HandleId, held: &str, asked: &str) -> ! {
+    panic!("handle {id:?} holds `{held}`, not `{asked}`")
 }
 
 #[cfg(test)]

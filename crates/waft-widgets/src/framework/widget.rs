@@ -199,7 +199,11 @@ pub fn downcast_widget<W: 'static>(widget: &dyn Widget) -> Option<&W> {
 /// `W`'s name as Dart's `runtimeType` prints it, for [`Widget::type_name`]: the module path
 /// before the type's own name is cut, and the type arguments are kept as Rust writes them.
 pub fn short_type_name<W: ?Sized>() -> &'static str {
-    let name = std::any::type_name::<W>();
+    without_module_path(std::any::type_name::<W>())
+}
+
+/// [`short_type_name`]'s cut, one body for every type.
+fn without_module_path(name: &'static str) -> &'static str {
     let type_arguments = name.find('<').unwrap_or(name.len());
     let own_name = name[..type_arguments]
         .rfind("::")
