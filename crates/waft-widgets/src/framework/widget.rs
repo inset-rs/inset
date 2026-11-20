@@ -144,6 +144,18 @@ pub trait Widget: Any + Debug {
         None
     }
 
+    /// This widget as a [`ParentDataWidget`], when it is one: what the one
+    /// [`ParentDataElement`] reads, so that element is not copied per widget type.
+    fn as_parent_data(&self) -> Option<&dyn AnyParentDataWidget> {
+        None
+    }
+
+    /// This widget as an [`InheritedWidget`], when it is one: what the one
+    /// [`InheritedElement`] reads, so that element is not copied per widget type.
+    fn as_inherited(&self) -> Option<&dyn AnyInheritedWidget> {
+        None
+    }
+
     /// This widget as a [`StatelessWidget`], when it is one: what the one
     /// [`StatelessElement`] builds from, so that element is not copied per widget type.
     fn as_stateless(&self) -> Option<&dyn StatelessWidget> {
@@ -508,7 +520,7 @@ impl<W: InheritedWidget> Widget for Inherited<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        InheritedElement::<W>::new(app, this).as_element()
+        InheritedElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -530,6 +542,31 @@ impl<W: InheritedWidget> Widget for Inherited<W> {
     fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
         self.0.as_inherited_theme()
     }
+
+    fn as_inherited(&self) -> Option<&dyn AnyInheritedWidget> {
+        Some(self)
+    }
+}
+
+impl<W: InheritedWidget> AnyInheritedWidget for Inherited<W> {
+    fn child(&self) -> &WidgetRef {
+        self.0.child()
+    }
+
+    fn update_should_notify(&self, old_widget: &dyn Widget) -> bool {
+        let old_widget =
+            downcast_widget::<W>(old_widget).expect("the old widget has the same type");
+        self.0.update_should_notify(old_widget)
+    }
+}
+
+/// An [`InheritedWidget`] of any type, as the one [`InheritedElement`] reads it.
+pub trait AnyInheritedWidget {
+    /// See [`InheritedWidget::child`].
+    fn child(&self) -> &WidgetRef;
+
+    /// [`InheritedWidget::update_should_notify`] against an `old_widget` of the same type.
+    fn update_should_notify(&self, old_widget: &dyn Widget) -> bool;
 }
 
 impl<W: InheritedWidget> Debug for Inherited<W> {
@@ -615,7 +652,7 @@ impl<W: ParentDataWidget> Widget for ParentDataWrapper<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        ParentDataElement::<W>::new(app, this).as_element()
+        ParentDataElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -633,6 +670,43 @@ impl<W: ParentDataWidget> Widget for ParentDataWrapper<W> {
     fn kind(&self) -> WidgetKind {
         WidgetKind::Other
     }
+
+    fn as_parent_data(&self) -> Option<&dyn AnyParentDataWidget> {
+        Some(self)
+    }
+}
+
+impl<W: ParentDataWidget> AnyParentDataWidget for ParentDataWrapper<W> {
+    fn child(&self) -> &WidgetRef {
+        self.0.child()
+    }
+
+    fn apply_parent_data(&self, app: &mut App, render_object: AnyRenderObject) {
+        self.0.apply_parent_data(app, render_object);
+    }
+
+    fn debug_is_valid_render_object(&self, app: &App, render_object: AnyRenderObject) -> bool {
+        self.0.debug_is_valid_render_object(app, render_object)
+    }
+
+    fn parent_data_type_name(&self) -> &'static str {
+        std::any::type_name::<W::ParentData>()
+    }
+}
+
+/// A [`ParentDataWidget`] of any type, as the one [`ParentDataElement`] reads it.
+pub trait AnyParentDataWidget: Debug {
+    /// See [`ParentDataWidget::child`].
+    fn child(&self) -> &WidgetRef;
+
+    /// See [`ParentDataWidget::apply_parent_data`].
+    fn apply_parent_data(&self, app: &mut App, render_object: AnyRenderObject);
+
+    /// See [`ParentDataWidget::debug_is_valid_render_object`].
+    fn debug_is_valid_render_object(&self, app: &App, render_object: AnyRenderObject) -> bool;
+
+    /// The name of [`ParentDataWidget::ParentData`], for the message of an invalid use.
+    fn parent_data_type_name(&self) -> &'static str;
 }
 
 impl<W: ParentDataWidget> Debug for ParentDataWrapper<W> {

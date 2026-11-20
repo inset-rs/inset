@@ -22,8 +22,9 @@ use super::element::{
 };
 use super::state::{AnyState, State, StateLifecycle};
 use super::widget::{
-    InheritedWidget, LeafRenderObjectWidget, MultiChildRenderObjectWidget, ParentDataWidget,
-    RenderObjectWidget, SingleChildRenderObjectWidget, WidgetRef, downcast_widget,
+    AnyInheritedWidget, AnyParentDataWidget, LeafRenderObjectWidget, MultiChildRenderObjectWidget,
+    ParentDataWidget, RenderObjectWidget, SingleChildRenderObjectWidget, WidgetRef,
+    downcast_widget,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -421,30 +422,30 @@ pub trait ProxyElement: ComponentElement {
 // InheritedElement
 
 /// An [`Element`] that uses an [`InheritedWidget`] as its configuration.
-pub struct InheritedElement<W: InheritedWidget> {
+pub struct InheritedElement {
     element: ElementData,
     component: ComponentElementData,
     dependents: HashMap<AnyElement, Option<Rc<dyn Any>>>,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: InheritedWidget> InheritedElement<W> {
+impl InheritedElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(InheritedElement::<W> {
+        debug_assert!(widget.as_inherited().is_some());
+        app.create(InheritedElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
             dependents: HashMap::new(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 
-    /// The widget, typed.
-    pub fn widget(self: Handle<Self>, app: &App) -> &W {
-        downcast_widget::<W>(&**self.as_element().widget(app))
-            .expect("an InheritedElement holds its InheritedWidget")
+    /// The widget, as an inherited widget.
+    pub fn widget(self: Handle<Self>, app: &App) -> &dyn AnyInheritedWidget {
+        self.as_element()
+            .widget(app)
+            .as_inherited()
+            .expect("an InheritedElement holds an InheritedWidget")
     }
 
     /// Returns the dependencies value recorded for `dependent` with
@@ -494,7 +495,7 @@ impl<W: InheritedWidget> InheritedElement<W> {
     }
 }
 
-impl<W: InheritedWidget> ComponentElement for InheritedElement<W> {
+impl ComponentElement for InheritedElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -508,17 +509,13 @@ impl<W: InheritedWidget> ComponentElement for InheritedElement<W> {
     }
 }
 
-impl<W: InheritedWidget> ProxyElement for InheritedElement<W> {
+impl ProxyElement for InheritedElement {
     fn proxied_child(self: Handle<Self>, app: &App) -> WidgetRef {
         self.widget(app).child().clone()
     }
 
     fn updated(self: Handle<Self>, app: &mut App, old_widget: WidgetRef) {
-        let should_notify = {
-            let old =
-                &downcast_widget::<W>(&*old_widget).expect("the old widget has the same type");
-            self.widget(app).update_should_notify(old)
-        };
+        let should_notify = self.widget(app).update_should_notify(&*old_widget);
         if should_notify {
             self.notify_clients(app, old_widget);
         }
@@ -549,7 +546,7 @@ impl<W: InheritedWidget> ProxyElement for InheritedElement<W> {
     }
 }
 
-impl<W: InheritedWidget> Element for InheritedElement<W> {
+impl Element for InheritedElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -582,7 +579,8 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
         let mut widgets: HashMap<TypeId, AnyElement> = incoming
             .map(|incoming| (*incoming).clone())
             .unwrap_or_default();
-        widgets.insert(TypeId::of::<W>(), self.as_element());
+        let widget_type = self.as_element().widget(app).widget_type();
+        widgets.insert(widget_type, self.as_element());
         self.as_element()
             .set_inherited_elements(app, Some(Rc::new(widgets)));
     }
@@ -613,28 +611,28 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
 // ParentDataElement
 
 /// An [`Element`] that uses a [`ParentDataWidget`] as its configuration.
-pub struct ParentDataElement<W: ParentDataWidget> {
+pub struct ParentDataElement {
     element: ElementData,
     component: ComponentElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: ParentDataWidget> ParentDataElement<W> {
+impl ParentDataElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(ParentDataElement::<W> {
+        debug_assert!(widget.as_parent_data().is_some());
+        app.create(ParentDataElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 
-    /// The widget, typed.
-    pub fn widget(self: Handle<Self>, app: &App) -> &W {
-        downcast_widget::<W>(&**self.as_element().widget(app))
-            .expect("a ParentDataElement holds its ParentDataWidget")
+    /// The widget, as a parent data widget.
+    pub fn widget(self: Handle<Self>, app: &App) -> &dyn AnyParentDataWidget {
+        self.as_element()
+            .widget(app)
+            .as_parent_data()
+            .expect("a ParentDataElement holds a ParentDataWidget")
     }
 
     fn apply_parent_data_to_descendants(self: Handle<Self>, app: &mut App) {
@@ -670,7 +668,11 @@ impl<W: ParentDataWidget> ParentDataElement<W> {
     /// `ParentDataWidget::debug_can_apply_out_of_turn` can be applied this way.
     ///
     /// The new widget must have the same child as the current widget.
-    pub fn apply_widget_out_of_turn(self: Handle<Self>, app: &mut App, new_widget: &W) {
+    pub fn apply_widget_out_of_turn<W: ParentDataWidget>(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: &W,
+    ) {
         debug_assert!(new_widget.debug_can_apply_out_of_turn());
         debug_assert!(Rc::ptr_eq(new_widget.child(), self.widget(app).child()));
         let mut child = self.as_element().render_object_attaching_child(app);
@@ -687,7 +689,7 @@ impl<W: ParentDataWidget> ParentDataElement<W> {
     }
 }
 
-impl<W: ParentDataWidget> ComponentElement for ParentDataElement<W> {
+impl ComponentElement for ParentDataElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -701,7 +703,7 @@ impl<W: ParentDataWidget> ComponentElement for ParentDataElement<W> {
     }
 }
 
-impl<W: ParentDataWidget> ProxyElement for ParentDataElement<W> {
+impl ProxyElement for ParentDataElement {
     fn proxied_child(self: Handle<Self>, app: &App) -> WidgetRef {
         self.widget(app).child().clone()
     }
@@ -711,7 +713,7 @@ impl<W: ParentDataWidget> ProxyElement for ParentDataElement<W> {
     }
 }
 
-impl<W: ParentDataWidget> Element for ParentDataElement<W> {
+impl Element for ParentDataElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -743,24 +745,22 @@ impl<W: ParentDataWidget> Element for ParentDataElement<W> {
         render_object: AnyRenderObject,
     ) -> bool {
         // `debugIsValidRenderObject`: the render object must carry this widget's parent data.
-        let widget_value = self.as_element().widget(app).clone();
-        let typed_widget = downcast_widget::<W>(&*widget_value)
-            .expect("a ParentDataElement holds its ParentDataWidget");
-        let valid = typed_widget.debug_is_valid_render_object(app, render_object);
+        let widget = self.as_element().widget(app).clone();
+        let parent_data_widget = widget
+            .as_parent_data()
+            .expect("a ParentDataElement holds a ParentDataWidget");
+        let valid = parent_data_widget.debug_is_valid_render_object(app, render_object);
         debug_assert!(
             valid,
             "Incorrect use of ParentDataWidget. The ParentDataWidget {:?} wants to apply \
              ParentData of type {} to a RenderObject which has been set up to accept ParentData \
              of an incompatible type. Usually, this means that the widget has the wrong \
              ancestor RenderObjectWidget.",
-            self.widget(app),
-            std::any::type_name::<W::ParentData>()
+            parent_data_widget,
+            parent_data_widget.parent_data_type_name()
         );
         if valid {
-            let widget = self.as_element().widget(app).clone();
-            let typed = &downcast_widget::<W>(&*widget)
-                .expect("a ParentDataElement holds its ParentDataWidget");
-            typed.apply_parent_data(app, render_object);
+            parent_data_widget.apply_parent_data(app, render_object);
         }
         valid
     }

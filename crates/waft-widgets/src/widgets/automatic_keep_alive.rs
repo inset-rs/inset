@@ -147,10 +147,7 @@ impl AutomaticKeepAliveState {
     ///
     /// While this widget is guaranteed to have a child, this may return null if
     /// the first build of that child has not completed yet.
-    fn get_child_element(
-        self: Handle<Self>,
-        app: &App,
-    ) -> Option<Handle<ParentDataElement<KeepAlive>>> {
+    fn get_child_element(self: Handle<Self>, app: &App) -> Option<Handle<ParentDataElement>> {
         debug_assert!(self.mounted(app));
         let element = self.context(app);
         let mut child_element = None;
@@ -180,7 +177,8 @@ impl AutomaticKeepAliveState {
         debug_assert!(child_element.is_parent_data_element());
         Some(
             child_element
-                .downcast::<ParentDataElement<KeepAlive>>(app)
+                .downcast::<ParentDataElement>(app)
+                .filter(|_| downcast_widget::<KeepAlive>(&**child_element.widget(app)).is_some())
                 .expect("the only child is the KeepAlive ParentDataElement"),
         )
     }
@@ -188,7 +186,7 @@ impl AutomaticKeepAliveState {
     fn update_parent_data_of_child(
         self: Handle<Self>,
         app: &mut App,
-        child_element: Handle<ParentDataElement<KeepAlive>>,
+        child_element: Handle<ParentDataElement>,
     ) {
         let context = self.context(app);
         let widget = self.build(app, context);
