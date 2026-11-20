@@ -295,6 +295,7 @@ impl<W: InheritedNotifier> Element for InheritedNotifierElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let old_notifier = self.widget(app).notifier();
         let new_notifier = downcast_widget::<W>(&*new_widget)

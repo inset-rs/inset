@@ -2697,8 +2697,7 @@ pub(crate) mod tests {
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
         Align, AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, IconData,
-        MediaQuery, MediaQueryData, MouseRegion, StateSetter, StatefulBuilder, StatefulElement,
-        UnfocusDisposition,
+        MediaQuery, MediaQueryData, MouseRegion, StateSetter, StatefulBuilder, UnfocusDisposition,
     };
 
     use waft_widgets::testing::{
@@ -2881,9 +2880,8 @@ pub(crate) mod tests {
             .expect("a _MaterialSwitch");
         let app = tester.cell.borrow();
         element
-            .downcast::<StatefulElement<MaterialSwitch>>(&app)
-            .expect("a stateful element")
-            .state(&app)
+            .state_handle::<MaterialSwitchState>(&app)
+            .expect("a _MaterialSwitch's state")
     }
 
     /// Dart's `state.position.value`.
