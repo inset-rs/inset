@@ -1808,7 +1808,7 @@ mod tests {
     use waft_test::{TestPlatform, TestView};
     use waft_widgets::{
         Builder, Center, Column, Container, Expanded, ListView, Notification, Offstage,
-        PlainLayoutChangedNotification, SizedBox, Stack, StatefulElement, View, ViewAnchor,
+        PlainLayoutChangedNotification, SizedBox, Stack, View, ViewAnchor,
     };
 
     use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
@@ -3054,9 +3054,8 @@ mod tests {
             let app = tester.cell.borrow();
             let state = elements
                 .into_iter()
-                .find_map(|element| element.downcast::<StatefulElement<MaterialInterior>>(&app))
-                .expect("a material interior")
-                .state(&app);
+                .find_map(|element| element.state_handle::<MaterialInteriorState>(&app))
+                .expect("a material interior");
             let tween = app
                 .get(state)
                 .surface_tint_color

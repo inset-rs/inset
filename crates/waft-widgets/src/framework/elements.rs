@@ -11,20 +11,17 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use waft_foundation::{App, Handle, HandleId};
-use waft_rendering::{
-    AnyRenderObject, ContainerRenderObjectMixin, ErasedRenderObject, RenderHandle,
-    RenderObjectWithChildMixin,
-};
+use waft_rendering::{AnyRenderObject, RenderHandle};
 
 use super::element::{
     AnyElement, Element, ElementBase, ElementData, ElementLifecycle, IndexedSlot, Slot,
     debug_check_owner_build_target_exists,
 };
-use super::state::{State, StateLifecycle};
+use super::state::{AnyState, State, StateLifecycle};
 use super::widget::{
-    InheritedWidget, LeafRenderObjectWidget, MultiChildRenderObjectWidget, ParentDataWidget,
-    RenderObjectWidget, SingleChildRenderObjectWidget, StatefulWidget, StatelessWidget, WidgetRef,
-    downcast_widget,
+    AnyInheritedWidget, AnyMultiChildRenderObjectWidget, AnyParentDataWidget,
+    AnyRenderObjectWidget, AnySingleChildRenderObjectWidget, ParentDataWidget, RenderObjectWidget,
+    WidgetRef,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -156,27 +153,25 @@ pub(crate) use component_element_overrides;
 // ---------------------------------------------------------------------------------------------
 // StatelessElement
 
-/// An [`Element`] that uses a [`StatelessWidget`] as its configuration.
-pub struct StatelessElement<W: StatelessWidget> {
+/// An [`Element`] that uses a [`StatelessWidget`](super::widget::StatelessWidget) as its configuration.
+pub struct StatelessElement {
     element: ElementData,
     component: ComponentElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: StatelessWidget> StatelessElement<W> {
+impl StatelessElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(StatelessElement::<W> {
+        debug_assert!(widget.as_stateless().is_some());
+        app.create(StatelessElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 }
 
-impl<W: StatelessWidget> ComponentElement for StatelessElement<W> {
+impl ComponentElement for StatelessElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -187,13 +182,14 @@ impl<W: StatelessWidget> ComponentElement for StatelessElement<W> {
 
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef {
         let widget = self.as_element().widget(app).clone();
-        let stateless =
-            &downcast_widget::<W>(&*widget).expect("a StatelessElement holds its StatelessWidget");
+        let stateless = widget
+            .as_stateless()
+            .expect("a StatelessElement holds a StatelessWidget");
         stateless.build(app, self.as_element())
     }
 }
 
-impl<W: StatelessWidget> Element for StatelessElement<W> {
+impl Element for StatelessElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -222,55 +218,53 @@ impl<W: StatelessWidget> Element for StatelessElement<W> {
 // ---------------------------------------------------------------------------------------------
 // StatefulElement
 
-/// An [`Element`] that uses a [`StatefulWidget`] as its configuration.
-pub struct StatefulElement<W: StatefulWidget> {
+/// An [`Element`] that uses a [`StatefulWidget`](super::widget::StatefulWidget) as its configuration.
+pub struct StatefulElement {
     element: ElementData,
     component: ComponentElementData,
-    state: Option<Handle<W::State>>,
+    state: Option<AnyState>,
     did_change_dependencies: bool,
 }
 
-impl<W: StatefulWidget> StatefulElement<W> {
-    /// Creates an element that uses the given widget as its configuration.
+impl StatefulElement {
+    /// Creates an element that uses the given widget as its configuration, and the widget's
+    /// state.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        let state = {
-            let stateful = &downcast_widget::<W>(&*widget)
-                .expect("a StatefulElement holds its StatefulWidget");
-            stateful.create_state()
-        };
-        let state = app.create(state).into_tree_node(app);
+        let state = widget
+            .as_stateful()
+            .expect("a StatefulElement holds a StatefulWidget")
+            .create_state(app);
         let this = app
-            .create(StatefulElement::<W> {
+            .create(StatefulElement {
                 element: ElementData::new(widget.clone()),
                 component: ComponentElementData::default(),
                 state: Some(state),
                 did_change_dependencies: false,
             })
             .into_tree_node(app);
-        debug_assert!(state.state_data(app).element().is_none());
-        state.state_data_mut(app).set_element(Some(this));
-        state.state_data_mut(app).set_widget(widget);
-        debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
+        debug_assert!(state.element(app).is_none());
+        state.set_element(app, Some(this));
+        state.set_widget(app, widget);
+        debug_assert!(state.debug_lifecycle_state(app) == StateLifecycle::Created);
         this
     }
 
-    /// The [`State`] instance associated with this location in the tree.
+    /// The [`State`] instance associated with this location in the tree, when it is an `S`.
     ///
     /// There is a one-to-one relationship between [`State`] objects and the
     /// [`StatefulElement`] objects that hold them. The [`State`] objects are created by
-    /// [`StatefulElement`] in `mount`.
-    pub fn state(self: Handle<Self>, app: &App) -> Handle<W::State> {
-        app.get(self).state.expect("the element is unmounted")
+    /// [`StatefulElement::new`].
+    pub fn state<S: State>(self: Handle<Self>, app: &App) -> Option<Handle<S>> {
+        let state = app.get(self).state.expect("the element is unmounted");
+        (state.type_id() == TypeId::of::<S>()).then(|| Handle::from_id(state.id()))
     }
 
-    /// The widget, typed.
-    pub fn widget(self: Handle<Self>, app: &App) -> &W {
-        downcast_widget::<W>(&**self.as_element().widget(app))
-            .expect("a StatefulElement holds its StatefulWidget")
+    fn any_state(self: Handle<Self>, app: &App) -> AnyState {
+        app.get(self).state.expect("the element is unmounted")
     }
 }
 
-impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
+impl ComponentElement for StatefulElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -280,25 +274,21 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
     }
 
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef {
-        let state = self.state(app);
+        let state = self.any_state(app);
         state.build(app, self.as_element())
     }
 
     #[inline(always)]
     fn first_build(self: Handle<Self>, app: &mut App) {
-        let state = self.state(app);
-        debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
+        let state = self.any_state(app);
+        debug_assert!(state.debug_lifecycle_state(app) == StateLifecycle::Created);
         state.init_state(app);
         if cfg!(debug_assertions) {
-            state
-                .state_data_mut(app)
-                .set_debug_lifecycle_state(StateLifecycle::Initialized);
+            state.set_debug_lifecycle_state(app, StateLifecycle::Initialized);
         }
         state.did_change_dependencies(app);
         if cfg!(debug_assertions) {
-            state
-                .state_data_mut(app)
-                .set_debug_lifecycle_state(StateLifecycle::Ready);
+            state.set_debug_lifecycle_state(app, StateLifecycle::Ready);
         }
         ElementBase::rebuild(self, app, false);
     }
@@ -306,7 +296,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
     #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         if app.get(self).did_change_dependencies {
-            self.state(app).did_change_dependencies(app);
+            self.any_state(app).did_change_dependencies(app);
             app.get_mut(self).did_change_dependencies = false;
         }
         if cfg!(debug_assertions) {
@@ -327,7 +317,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
     }
 }
 
-impl<W: StatefulWidget> Element for StatefulElement<W> {
+impl Element for StatefulElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -345,11 +335,9 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let old_widget = self.as_element().widget(app).clone();
         ElementBase::update(self, app, new_widget.clone());
-        let state = self.state(app);
-        state.state_data_mut(app).set_widget(new_widget);
-        let old = &downcast_widget::<W>(&*old_widget)
-            .expect("a StatefulElement holds its StatefulWidget");
-        state.did_update_widget(app, old);
+        let state = self.any_state(app);
+        state.set_widget(app, new_widget);
+        state.did_update_widget(app, &old_widget);
         ElementBase::rebuild(self, app, true);
     }
 
@@ -360,7 +348,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
 
     fn activate(self: Handle<Self>, app: &mut App) {
         ElementBase::activate(self, app);
-        self.state(app).activate(app);
+        self.any_state(app).activate(app);
         // Since the State could have observed the deactivate() and thus disposed of
         // resources allocated in the build method, we have to rebuild the widget
         // so that its State can reallocate its resources.
@@ -369,22 +357,20 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     }
 
     fn deactivate(self: Handle<Self>, app: &mut App) {
-        self.state(app).deactivate(app);
+        self.any_state(app).deactivate(app);
         ElementBase::deactivate(self, app);
     }
 
     fn unmount(self: Handle<Self>, app: &mut App) {
         ElementBase::unmount(self, app);
-        let state = self.state(app);
+        let state = self.any_state(app);
         state.dispose(app);
         if cfg!(debug_assertions) {
-            state
-                .state_data_mut(app)
-                .set_debug_lifecycle_state(StateLifecycle::Defunct);
+            state.set_debug_lifecycle_state(app, StateLifecycle::Defunct);
         }
-        state.state_data_mut(app).set_element(None);
+        state.set_element(app, None);
         app.get_mut(self).state = None;
-        app.release_tree_node(state);
+        app.release_tree_node(state.id());
     }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
@@ -395,7 +381,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     fn state_handle_id(self: Handle<Self>, app: &App) -> Option<(TypeId, HandleId)> {
         app.get(self)
             .state
-            .map(|state| (TypeId::of::<W::State>(), state.id()))
+            .map(|state| (state.type_id(), state.id()))
     }
 }
 
@@ -436,31 +422,31 @@ pub trait ProxyElement: ComponentElement {
 // ---------------------------------------------------------------------------------------------
 // InheritedElement
 
-/// An [`Element`] that uses an [`InheritedWidget`] as its configuration.
-pub struct InheritedElement<W: InheritedWidget> {
+/// An [`Element`] that uses an [`InheritedWidget`](super::widget::InheritedWidget) as its configuration.
+pub struct InheritedElement {
     element: ElementData,
     component: ComponentElementData,
     dependents: HashMap<AnyElement, Option<Rc<dyn Any>>>,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: InheritedWidget> InheritedElement<W> {
+impl InheritedElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(InheritedElement::<W> {
+        debug_assert!(widget.as_inherited().is_some());
+        app.create(InheritedElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
             dependents: HashMap::new(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 
-    /// The widget, typed.
-    pub fn widget(self: Handle<Self>, app: &App) -> &W {
-        downcast_widget::<W>(&**self.as_element().widget(app))
-            .expect("an InheritedElement holds its InheritedWidget")
+    /// The widget, as an inherited widget.
+    pub fn widget(self: Handle<Self>, app: &App) -> &dyn AnyInheritedWidget {
+        self.as_element()
+            .widget(app)
+            .as_inherited()
+            .expect("an InheritedElement holds an InheritedWidget")
     }
 
     /// Returns the dependencies value recorded for `dependent` with
@@ -510,7 +496,7 @@ impl<W: InheritedWidget> InheritedElement<W> {
     }
 }
 
-impl<W: InheritedWidget> ComponentElement for InheritedElement<W> {
+impl ComponentElement for InheritedElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -524,17 +510,13 @@ impl<W: InheritedWidget> ComponentElement for InheritedElement<W> {
     }
 }
 
-impl<W: InheritedWidget> ProxyElement for InheritedElement<W> {
+impl ProxyElement for InheritedElement {
     fn proxied_child(self: Handle<Self>, app: &App) -> WidgetRef {
         self.widget(app).child().clone()
     }
 
     fn updated(self: Handle<Self>, app: &mut App, old_widget: WidgetRef) {
-        let should_notify = {
-            let old =
-                &downcast_widget::<W>(&*old_widget).expect("the old widget has the same type");
-            self.widget(app).update_should_notify(old)
-        };
+        let should_notify = self.widget(app).update_should_notify(&*old_widget);
         if should_notify {
             self.notify_clients(app, old_widget);
         }
@@ -565,7 +547,7 @@ impl<W: InheritedWidget> ProxyElement for InheritedElement<W> {
     }
 }
 
-impl<W: InheritedWidget> Element for InheritedElement<W> {
+impl Element for InheritedElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -598,7 +580,8 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
         let mut widgets: HashMap<TypeId, AnyElement> = incoming
             .map(|incoming| (*incoming).clone())
             .unwrap_or_default();
-        widgets.insert(TypeId::of::<W>(), self.as_element());
+        let widget_type = self.as_element().widget(app).widget_type();
+        widgets.insert(widget_type, self.as_element());
         self.as_element()
             .set_inherited_elements(app, Some(Rc::new(widgets)));
     }
@@ -629,28 +612,28 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
 // ParentDataElement
 
 /// An [`Element`] that uses a [`ParentDataWidget`] as its configuration.
-pub struct ParentDataElement<W: ParentDataWidget> {
+pub struct ParentDataElement {
     element: ElementData,
     component: ComponentElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: ParentDataWidget> ParentDataElement<W> {
+impl ParentDataElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(ParentDataElement::<W> {
+        debug_assert!(widget.as_parent_data().is_some());
+        app.create(ParentDataElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 
-    /// The widget, typed.
-    pub fn widget(self: Handle<Self>, app: &App) -> &W {
-        downcast_widget::<W>(&**self.as_element().widget(app))
-            .expect("a ParentDataElement holds its ParentDataWidget")
+    /// The widget, as a parent data widget.
+    pub fn widget(self: Handle<Self>, app: &App) -> &dyn AnyParentDataWidget {
+        self.as_element()
+            .widget(app)
+            .as_parent_data()
+            .expect("a ParentDataElement holds a ParentDataWidget")
     }
 
     fn apply_parent_data_to_descendants(self: Handle<Self>, app: &mut App) {
@@ -686,7 +669,11 @@ impl<W: ParentDataWidget> ParentDataElement<W> {
     /// `ParentDataWidget::debug_can_apply_out_of_turn` can be applied this way.
     ///
     /// The new widget must have the same child as the current widget.
-    pub fn apply_widget_out_of_turn(self: Handle<Self>, app: &mut App, new_widget: &W) {
+    pub fn apply_widget_out_of_turn<W: ParentDataWidget>(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: &W,
+    ) {
         debug_assert!(new_widget.debug_can_apply_out_of_turn());
         debug_assert!(Rc::ptr_eq(new_widget.child(), self.widget(app).child()));
         let mut child = self.as_element().render_object_attaching_child(app);
@@ -703,7 +690,7 @@ impl<W: ParentDataWidget> ParentDataElement<W> {
     }
 }
 
-impl<W: ParentDataWidget> ComponentElement for ParentDataElement<W> {
+impl ComponentElement for ParentDataElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -717,7 +704,7 @@ impl<W: ParentDataWidget> ComponentElement for ParentDataElement<W> {
     }
 }
 
-impl<W: ParentDataWidget> ProxyElement for ParentDataElement<W> {
+impl ProxyElement for ParentDataElement {
     fn proxied_child(self: Handle<Self>, app: &App) -> WidgetRef {
         self.widget(app).child().clone()
     }
@@ -727,7 +714,7 @@ impl<W: ParentDataWidget> ProxyElement for ParentDataElement<W> {
     }
 }
 
-impl<W: ParentDataWidget> Element for ParentDataElement<W> {
+impl Element for ParentDataElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -759,24 +746,22 @@ impl<W: ParentDataWidget> Element for ParentDataElement<W> {
         render_object: AnyRenderObject,
     ) -> bool {
         // `debugIsValidRenderObject`: the render object must carry this widget's parent data.
-        let widget_value = self.as_element().widget(app).clone();
-        let typed_widget = downcast_widget::<W>(&*widget_value)
-            .expect("a ParentDataElement holds its ParentDataWidget");
-        let valid = typed_widget.debug_is_valid_render_object(app, render_object);
+        let widget = self.as_element().widget(app).clone();
+        let parent_data_widget = widget
+            .as_parent_data()
+            .expect("a ParentDataElement holds a ParentDataWidget");
+        let valid = parent_data_widget.debug_is_valid_render_object(app, render_object);
         debug_assert!(
             valid,
             "Incorrect use of ParentDataWidget. The ParentDataWidget {:?} wants to apply \
              ParentData of type {} to a RenderObject which has been set up to accept ParentData \
              of an incompatible type. Usually, this means that the widget has the wrong \
              ancestor RenderObjectWidget.",
-            self.widget(app),
-            std::any::type_name::<W::ParentData>()
+            parent_data_widget,
+            parent_data_widget.parent_data_type_name()
         );
         if valid {
-            let widget = self.as_element().widget(app).clone();
-            let typed = &downcast_widget::<W>(&*widget)
-                .expect("a ParentDataElement holds its ParentDataWidget");
-            typed.apply_parent_data(app, render_object);
+            parent_data_widget.apply_parent_data(app, render_object);
         }
         valid
     }
@@ -900,7 +885,7 @@ pub trait RenderObjectElement: Element {
     #[inline(always)]
     fn mount(self: Handle<Self>, app: &mut App, parent: Option<AnyElement>, new_slot: Option<Slot>)
     where
-        Self: RenderObjectElementWidget,
+        Self: RenderObjectWidgetCalls,
     {
         ElementBase::mount(self, app, parent, new_slot.clone());
         if cfg!(debug_assertions) {
@@ -908,8 +893,7 @@ pub trait RenderObjectElement: Element {
         }
         let render_object = {
             let widget = self.as_element().widget(app).clone();
-            let typed = Self::widget_of(&widget);
-            typed.create_render_object(app, self.as_element())
+            RenderObjectWidgetCalls::create_render_object(self, app, &widget)
         };
         self.render_object_element_data_mut(app).render_object = Some(render_object);
         if cfg!(debug_assertions) {
@@ -924,7 +908,7 @@ pub trait RenderObjectElement: Element {
     #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef)
     where
-        Self: RenderObjectElementWidget,
+        Self: RenderObjectWidgetCalls,
     {
         ElementBase::update(self, app, new_widget);
         RenderObjectElement::perform_rebuild(self, app); // calls widget.updateRenderObject()
@@ -934,14 +918,13 @@ pub trait RenderObjectElement: Element {
     #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App)
     where
-        Self: RenderObjectElementWidget,
+        Self: RenderObjectWidgetCalls,
     {
         if cfg!(debug_assertions) {
             self.render_object_element_data_mut(app).debug_doing_build = true;
         }
         let widget = self.as_element().widget(app).clone();
-        let render_object = self.typed_render_object(app);
-        Self::widget_of(&widget).update_render_object(app, self.as_element(), render_object);
+        RenderObjectWidgetCalls::update_render_object(self, app, &widget);
         if cfg!(debug_assertions) {
             self.render_object_element_data_mut(app).debug_doing_build = false;
         }
@@ -961,7 +944,7 @@ pub trait RenderObjectElement: Element {
     /// `RenderObjectElement.unmount`.
     fn unmount(self: Handle<Self>, app: &mut App)
     where
-        Self: RenderObjectElementWidget,
+        Self: RenderObjectWidgetCalls,
     {
         let old_widget = self.as_element().widget(app).clone();
         ElementBase::unmount(self, app);
@@ -970,10 +953,7 @@ pub trait RenderObjectElement: Element {
             !render_object.attached(app),
             "A RenderObject was still attached when attempting to unmount its RenderObjectElement"
         );
-        let typed = render_object
-            .downcast(app)
-            .expect("the render object this widget created");
-        Self::widget_of(&old_widget).did_unmount_render_object(app, typed);
+        RenderObjectWidgetCalls::did_unmount_render_object(self, app, &old_widget, render_object);
         render_object.dispose(app);
         self.render_object_element_data_mut(app).render_object = None;
     }
@@ -1047,14 +1027,102 @@ pub trait RenderObjectElement: Element {
     }
 }
 
-/// The widget type a [`RenderObjectElement`] is generic over, and how to read it off the
-/// erased widget.
+/// The widget type of a render object element made for one widget type (a viewport, the
+/// overlay's theater), and how to read it off the erased widget, for the typed reads its own
+/// overrides make. The framework's leaf, single-child and multi-child elements serve every widget
+/// of their kind and do not implement it.
 pub trait RenderObjectElementWidget {
     /// The widget class.
     type Widget: RenderObjectWidget;
 
     /// Dart's `widget as RenderObjectWidget`.
     fn widget_of(widget: &WidgetRef) -> &Self::Widget;
+}
+
+/// The calls a render object element's shared bodies make on its widget: create, update and
+/// let go of the render object.
+///
+/// An element of one widget type gets them from its typed widget (the blanket impl over
+/// [`RenderObjectElementWidget`]); the framework's leaf, single-child and multi-child elements,
+/// one for every widget of their kind, make them through the erased widget
+/// ([`AnyRenderObjectWidget`]). The two routes exist because a widget written as its own
+/// `impl Widget` (`LayoutBuilder`, `Table`, a view) has only its typed calls; a widget that goes
+/// through one of the framework's wrappers has both.
+pub trait RenderObjectWidgetCalls: RenderObjectElement {
+    /// The widget's `createRenderObject`.
+    fn create_render_object(
+        self: Handle<Self>,
+        app: &mut App,
+        widget: &WidgetRef,
+    ) -> AnyRenderObject;
+
+    /// The widget's `updateRenderObject` on this element's render object.
+    fn update_render_object(self: Handle<Self>, app: &mut App, widget: &WidgetRef);
+
+    /// The old widget's `didUnmountRenderObject` on this element's render object.
+    fn did_unmount_render_object(
+        self: Handle<Self>,
+        app: &mut App,
+        old_widget: &WidgetRef,
+        render_object: AnyRenderObject,
+    );
+}
+
+impl<T: RenderObjectElement + RenderObjectElementWidget> RenderObjectWidgetCalls for T {
+    fn create_render_object(
+        self: Handle<Self>,
+        app: &mut App,
+        widget: &WidgetRef,
+    ) -> AnyRenderObject {
+        T::widget_of(widget).create_render_object(app, self.as_element())
+    }
+
+    fn update_render_object(self: Handle<Self>, app: &mut App, widget: &WidgetRef) {
+        let render_object = self.typed_render_object(app);
+        T::widget_of(widget).update_render_object(app, self.as_element(), render_object);
+    }
+
+    fn did_unmount_render_object(
+        self: Handle<Self>,
+        app: &mut App,
+        old_widget: &WidgetRef,
+        render_object: AnyRenderObject,
+    ) {
+        let render_object = render_object
+            .downcast(app)
+            .expect("the render object this widget created");
+        T::widget_of(old_widget).did_unmount_render_object(app, render_object);
+    }
+}
+
+/// [`RenderObjectWidgetCalls`] for a framework element of one kind, whose widget is reached
+/// erased through `$widget_face: fn(&WidgetRef) -> &dyn AnyRenderObjectWidget`.
+macro_rules! erased_render_object_widget_calls {
+    ($element:ty, $widget_face:expr) => {
+        impl RenderObjectWidgetCalls for $element {
+            fn create_render_object(
+                self: Handle<Self>,
+                app: &mut App,
+                widget: &WidgetRef,
+            ) -> AnyRenderObject {
+                $widget_face(widget).create_render_object(app, self.as_element())
+            }
+
+            fn update_render_object(self: Handle<Self>, app: &mut App, widget: &WidgetRef) {
+                let render_object = RenderObjectElement::render_object(self, app);
+                $widget_face(widget).update_render_object(app, self.as_element(), render_object);
+            }
+
+            fn did_unmount_render_object(
+                self: Handle<Self>,
+                app: &mut App,
+                old_widget: &WidgetRef,
+                render_object: AnyRenderObject,
+            ) {
+                $widget_face(old_widget).did_unmount_render_object(app, render_object);
+            }
+        }
+    };
 }
 
 /// The `impl Element` overrides every render object element writes the same way.
@@ -1123,36 +1191,34 @@ macro_rules! render_object_element_overrides {
 // ---------------------------------------------------------------------------------------------
 // LeafRenderObjectElement
 
-/// An [`Element`] that uses a [`LeafRenderObjectWidget`] as its configuration.
-pub struct LeafRenderObjectElement<W: LeafRenderObjectWidget> {
+/// An [`Element`] that uses a [`LeafRenderObjectWidget`](super::widget::LeafRenderObjectWidget) as its configuration.
+pub struct LeafRenderObjectElement {
     element: ElementData,
     render_object_element: RenderObjectElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: LeafRenderObjectWidget> LeafRenderObjectElement<W> {
+impl LeafRenderObjectElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(LeafRenderObjectElement::<W> {
+        debug_assert!(widget.as_render_object().is_some());
+        app.create(LeafRenderObjectElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 }
 
-impl<W: LeafRenderObjectWidget> RenderObjectElementWidget for LeafRenderObjectElement<W> {
-    type Widget = W;
+erased_render_object_widget_calls!(LeafRenderObjectElement, leaf_widget);
 
-    fn widget_of(widget: &WidgetRef) -> &W {
-        downcast_widget::<W>(&**widget)
-            .expect("a LeafRenderObjectElement holds its LeafRenderObjectWidget")
-    }
+/// `widget` as the render object widget a leaf element holds.
+fn leaf_widget(widget: &WidgetRef) -> &dyn AnyRenderObjectWidget {
+    widget
+        .as_render_object()
+        .expect("a LeafRenderObjectElement holds a LeafRenderObjectWidget")
 }
 
-impl<W: LeafRenderObjectWidget> RenderObjectElement for LeafRenderObjectElement<W> {
+impl RenderObjectElement for LeafRenderObjectElement {
     fn render_object_element_data(self: Handle<Self>, app: &App) -> &RenderObjectElementData {
         &app.get(self).render_object_element
     }
@@ -1165,7 +1231,7 @@ impl<W: LeafRenderObjectWidget> RenderObjectElement for LeafRenderObjectElement<
     }
 }
 
-impl<W: LeafRenderObjectWidget> Element for LeafRenderObjectElement<W> {
+impl Element for LeafRenderObjectElement {
     crate::element_accessors!();
     render_object_element_overrides!();
 
@@ -1212,23 +1278,27 @@ pub struct SingleChildRenderObjectElementData {
 }
 
 /// The bodies of Dart's `SingleChildRenderObjectElement`: an [`Element`] that uses a
-/// [`SingleChildRenderObjectWidget`] as its configuration.
+/// [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget) as its configuration.
 ///
 /// The child is optional.
 ///
 /// This element subclass can be used for [`RenderObjectWidget`]s whose `RenderObject`s use the
 /// `RenderObjectWithChildMixin` mixin. Such widgets are expected to inherit from
-/// [`SingleChildRenderObjectWidget`].
+/// [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget).
 ///
 /// Flutter's class is instantiable and also subclassed (`SingleChildScrollView`'s viewport
 /// element), so the bodies live on this trait and [`SingleChildRenderObjectElement`] is the
 /// plain leaf that implements it; a subclass calls the body it overrides by name where Dart
 /// writes `super`.
+///
+/// The bodies reach the widget's child and its render object's child slot through
+/// [`Widget::as_single_child_render_object`](super::widget::Widget::as_single_child_render_object),
+/// which only the framework's wrapper answers: an element implementing this trait needs its
+/// widget to reach the tree through [`IntoWidget`](super::widget::IntoWidget) as a
+/// [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget), with its own
+/// `create_element` (as `SingleChildViewport` does), not through an `impl Widget` of its own.
 pub trait SingleChildRenderObjectElementBase:
-    RenderObjectElement + RenderObjectElementWidget
-where
-    Self::Widget: SingleChildRenderObjectWidget,
-    <Self::Widget as RenderObjectWidget>::RenderObject: RenderObjectWithChildMixin,
+    RenderObjectElement + RenderObjectWidgetCalls
 {
     /// The child slot, held under the field `single_child`.
     fn single_child_data(self: Handle<Self>, app: &App) -> &SingleChildRenderObjectElementData;
@@ -1248,7 +1318,7 @@ where
     /// which both `mount` and `update` run.
     #[inline(always)]
     fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
-        let child_widget = Self::widget_of(self.as_element().widget(app))
+        let child_widget = single_child_widget(self.as_element().widget(app))
             .child()
             .cloned();
         let child = self.single_child_data(app).child;
@@ -1279,6 +1349,16 @@ where
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
+        debug_assert!(
+            self.as_element()
+                .widget(app)
+                .as_single_child_render_object()
+                .is_some(),
+            "{:?} uses SingleChildRenderObjectElementBase, but its widget did not reach the tree \
+             through the framework's SingleChildRenderObjectWidget wrapper: turn it into a widget \
+             with into_widget and give it its own create_element",
+            self.as_element()
+        );
         RenderObjectElement::mount(self, app, parent, new_slot);
         self.update_child_from_widget(app);
     }
@@ -1298,8 +1378,9 @@ where
         slot: Option<Slot>,
     ) {
         debug_assert!(slot.is_none());
-        let render_object = self.typed_render_object(app);
-        render_object.set_child(app, Some(ErasedRenderObject::from_object(child)));
+        let render_object = RenderObjectElement::render_object(self, app);
+        let widget = self.as_element().widget(app).clone();
+        single_child_widget(&widget).set_render_object_child(app, render_object, Some(child));
     }
 
     /// `SingleChildRenderObjectElement.moveRenderObjectChild`.
@@ -1321,58 +1402,48 @@ where
         slot: Option<Slot>,
     ) {
         debug_assert!(slot.is_none());
-        let render_object = self.typed_render_object(app);
-        debug_assert!(render_object.child(app).map(|current| current.as_object()) == Some(child));
-        render_object.set_child(app, None);
+        let render_object = RenderObjectElement::render_object(self, app);
+        let widget = self.as_element().widget(app).clone();
+        let widget = single_child_widget(&widget);
+        debug_assert!(widget.render_object_child(app, render_object) == Some(child));
+        widget.set_render_object_child(app, render_object, None);
     }
 }
 
-/// An [`Element`] that uses a [`SingleChildRenderObjectWidget`] as its configuration: the leaf
+/// An [`Element`] that uses a [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget) as its configuration: the leaf
 /// that has no bodies of its own beyond [`SingleChildRenderObjectElementBase`]'s.
-pub struct SingleChildRenderObjectElement<W: SingleChildRenderObjectWidget>
-where
-    W::RenderObject: RenderObjectWithChildMixin,
-{
+pub struct SingleChildRenderObjectElement {
     element: ElementData,
     render_object_element: RenderObjectElementData,
     single_child: SingleChildRenderObjectElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: SingleChildRenderObjectWidget> SingleChildRenderObjectElement<W>
-where
-    W::RenderObject: RenderObjectWithChildMixin,
-{
+impl SingleChildRenderObjectElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(SingleChildRenderObjectElement::<W> {
+        debug_assert!(widget.as_single_child_render_object().is_some());
+        app.create(SingleChildRenderObjectElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
             single_child: SingleChildRenderObjectElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 }
 
-impl<W: SingleChildRenderObjectWidget> RenderObjectElementWidget
-    for SingleChildRenderObjectElement<W>
-where
-    W::RenderObject: RenderObjectWithChildMixin,
-{
-    type Widget = W;
+erased_render_object_widget_calls!(
+    SingleChildRenderObjectElement,
+    |widget| -> &dyn AnyRenderObjectWidget { single_child_widget(widget) }
+);
 
-    fn widget_of(widget: &WidgetRef) -> &W {
-        downcast_widget::<W>(&**widget)
-            .expect("a SingleChildRenderObjectElement holds its SingleChildRenderObjectWidget")
-    }
+/// `widget` as the widget a single-child render object element holds.
+fn single_child_widget(widget: &WidgetRef) -> &dyn AnySingleChildRenderObjectWidget {
+    widget
+        .as_single_child_render_object()
+        .expect("a single-child render object element holds a SingleChildRenderObjectWidget")
 }
 
-impl<W: SingleChildRenderObjectWidget> RenderObjectElement for SingleChildRenderObjectElement<W>
-where
-    W::RenderObject: RenderObjectWithChildMixin,
-{
+impl RenderObjectElement for SingleChildRenderObjectElement {
     fn render_object_element_data(self: Handle<Self>, app: &App) -> &RenderObjectElementData {
         &app.get(self).render_object_element
     }
@@ -1385,11 +1456,7 @@ where
     }
 }
 
-impl<W: SingleChildRenderObjectWidget> SingleChildRenderObjectElementBase
-    for SingleChildRenderObjectElement<W>
-where
-    W::RenderObject: RenderObjectWithChildMixin,
-{
+impl SingleChildRenderObjectElementBase for SingleChildRenderObjectElement {
     fn single_child_data(self: Handle<Self>, app: &App) -> &SingleChildRenderObjectElementData {
         &app.get(self).single_child
     }
@@ -1402,10 +1469,7 @@ where
     }
 }
 
-impl<W: SingleChildRenderObjectWidget> Element for SingleChildRenderObjectElement<W>
-where
-    W::RenderObject: RenderObjectWithChildMixin,
-{
+impl Element for SingleChildRenderObjectElement {
     crate::element_accessors!();
 
     fn render_object(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
@@ -1432,7 +1496,7 @@ where
         visitor: &mut dyn FnMut(AnyElement),
     ) {
         let children: Vec<AnyElement> = self.child(app).into_iter().collect();
-        Self::widget_of(self.as_element().widget(app))
+        single_child_widget(self.as_element().widget(app))
             .debug_visit_onstage_children(app, &children, visitor);
     }
 
@@ -1528,16 +1592,24 @@ pub struct MultiChildRenderObjectElementData {
 }
 
 /// The bodies of Dart's `MultiChildRenderObjectElement`: an [`Element`] that uses a
-/// [`MultiChildRenderObjectWidget`] as its configuration.
+/// [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget) as its configuration.
 ///
 /// This element subclass can be used for [`RenderObjectWidget`]s whose `RenderObject`s use the
 /// `ContainerRenderObjectMixin` mixin with a parent data type that implements
 /// `ContainerParentDataMixin`. Such widgets are expected to inherit from
-/// [`MultiChildRenderObjectWidget`].
+/// [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget).
 ///
 /// Flutter's class is instantiable and also subclassed (`Viewport`'s element), so the bodies
 /// live on this trait and [`MultiChildRenderObjectElement`] is the plain leaf that implements
 /// it; a subclass calls the body it overrides by name where Dart writes `super`.
+///
+/// The bodies reach the widget's children and its render object's child list through
+/// [`Widget::as_multi_child_render_object`](super::widget::Widget::as_multi_child_render_object),
+/// which only the framework's wrapper answers: an element implementing this trait needs its
+/// widget to reach the tree through [`IntoWidget`](super::widget::IntoWidget) as a
+/// [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget), with its own
+/// `create_element` (as `Viewport` and the overlay's `Theater` do), not through an
+/// `impl Widget` of its own.
 ///
 /// See also:
 ///
@@ -1545,12 +1617,7 @@ pub struct MultiChildRenderObjectElementData {
 ///   [`MultiChildRenderObjectElement`].
 /// * [`AnyElement::update_children`], which discusses why [`IndexedSlot`] is used for the slots
 ///   of the children.
-pub trait MultiChildRenderObjectElementBase:
-    RenderObjectElement + RenderObjectElementWidget
-where
-    Self::Widget: MultiChildRenderObjectWidget,
-    <Self::Widget as RenderObjectWidget>::RenderObject: ContainerRenderObjectMixin,
-{
+pub trait MultiChildRenderObjectElementBase: RenderObjectElement + RenderObjectWidgetCalls {
     /// The child list, held under the field `multi_child`.
     fn multi_child_data(self: Handle<Self>, app: &App) -> &MultiChildRenderObjectElementData;
 
@@ -1575,17 +1642,12 @@ where
 
     /// Dart's `slot.value?.renderObject`: the child this child is inserted after, as the
     /// container's `ChildType`.
-    fn after_render_object(
-        app: &App,
-        slot: Option<&Slot>,
-    ) -> Option<
-        <<Self::Widget as RenderObjectWidget>::RenderObject as ContainerRenderObjectMixin>::ChildType,
-    >{
+    fn after_render_object(app: &App, slot: Option<&Slot>) -> Option<AnyRenderObject> {
         let render_object = Self::indexed_slot(slot)
             .value?
             .render_object(app)
             .expect("the element before this slot has a render object");
-        Some(ErasedRenderObject::from_object(render_object))
+        Some(render_object)
     }
 
     /// Dart's `IndexedSlot<Element?> slot` parameter type.
@@ -1628,8 +1690,18 @@ where
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
+        debug_assert!(
+            self.as_element()
+                .widget(app)
+                .as_multi_child_render_object()
+                .is_some(),
+            "{:?} uses MultiChildRenderObjectElementBase, but its widget did not reach the tree \
+             through the framework's MultiChildRenderObjectWidget wrapper: turn it into a widget \
+             with into_widget and give it its own create_element",
+            self.as_element()
+        );
         RenderObjectElement::mount(self, app, parent, new_slot);
-        let child_widgets = Self::widget_of(self.as_element().widget(app))
+        let child_widgets = multi_child_widget(self.as_element().widget(app))
             .children()
             .to_vec();
         let mut children = Vec::with_capacity(child_widgets.len());
@@ -1653,7 +1725,7 @@ where
     #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         RenderObjectElement::update(self, app, new_widget);
-        let child_widgets = Self::widget_of(self.as_element().widget(app))
+        let child_widgets = multi_child_widget(self.as_element().widget(app))
             .children()
             .to_vec();
         let old_children = self.multi_child_data(app).children.clone();
@@ -1681,9 +1753,10 @@ where
         child: AnyRenderObject,
         slot: Option<Slot>,
     ) {
-        let render_object = self.typed_render_object(app);
+        let render_object = RenderObjectElement::render_object(self, app);
         let after = Self::after_render_object(app, slot.as_ref());
-        render_object.insert(app, ErasedRenderObject::from_object(child), after);
+        let widget = self.as_element().widget(app).clone();
+        multi_child_widget(&widget).insert_render_object_child(app, render_object, child, after);
     }
 
     /// `MultiChildRenderObjectElement.moveRenderObjectChild`.
@@ -1694,10 +1767,11 @@ where
         _old_slot: Option<Slot>,
         new_slot: Option<Slot>,
     ) {
-        let render_object = self.typed_render_object(app);
-        debug_assert!(child.parent(app) == Some(RenderObjectElement::render_object(self, app)));
+        let render_object = RenderObjectElement::render_object(self, app);
+        debug_assert!(child.parent(app) == Some(render_object));
         let after = Self::after_render_object(app, new_slot.as_ref());
-        render_object.move_child(app, ErasedRenderObject::from_object(child), after);
+        let widget = self.as_element().widget(app).clone();
+        multi_child_widget(&widget).move_render_object_child(app, render_object, child, after);
     }
 
     /// `MultiChildRenderObjectElement.removeRenderObjectChild`.
@@ -1707,57 +1781,47 @@ where
         child: AnyRenderObject,
         _slot: Option<Slot>,
     ) {
-        let render_object = self.typed_render_object(app);
-        debug_assert!(child.parent(app) == Some(RenderObjectElement::render_object(self, app)));
-        render_object.remove(app, ErasedRenderObject::from_object(child));
+        let render_object = RenderObjectElement::render_object(self, app);
+        debug_assert!(child.parent(app) == Some(render_object));
+        let widget = self.as_element().widget(app).clone();
+        multi_child_widget(&widget).remove_render_object_child(app, render_object, child);
     }
 }
 
-/// An [`Element`] that uses a [`MultiChildRenderObjectWidget`] as its configuration: the leaf
+/// An [`Element`] that uses a [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget) as its configuration: the leaf
 /// that has no bodies of its own beyond [`MultiChildRenderObjectElementBase`]'s.
-pub struct MultiChildRenderObjectElement<W: MultiChildRenderObjectWidget>
-where
-    W::RenderObject: ContainerRenderObjectMixin,
-{
+pub struct MultiChildRenderObjectElement {
     element: ElementData,
     render_object_element: RenderObjectElementData,
     multi_child: MultiChildRenderObjectElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: MultiChildRenderObjectWidget> MultiChildRenderObjectElement<W>
-where
-    W::RenderObject: ContainerRenderObjectMixin,
-{
+impl MultiChildRenderObjectElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(MultiChildRenderObjectElement::<W> {
+        debug_assert!(widget.as_multi_child_render_object().is_some());
+        app.create(MultiChildRenderObjectElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
             multi_child: MultiChildRenderObjectElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 }
 
-impl<W: MultiChildRenderObjectWidget> RenderObjectElementWidget for MultiChildRenderObjectElement<W>
-where
-    W::RenderObject: ContainerRenderObjectMixin,
-{
-    type Widget = W;
+erased_render_object_widget_calls!(
+    MultiChildRenderObjectElement,
+    |widget| -> &dyn AnyRenderObjectWidget { multi_child_widget(widget) }
+);
 
-    fn widget_of(widget: &WidgetRef) -> &W {
-        downcast_widget::<W>(&**widget)
-            .expect("a MultiChildRenderObjectElement holds its MultiChildRenderObjectWidget")
-    }
+/// `widget` as the widget a multi-child render object element holds.
+fn multi_child_widget(widget: &WidgetRef) -> &dyn AnyMultiChildRenderObjectWidget {
+    widget
+        .as_multi_child_render_object()
+        .expect("a multi-child render object element holds a MultiChildRenderObjectWidget")
 }
 
-impl<W: MultiChildRenderObjectWidget> RenderObjectElement for MultiChildRenderObjectElement<W>
-where
-    W::RenderObject: ContainerRenderObjectMixin,
-{
+impl RenderObjectElement for MultiChildRenderObjectElement {
     fn render_object_element_data(self: Handle<Self>, app: &App) -> &RenderObjectElementData {
         &app.get(self).render_object_element
     }
@@ -1770,11 +1834,7 @@ where
     }
 }
 
-impl<W: MultiChildRenderObjectWidget> MultiChildRenderObjectElementBase
-    for MultiChildRenderObjectElement<W>
-where
-    W::RenderObject: ContainerRenderObjectMixin,
-{
+impl MultiChildRenderObjectElementBase for MultiChildRenderObjectElement {
     fn multi_child_data(self: Handle<Self>, app: &App) -> &MultiChildRenderObjectElementData {
         &app.get(self).multi_child
     }
@@ -1787,10 +1847,7 @@ where
     }
 }
 
-impl<W: MultiChildRenderObjectWidget> Element for MultiChildRenderObjectElement<W>
-where
-    W::RenderObject: ContainerRenderObjectMixin,
-{
+impl Element for MultiChildRenderObjectElement {
     crate::element_accessors!();
 
     fn render_object(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
@@ -1849,7 +1906,7 @@ where
         MultiChildRenderObjectElementBase::visit_children(self, app, &mut |child| {
             children.push(child);
         });
-        Self::widget_of(self.as_element().widget(app))
+        multi_child_widget(self.as_element().widget(app))
             .debug_visit_onstage_children(app, &children, visitor);
     }
 
