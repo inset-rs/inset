@@ -1,0 +1,74 @@
+---
+title: State
+description: Keep the app's data in entities, and a widget's own objects in its State.
+---
+## Entities
+
+The app's data lives in entities. `app.new_entity(|cx| value)` makes one and answers an `Entity<T>`, a counted handle that clones cheaply. Reading it in `build` with `entity.read(app)` subscribes the widget, and `entity.update(app, |value, cx| …)` changes it; `cx.notify()` in the update rebuilds every widget that read it.
+
+```rust
+let count = app.new_entity(|_cx| 0u32);
+let n = *count.read(app);                                 // in build
+count.update(app, |n, cx| { *n += 1; cx.notify(); });     // in a callback
+```
+
+An entity tells others what happened as well: one whose type is an `EventEmitter<E>` emits with `cx.emit(event)`, and another hears it through `cx.subscribe(&entity, |this, emitter, event, cx| …)`, keeping the `Subscription` it answers in a field, since dropping it ends the subscription.
+
+Four rules keep the borrow checker out of the way:
+
+- **Read what you need, then drop the borrow.** `entity.read(app)` borrows `app` immutably for as long as the reference lives. Calling anything that takes `&mut App` — `ThemeResources::of(app, context)`, `entity.update(app, …)`, or another `app.get_mut(...)` — while holding that reference fails with `E0502` or `E0499`. Copy or clone the values you need in a short block so the borrow ends before the next `app` call:
+
+```rust
+let (items, active) = {
+    let notes = self.notes.read(app);
+    (notes.items.clone(), notes.active)
+};
+// `notes` is dropped; `app` is free for `&mut App` calls again
+let theme = ThemeResources::of(app, context);
+```
+
+- **A field keeps an `Entity`** (or a `Ref`); code that only uses an object during a call takes it by reference, or the bare `Handle`.
+- **Each closure that keeps one takes its own clone**, made just before `move`: a callback can be called many times, so it cannot give away what it captured.
+- **Methods go on a type of your own.** `Entity<T>` is Waft's, so `impl Entity<Notes>` does not compile: put the methods that change state on a struct around the entity (`impl NotesModel`, as `ClockModel` on [Architecture](/docs/architecture#logic-state-and-ui)), and the rules themselves on `T`.
+
+> `app.create(value)` makes a `Ref<T>`, which looks like an entity and is not one: it keeps a Flutter object in the arena, and nothing that reads it rebuilds when it changes. App data goes in `app.new_entity`.
+
+## A widget's own objects
+
+A widget needs a `State` only when it owns something no one else does: a Flutter object it makes and disposes of, such as a text field's controller or an animation, or view state no one else reads, such as whether its panel is open. Every `StatefulWidget` (and `StatelessWidget`) struct must derive `Debug` (its `State` struct does not). The state keeps a `StateData` field named `state` and `state_accessors!()`, which the framework reads, and `set_state` changes it and rebuilds:
+
+```rust
+#[derive(Debug)]
+struct Disclosure {
+    title: String,
+}
+
+struct DisclosureState {
+    state: StateData<Disclosure>,
+    open: bool,
+}
+
+impl StatefulWidget for Disclosure {
+    type State = DisclosureState;
+    fn create_state(&self) -> DisclosureState {
+        DisclosureState { state: StateData::new(), open: false }
+    }
+}
+
+impl State for DisclosureState {
+    type Widget = Disclosure;
+    waft::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let label = format!("{} {}", if app.get(self).open { "▾" } else { "▸" }, self.widget(app).title);
+        let toggle = Listener::new(move |app| self.set_state(app, |state| state.open = !state.open));
+        Button::text(label, toggle).into_widget()
+    }
+}
+```
+
+- `self.widget(app)` is the widget's current configuration, Flutter's `widget`.
+- `init_state` makes what the state owns, such as a controller, and `dispose` disposes of it ([Text input](/docs/text-input)).
+- The state's methods take `self: Handle<Self>`: the state lives in the app's arena ([Handles and ownership](/docs/handles)), and `app.get(self)` reads it.
+
+> The `StateData` field and `state_accessors!()` are how Waft ports Dart's mixins: a field for the data, accessors for the trait. A missing one shows as "not all trait items implemented, missing: `state_data`, `state_data_mut`".

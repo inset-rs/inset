@@ -1,0 +1,33 @@
+---
+title: Layout
+description: Rows, columns, lists and grids, laid out as Flutter lays them out.
+---
+Layout is Flutter's: constraints go down, sizes go up, and a parent places its children, as Flutter's [Understanding constraints](https://docs.flutter.dev/ui/layout/constraints) explains. So are the widgets:
+
+- `Row`, `Column` (both with `spacing`), `Expanded`, `Flexible` and `Spacer`;
+- `Padding`, `SizedBox`, `ConstrainedBox` and `AspectRatio`; `Center` and `Align`; `Stack` with `Positioned`; `Wrap`;
+- `ListView` (`ListView::builder` for a long list), `GridView`, `SingleChildScrollView`, `PageView`, and `CustomScrollView` with slivers;
+- `LayoutBuilder` and `MediaQuery` for the room there is;
+- `Container`, `ColoredBox`, `DecoratedBox` and `ClipRRect`.
+
+```rust
+let notes = ListView::builder(|_app, _context, i| Some(Text::new(format!("Note {i}")).into_widget()))
+    .item_count(100);
+Column::new()
+    .cross_axis_alignment(CrossAxisAlignment::Stretch)
+    .children([
+        Padding::new(EdgeInsetsGeometry::all(12.0)).child(Text::new("Notes")).into_widget(),
+        Expanded::new(notes).into_widget(),
+    ])
+```
+A grid of tiles at most 160 points wide, with room around it:
+
+```rust
+GridView::extent(160.0)
+    .main_axis_spacing(8.0)
+    .cross_axis_spacing(8.0)
+    .children(tiles)
+    .build()
+    .padding(EdgeInsetsGeometry::all(16.0))
+```
+> `GridView::extent` and `GridView::count` take the tiles' settings; `.build()` answers the `GridView`, whose `padding` and scrolling settings follow it.

@@ -1,0 +1,19 @@
+{
+  "title": "Waft",
+  "description": "Solid, fluent cross-platform apps in Rust.",
+  "pages": [
+    "start",
+    "architecture",
+    "state",
+    "handles",
+    "layout",
+    "text-input",
+    "kits",
+    "pages",
+    "shortcuts",
+    "testing",
+    "cli",
+    "embedder",
+    "reference"
+  ]
+}

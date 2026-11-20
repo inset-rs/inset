@@ -1,0 +1,81 @@
+---
+title: Text input
+description: "A text field, its controller and its focus: read and set its text, and hear it change."
+---
+A text field edits the text of a `TextEditingController`, a Flutter object the widget that shows the field makes and disposes of, so that widget is a `StatefulWidget` and the controller lives in its `State`. The field itself is the kit's: WinUI's `TextBox`, Cupertino's `CupertinoTextField` or Material's `TextField`. A `FocusNode` is how the app moves the keyboard's focus to a field.
+
+A search box that hands what is typed to the app's entity, and takes the focus when the page opens:
+
+```rust
+#[derive(Debug)]
+struct SearchBox {
+    search: Entity<Search>,
+}
+
+struct SearchBoxState {
+    state: StateData<SearchBox>,
+    query: Option<Ref<TextEditingController>>,
+    focus: Option<Ref<FocusNode>>,
+}
+
+impl StatefulWidget for SearchBox {
+    type State = SearchBoxState;
+    fn create_state(&self) -> SearchBoxState {
+        SearchBoxState { state: StateData::new(), query: None, focus: None }
+    }
+}
+
+impl State for SearchBoxState {
+    type Widget = SearchBox;
+    waft::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let query = TextEditingController::new(app).text(app, "rust");
+        let focus = FocusNode::new(app);
+        let state = app.get_mut(self);
+        state.query = Some(query);
+        state.focus = Some(focus);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(query) = app.get_mut(self).query.take() {
+            query.dispose(app);
+        }
+        if let Some(focus) = app.get_mut(self).focus.take() {
+            focus.dispose(app);
+        }
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let query = app.get(self).query.clone().expect("made in init_state");
+        let focus = app.get(self).focus.clone().expect("made in init_state");
+        let search = self.widget(app).search.clone();
+        let clear = query.clone();
+        Row::new()
+            .spacing(8.0)
+            .children([
+                Expanded::new(
+                    TextBox::new(query.erase())
+                        .focus_node(focus.erase())
+                        .autofocus(true)
+                        .placeholder_text("Search")
+                        .text_changed(move |app, text| search.update(app, |search, cx| {
+                            search.query = text;
+                            cx.notify();
+                        })),
+                )
+                .into_widget(),
+                Button::text("Clear", Listener::new(move |app| clear.clear(app))).into_widget(),
+            ])
+            .into_widget()
+    }
+}
+```
+- `controller.text_value(app)` reads the text, `set_text(app, text)` replaces it and `clear(app)` empties it; `TextEditingController::new(app).text(app, "…")` starts it with some. These are the `TextEditingControllerLeaf` trait's, which `use waft::*` brings in.
+- `text_changed` is called with the new text at each change the user makes. A change the app makes with `set_text` reaches whoever listens to the controller itself: `controller.add_listener(app, listener)`.
+- `focus.request_focus(app, None)` moves the focus to the field, `focus.has_focus(app)` says whether it has it, and `autofocus(true)` takes it when the field first shows.
+- `accepts_return(true)` makes a `TextBox` of many lines, and `PasswordBox` hides what is typed.
+
+> `EditableText` is the editing engine under every field, and takes no taps or clicks of its own: use the kit's field.
+
+> Keep the field's controller in the `State`, not in an entity: the controller is the field's own, made in `init_state` and disposed of in `dispose`, and the app's entity keeps the text it cares about.

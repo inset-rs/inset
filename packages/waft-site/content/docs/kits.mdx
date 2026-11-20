@@ -1,0 +1,80 @@
+---
+title: The kits
+description: WinUI's, Cupertino's and Material's controls, and their themes.
+---
+The controls come from a kit over Waft's core widgets, each a crate of its own. Try WinUI's and Cupertino's live in their galleries: [WinUI Gallery](https://winui-gallery.waft.rs), [Cupertino Gallery](https://cupertino-gallery.waft.rs).
+
+- **WinUI** ([`waft-winui`](https://docs.rs/waft-winui), `cargo waft new --template winui`): desktop, web, and adaptive apps.
+- **Cupertino** ([`waft-cupertino`](https://docs.rs/waft-cupertino), `cargo waft new --template cupertino`): iOS-styled mobile apps.
+- **Material** ([`waft-material`](https://docs.rs/waft-material), added to `Cargo.toml`): apps in Material Design 3.
+
+## WinUI
+Its controls are ports of Microsoft's WinUI, with XAML's names and behaviour, so [WinUI's documentation](https://learn.microsoft.com/windows/apps/design/controls/) tells what a control does. Most hold no value of their own: the app passes the value, and the control's callback asks for a change, which the app makes. A control that opens a popup needs an `Overlay` above it, which `FluentApp` or `WidgetsApp` gives.
+
+```rust
+let on = self.wifi.read(app).on;                           // in build
+let wifi = self.wifi.clone();
+ToggleSwitch::new(on, move |app, on| wifi.update(app, |wifi, cx| { wifi.on = on; cx.notify(); }))
+```
+
+| For | WinUI's controls |
+| --- | --- |
+| Buttons | `Button` (standard, accent or subtle), `HyperlinkButton` (a link's look; the app opens the link), `RepeatButton` (clicks again while held), `ToggleButton` (stays checked), `DropDownButton` (opens a flyout), `SplitButton` and `ToggleSplitButton` (an action, or a toggle, beside a button that opens a flyout) |
+| Choices | `CheckBox` (two or three states), `RadioButton` (one of a group the app keeps), `ToggleSwitch` (on or off), `Slider` (a value in a range), `ComboBox` (an item from a drop-down list, or typed), `NumberBox` (a number or an expression, with spin buttons), `ColorPicker` (a colour from a spectrum, sliders, channels or hex) |
+| Text | `TextBox` (one line or many), `PasswordBox` (hidden, with a reveal); [Text input](/docs/text-input) |
+| Menus, flyouts and dialogs | `MenuBar` (menus drawn in the window), `MenuFlyout` (commands, checks, radio items and submenus), `Flyout` (any content, anchored to a control), `ContentDialog` (a modal question with buttons, `show_async`), `ToolTipService` with `ToolTip` (help on hover and focus) |
+| Navigation | `NavigationView` (the app's pages in a pane that adapts to the width, or along the top), `TabView` (tabs to select, close and drag), `SelectorBar` (a few views of one page), `BreadcrumbBar` (the path to where the user is), `TreeView` (nested nodes to expand, select and reorder), `SplitView` (a pane beside or over the content) |
+| Status | `ProgressBar` and `ProgressRing` (a value, or work going on), `InfoBar` (a message in the page, by severity), `InfoBadge` (a count, an icon or a dot) |
+| Layout and look | `FluentApp`, `FluentPage` (a window's content on its background, clear of a phone's bars and keyboard), `Grid` with `GridCell` (XAML's rows and columns, sized in pixels, auto or star), `Expander` (content shown or hidden under a header), `FontIcon` (a glyph, such as a `FluentSymbol` once `install_icon_font` has run), `PathIcon` (a shape), `ThemeScope` |
+
+> `FluentPage` is WinUI's; `waft`'s `Page` is the `Navigator`'s, so a bare `Page` beside `use waft::*` is that one.
+
+**Its theme.** `ThemeResources::of(app, context)` gives WinUI's theme resources, a field for each XAML key: colours, sizes, corner radii, fonts. They follow the system's light or dark unless a `ThemeScope` sets them: `ThemeScope::new(Theme::Dark, child)`, with `.accent(palette)` for an `AccentPalette` other than Windows' blue, sets them for a subtree, and `ThemeScope::overriding(child)` with `.any`, `.light` or `.dark` changes some for one control, as XAML's resource dictionaries do. Text takes WinUI's type ramp from `TextBlockStyle`:
+
+```rust
+let r = ThemeResources::of(app, context);
+let title = Text::new("Notes").style(TextBlockStyle::Title.text_style(&r, r.text_fill_color_primary));
+
+let green = AccentPalette { base: Color::from_argb(255, 16, 124, 16), ..AccentPalette::default() };
+let dark = ThemeScope::new(Theme::Dark, page).accent(green);
+let square = ThemeScope::overriding(field).any(|r| r.control_corner_radius = [0.0; 4]);
+```
+
+## Cupertino
+Its widgets are Flutter's Cupertino library.
+
+| For | Cupertino's widgets |
+| --- | --- |
+| The app and its pages | `CupertinoApp`, `CupertinoPageScaffold` (a page: its navigation bar and content), `CupertinoNavigationBar`, `CupertinoSliverNavigationBar` (with a large title), `CupertinoNavigationBarBackButton`, `CupertinoPageRoute` (a page that slides in), `CupertinoSheetRoute` and `show_cupertino_sheet` (a page as a sheet) |
+| Controls | `CupertinoButton` (plain, `tinted` or `filled`), `CupertinoSwitch`, `CupertinoSlider`, `CupertinoCheckbox`, `CupertinoRadio`, `CupertinoSegmentedControl` (one of a few options), `CupertinoTextField`, `CupertinoSearchTextField` |
+| Lists and forms | `CupertinoListSection` and `CupertinoListTile` (with `CupertinoListTileChevron`), `CupertinoExpansionTile` (a tile that reveals more), `CupertinoFormSection` and `CupertinoFormRow`, `CupertinoSliverRefreshControl` (pull to refresh) |
+| Dialogs and sheets | `CupertinoAlertDialog` with `CupertinoDialogAction`, shown by `show_cupertino_dialog`; `CupertinoActionSheet` with `CupertinoActionSheetAction`, shown by `show_cupertino_modal_popup`; `CupertinoPopupSurface` |
+| Status | `CupertinoActivityIndicator` (a spinner), `CupertinoLinearActivityIndicator` (a bar) |
+| Look | `CupertinoTheme` and `CupertinoThemeData`, `CupertinoColors`, `CupertinoIcons` (once `install_cupertino_icon_font` has run), `CupertinoScrollbar` |
+
+Not in Waft's Cupertino: `CupertinoSlidingSegmentedControl`, the pickers, `CupertinoContextMenu`, and the tab bar with `CupertinoTabScaffold`.
+
+**Its theme.** `CupertinoApp::theme` takes a `CupertinoThemeData`, built with its `with_*` setters, and `CupertinoTheme::of(app, context)` reads it. It follows the system's light or dark unless `with_brightness` sets one; `CupertinoColors` are iOS's, most with a light and a dark value.
+
+```rust
+let root = CupertinoApp::new()
+    .theme(CupertinoThemeData::new().with_primary_color(CupertinoColors::SYSTEM_GREEN))
+    .home(home);
+let primary = CupertinoTheme::of(app, context).primary_color();     // in a widget's build
+```
+
+## Material
+Its widgets are Flutter's Material library: `MaterialApp`, `Scaffold`, `AppBar`, `NavigationBar`, `NavigationRail`, `Drawer`, `TabBar`; `FilledButton`, `ElevatedButton`, `OutlinedButton`, `TextButton`, `IconButton`, `FloatingActionButton`, `SegmentedButton`; `TextField`, `SearchBar`, `Checkbox`, `Switch`, `Slider`, the chips; `Card`, `ListTile`, `InkWell`, `Divider`, `Badge`, `Tooltip`; `SnackBar`, bottom sheets, `CircularProgressIndicator` and `LinearProgressIndicator`; `MaterialPageRoute`, and `Icons` once `install_material_icon_font` has run, after `run_app`.
+
+```rust
+let theme = ThemeData::builder().color_scheme_seed(Color::new(0xFF6750A4)).build(app);
+let home = Scaffold::new()
+    .app_bar(PreferredSizeWidgetRef::new(AppBar::new().title(Text::new("Notes"))))
+    .body(Center::new().child(FilledButton::new(Some(Listener::new(save)), Some(Text::new("Save")))));
+run_app(app, MaterialApp::new().theme(theme).home(home).into_widget());
+install_material_icon_font(app);
+```
+**Its theme.** `Theme::of(app, context)` answers the `ThemeData`, and its `color_scheme` the colours. The eight base colours are fields, `scheme.primary`, `on_primary`, `secondary`, `on_secondary`, `error`, `on_error`, `surface` and `on_surface`; every other role is a method, which falls back as Flutter's does: `scheme.surface_container_high()`, `scheme.primary_container()`, `scheme.outline()`.
+
+## Markdown
+For rich formatted text, add [`waft-markdown`](https://docs.rs/waft-markdown) to the app's `Cargo.toml`. It parses Markdown with `pulldown-cmark` and renders it with `Markdown` (scrollable) or `MarkdownBody` (inline), styled with `MarkdownStyleSheet` or an inherited `DefaultMarkdownStyle` and supporting custom link handlers.

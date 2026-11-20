@@ -1,0 +1,10 @@
+# The website deploys to Vercel from the repository's root, with the Vercel project's root
+# directory set to packages/waft-site. Only Cargo.toml and packages/waft-site are uploaded.
+/*
+!/Cargo.toml
+!/packages
+/packages/*
+!/packages/waft-site
+/packages/waft-site/node_modules
+/packages/waft-site/.next
+/packages/waft-site/.source

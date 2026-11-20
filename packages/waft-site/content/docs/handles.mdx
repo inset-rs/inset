@@ -1,0 +1,29 @@
+---
+title: Handles and ownership
+description: How Waft keeps Flutter's objects in an arena, and how a Ref keeps one alive.
+---
+Dart's objects point at each other freely; Rust's cannot. Waft keeps every Flutter object — each element, state, render object, controller, focus node and route — in the `App`'s arena, and names it there by a `Handle<T>`, which is `Copy` and holds nothing. `app.get(handle)` reads the object, and `app.get_mut(handle)` changes it. Exclusivity lasts one field access, never a whole pass.
+
+## What keeps an object
+A `Ref<T>` keeps an object alive: it is Dart's ordinary reference. It derefs to its `Handle<T>`, so every method of the handle is callable on it, and its clones share one count. When the last `Ref` to an object is dropped, the object is freed at the next checkpoint, the end of the current event, so a bare `Handle` stays good until then.
+
+- `app.create(value)` puts a value in the arena and answers the one `Ref` that keeps it; Waft's constructors answer one, as `TextEditingController::new(app)` and `FocusNode::new(app)` do.
+- A field, a widget, or a closure that is stored holds a `Ref`. Code that only uses an object during a call takes the bare `Handle`.
+- `handle.keep(app)` answers a new `Ref` to an object something else keeps; `handle.upgrade(app)` answers `None` where nothing does. There is no `Ref::new`.
+- An object with a `dispose`, such as a controller or a focus node, is disposed of by whoever made it, in its `State`'s `dispose`; a debug build reports one freed without it.
+
+## Erased handles
+A field Dart types as a base class, such as a `TextBox`'s controller or the `Navigator`'s routes, holds an erased handle, which names any object of that kind: `AnyTextEditingController`, `AnyFocusNode`, `AnyRoute`. A `Ref` becomes the kept one with `into_erased()`, which hands over its count, or `erase()`, which shares it:
+
+```rust
+let controller = TextEditingController::new(app);
+TextBox::new(controller.erase());                          // a TextEditingControllerRef
+let route = PageRouteBuilder::new(app, page);
+Navigator::push(app, context, route.into_erased());        // a RouteRef
+```
+The names of the kept ones end in `Ref`: `TextEditingControllerRef`, `FocusNodeRef`, `RouteRef`, each a `Retained` of the erased handle, as `Ref<T>` is a `Retained<Handle<T>>`.
+
+> A handle's own `as_controller()`, `as_node()` or `as_route()` answers the bare erased handle, which keeps nothing; a widget asks for the kept one, so use `erase()` or `into_erased()`.
+
+## Entities are not in the arena
+An `Entity<T>` is a counted handle of its own kind, made by `app.new_entity`: its object lives while an `Entity` to it does, reading it in `build` subscribes the widget, and `notify` rebuilds what read it. That is what the app's logic wants, and what an arena object does not do ([State](/docs/state)).

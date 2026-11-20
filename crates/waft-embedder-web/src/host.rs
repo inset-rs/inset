@@ -84,6 +84,7 @@ async fn run_async<C: EmbedderClient + 'static>(
         .expect("element is a canvas");
     let _ = canvas.set_attribute("tabindex", "0");
     let _ = canvas.style().set_property("touch-action", "none");
+    let _ = canvas.style().set_property("outline", "none");
     let brightness = if prefers_dark(&window) {
         Brightness::Dark
     } else {

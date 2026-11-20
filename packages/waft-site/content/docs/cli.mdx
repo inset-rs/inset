@@ -1,0 +1,69 @@
+---
+title: CLI and packaging
+description: Configure [package.metadata.waft], run on simulators, and sign installers for every platform.
+---
+`cargo waft` (`waft-cli`) builds, runs, and packages one standard Waft library crate into native distributables for macOS, Windows, Linux, iOS, Android, the web, and WASI hosts.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `cargo waft new <name> [--template cupertino\|winui]` | Scaffold a new Waft crate with `src/lib.rs`, `src/main.rs`, `assets/icon.png`, and `rust-toolchain.toml` |
+| `cargo waft doctor` | Report which platforms this machine can build for and how to install missing SDKs |
+| `cargo waft devices` | List available desktop, web, iOS simulator/device, and Android emulator/device targets |
+| `cargo waft run [-d <device>] [--release]` | Build and launch on desktop (default), `ios`, `android`, `web`, `chrome`, or a specific device ID |
+| `cargo waft build <target> [--debug]` | Build a distributable under `target/waft/`: `macos`, `dmg`, `windows`, `msi`, `nsis`, `linux`, `deb`, `appimage`, `ios`, `ipa`, `apk`, `web`, or `wasm` |
+
+## `[package.metadata.waft]`
+
+All platform packaging is configured in your crate's `Cargo.toml`:
+
+```toml
+[package.metadata.waft]
+identifier = "com.example.my-app"   # defaults to com.example.<package-name>
+name = "My App"                     # defaults to the package name, capitalized
+icon = "assets/icon.png"            # one 1024×1024 RGBA PNG; each platform's icon sizes are cut from it
+resources = ["assets", "README.md"] # files or folders carried into the package, relative to the package root
+schemes = ["myapp"]                 # custom URL schemes the system opens this app for
+
+[package.metadata.waft.usage_descriptions]
+camera = "Scan QR codes."           # NSCameraUsageDescription + macOS entitlement + Android CAMERA permission
+microphone = "Record voice notes."  # NSMicrophoneUsageDescription + macOS audio-input entitlement
+
+[package.metadata.waft.macos]
+minimum_system_version = "13.0"     # defaults to 12.0
+category = "public.app-category.productivity"
+entitlements = "macos/App.entitlements"
+helpers = ["my-helper"]             # workspace binaries placed in Contents/Helpers/<bin>
+libraries = [{ package = "my-plugin", lib = "my_plugin" }]
+
+[package.metadata.waft.ios]
+team = "ABCDE12345"
+minimum_version = "15.0"
+
+[package.metadata.waft.android]
+min_sdk = 31                        # Android 12+ (surface controls place composition layers)
+target_sdk = 34
+permissions = ["android.permission.INTERNET"]
+adaptive_icon = { foreground = "assets/icon-foreground.png", background = "#ffffff" }
+dependencies = ["android/some-library-1.0.aar", "android/kotlin-stdlib-2.2.10.jar"]
+
+[package.metadata.waft.windows]
+certificate_thumbprint = "A1B2…"
+timestamp_url = "http://timestamp.digicert.com"
+
+[[package.metadata.waft.file_associations]]
+extensions = ["md", "markdown"]
+name = "Markdown document"
+identifier = "net.daringfireball.markdown"
+mime_type = "text/markdown"
+```
+
+## Signing
+
+Signing happens automatically when credentials are present — never by flag:
+
+- **macOS (`macos`, `dmg`)**: signs inside-out with `APPLE_SIGNING_IDENTITY` (or a unique `Developer ID Application` certificate in your keychain) under the hardened runtime, and notarizes when `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_SPECIFIC_PASSWORD` (or `APPLE_KEYCHAIN_PROFILE`) are set.
+- **iOS (`ios`, `ipa`)**: signs with your Apple development or distribution identity and provisioning profile (`--export-method app-store-connect`, `ad-hoc`, `enterprise`, or `release-testing`).
+- **Android (`apk`)**: debug builds sign with the debug key; release builds sign with `[package.metadata.waft.android.release]` or `WAFT_ANDROID_KEYSTORE` / `WAFT_ANDROID_KEY_ALIAS` / `WAFT_ANDROID_STORE_PASSWORD`.
+- **Windows (`msi`, `nsis`)**: signs executables and installers with `signtool` (`certificate_thumbprint`) or a custom `sign_command`.

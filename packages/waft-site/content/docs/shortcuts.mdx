@@ -1,0 +1,22 @@
+---
+title: Keys and shortcuts
+description: Hear keys in a widget, and bind commands to keys.
+---
+Keys are Flutter's: a key goes to the widget with the focus, then up through its ancestors until one takes it. `Focus` takes the focus (`autofocus`) or hears keys itself (`on_key_event`).
+
+- `CallbackShortcuts` runs a callback for a key while the focus is inside its child, taking the key even from a text field there, so it suits keys a field neither types nor edits with, such as ⌘N.
+- `Shortcuts` maps keys to intents, and `Actions` intents to what they do. The app's own, `WidgetsApp::shortcuts` and `actions`, sit above the text fields' keys, so a field still types and moves its caret with them. Each replaces the app's defaults (Tab, Enter, Esc and what they do), so keep `WidgetsApp::default_shortcuts(app)` after your shortcuts, and `default_actions(app)` among your actions.
+- A key is a `LogicalKeyboardKey`, from the `waft-services` crate, which the program adds to its dependencies.
+
+```rust
+use waft_services::LogicalKeyboardKey;
+
+let command_n = SingleActivator::new(LogicalKeyboardKey::KEY_N).meta(true);
+let page = CallbackShortcuts::new(vec![(Rc::new(command_n), Listener::new(new_note))], Focus::new(page).autofocus(true));
+
+let space: ShortcutActivatorRef = Rc::new(SingleActivator::new(LogicalKeyboardKey::SPACE));
+let play: IntentRef = Rc::new(VoidCallbackIntent::new(Listener::new(play_pause)));
+let shortcuts = std::iter::once((space, play)).chain(WidgetsApp::default_shortcuts(app)).collect();
+let root = WidgetsApp::new(color).shortcuts(shortcuts).home(page);
+```
+On a desktop, a command on the system menu bar takes its key there: `PlainPlatformMenuItem`'s `shortcut` shows the key in the system's menu, which chooses the item when nothing with the focus takes the key.

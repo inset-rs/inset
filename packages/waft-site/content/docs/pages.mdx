@@ -1,0 +1,26 @@
+---
+title: Pages
+description: Show a page over the others and go back, with Flutter's Navigator.
+---
+Pages are kept by Flutter's `Navigator`: `Navigator::push(app, context, route)` shows a page over the others, and `Navigator::pop(app, context, result)` goes back, `push`'s future answering the `result`, an `Option<Rc<dyn Any>>`. A phone's Back gesture pops the top page automatically.
+
+- **WinUI:** `FluentApp` or the template's `WidgetsApp` holds the pages, each a `PageRouteBuilder`, which shows its page with no animation. A window's main pages are usually a `NavigationView`'s instead: the app shows the selected item's page as its content.
+- **Cupertino:** `CupertinoApp` holds them, and a `CupertinoPageRoute` is a page that slides in from the right, its title what the next page's back button says.
+- **Material:** `MaterialApp` holds them, and a `MaterialPageRoute` is a page that comes in as the platform's do.
+
+```rust
+// WinUI
+let route = PageRouteBuilder::new(app, Rc::new(|_app, _context, _, _| Details.into_widget()));
+Navigator::push(app, context, route.into_erased());
+Navigator::pop(app, context, None);                          // in Details, back
+
+// Cupertino
+let page: WidgetBuilder = Rc::new(|_app, _context| CupertinoPageScaffold::new(Details).into_widget());
+let route = CupertinoPageRoute::new(app, page).title(app, "Details".into());
+Navigator::push(app, context, route.into_erased());
+```
+`Navigator::push` takes a `RouteRef`, the kept handle of any route, which `into_erased()` makes of the route's `Ref` ([Handles and ownership](/docs/handles)).
+
+> `WidgetsApp` needs its `page_route_builder` (which `FluentApp`, `CupertinoApp`, and `MaterialApp` configure automatically): without it the app compiles, and panics on its first frame.
+
+> Every app widget shows Flutter's DEBUG ribbon in its top right corner, over the controls there, until `debug_show_checked_mode_banner(false)` hides it.
