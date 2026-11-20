@@ -213,7 +213,7 @@ export function HeroStudio() {
               borderColor: 'var(--site-hairline)',
             }}
           >
-            <div className="my-auto">
+            <div>
               <RustCodeBlock code={spec.code} className="!border-0 !bg-transparent !p-0" />
             </div>
 
@@ -249,9 +249,9 @@ export function HeroStudio() {
 
           {/* Right: Real Live WebGPU Gallery Embed */}
           <div
-            className="relative flex min-h-[580px] flex-col overflow-hidden"
+            className="relative flex h-[580px] flex-col overflow-hidden"
             style={{
-              background: activeKit === 'cupertino' ? 'var(--site-surface)' : '#ffffff',
+              background: activeKit === 'cupertino' ? 'var(--site-surface)' : '#faf9f6',
             }}
           >
             {!isIframeReady && (
@@ -282,7 +282,7 @@ export function HeroStudio() {
             {activeKit === 'cupertino' ? (
               <div className="flex flex-1 items-center justify-center p-4 sm:p-6">
                 <div
-                  className="relative h-[540px] w-full max-w-[390px] overflow-hidden rounded-[28px] border bg-white shadow-[0_18px_45px_-18px_rgba(20,20,19,0.2)]"
+                  className="relative h-[532px] w-full max-w-[390px] overflow-hidden rounded-[28px] border bg-[#faf9f6] shadow-[0_18px_45px_-18px_rgba(20,20,19,0.2)]"
                   style={{ borderColor: 'var(--site-hairline-strong)' }}
                 >
                   <iframe
