@@ -1224,6 +1224,7 @@ impl Element for FocusInheritedScopeElement {
 
     const IS_INHERITED_ELEMENT: bool = true;
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -1251,6 +1252,7 @@ impl Element for FocusInheritedScopeElement {
         ProxyElement::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }

@@ -7,6 +7,17 @@
 //!
 //! Dart's base bodies are the free functions `base_*`; an override calls the one it would
 //! call as `super`.
+//!
+//! Mounting and rebuilding recurse once per level of the tree, and on the web each wasm call
+//! costs Safari's first tier close to a kilobyte of stack however small it is, so a deep tree
+//! (the Material gallery's phone layout is about 300 levels) overflows an iPhone's stack when a
+//! level costs many calls. A level costs two: [`AnyElement::update_child`] and the child's
+//! vtable entry. What runs between them is folded into one or the other with
+//! `#[inline(always)]`: each element's `mount`, `update`, `first_build` and `perform_rebuild`
+//! and the base bodies they forward to, and [`AnyElement::inflate_widget`] (which is why it is
+//! not an override point). An element of a known type rebuilds through [`ElementBase::rebuild`],
+//! which calls its `perform_rebuild` directly rather than through the vtable. A forwarding method
+//! on that path without the attribute adds a call to every level.
 
 use std::any::{Any, TypeId};
 use std::cell::Cell;
@@ -480,17 +491,6 @@ pub trait Element: Sized + 'static {
         ElementBase::render_object(self, app)
     }
 
-    /// Create an element for the given widget and add it as a child of this element in the
-    /// given slot.
-    fn inflate_widget(
-        self: Handle<Self>,
-        app: &mut App,
-        new_widget: WidgetRef,
-        new_slot: Option<Slot>,
-    ) -> AnyElement {
-        ElementBase::inflate_widget(self, app, new_widget, new_slot)
-    }
-
     /// Whether this element is in the middle of building.
     fn debug_doing_build(self: Handle<Self>, app: &App) -> bool {
         let _ = (self, app);
@@ -609,7 +609,6 @@ pub(crate) struct ElementVTable {
     pub on_notification: fn(&mut App, HandleId, &dyn Notification) -> bool,
     pub debug_expects_render_object_for_slot: fn(&App, HandleId, Option<&Slot>) -> bool,
     pub render_object: fn(&App, HandleId) -> Option<AnyRenderObject>,
-    pub inflate_widget: fn(&mut App, HandleId, WidgetRef, Option<Slot>) -> AnyElement,
     pub debug_doing_build: fn(&App, HandleId) -> bool,
     pub is_render_object_element: bool,
     pub insert_render_object_child: fn(&mut App, HandleId, AnyRenderObject, Option<Slot>),
@@ -665,9 +664,6 @@ impl ElementVTable {
                 T::debug_expects_render_object_for_slot(resolve(id), app, slot)
             },
             render_object: |app, id| T::render_object(resolve(id), app),
-            inflate_widget: |app, id, widget, slot| {
-                T::inflate_widget(resolve(id), app, widget, slot)
-            },
             debug_doing_build: |app, id| T::debug_doing_build(resolve(id), app),
             is_render_object_element: T::IS_RENDER_OBJECT_ELEMENT,
             insert_render_object_child: |app, id, child, slot| {
@@ -973,14 +969,36 @@ impl AnyElement {
         (self.vtable.render_object)(app, self.id)
     }
 
-    /// See [`Element::inflate_widget`].
+    /// `Element.inflateWidget`: create an element for the given widget and add it as a child of
+    /// this element in the given slot.
+    #[inline(always)]
     pub fn inflate_widget(
         self,
         app: &mut App,
         new_widget: WidgetRef,
         new_slot: Option<Slot>,
     ) -> AnyElement {
-        (self.vtable.inflate_widget)(app, self.id, new_widget, new_slot)
+        let inactive_child = match new_widget.key() {
+            Some(KeyRef::Global(key)) => self.retake_inactive_element(app, key, &new_widget),
+            _ => None,
+        };
+        match inactive_child {
+            Some(inactive_child) => {
+                debug_assert!(inactive_child.parent(app).is_none());
+                inactive_child.activate_with_parent(app, self, new_slot.clone());
+                let updated_child =
+                    self.update_child(app, Some(inactive_child), Some(new_widget), new_slot);
+                debug_assert!(updated_child == Some(inactive_child));
+                updated_child.expect("a retaken child stays")
+            }
+            None => {
+                let new_child = new_widget.create_element(app, new_widget.clone());
+                debug_assert!(debug_check_for_cycles(self, app, new_child));
+                new_child.mount(app, Some(self), new_slot);
+                debug_assert!(new_child.lifecycle(app) == ElementLifecycle::Active);
+                new_child
+            }
+        }
     }
 
     /// Dart's `this is RenderObjectElement`.
@@ -1851,9 +1869,20 @@ impl AnyElement {
     /// rebuild is convenient when [`update`](Self::update) is called, during which
     /// [`dirty`](Self::dirty) is false.
     pub fn rebuild(self, app: &mut App, force: bool) {
+        if let Some(rebuilding) = self.begin_rebuild(app, force) {
+            self.perform_rebuild(app);
+            self.end_rebuild(app, rebuilding);
+        }
+    }
+
+    /// What [`rebuild`](Self::rebuild) checks and records before `perform_rebuild`, or `None`
+    /// when the element needs no rebuild. Apart from `rebuild` itself so that an element of a
+    /// known type can call its own `perform_rebuild` in between (see [`ElementBase::rebuild`]).
+    #[inline(always)]
+    pub(crate) fn begin_rebuild(self, app: &mut App, force: bool) -> Option<Rebuilding> {
         debug_assert!(self.lifecycle(app) != ElementLifecycle::Initial);
         if self.lifecycle(app) != ElementLifecycle::Active || (!self.dirty(app) && !force) {
-            return;
+            return None;
         }
         let owner = self.owner(app).expect("an active element has an owner");
         debug_assert!(owner.debug_state_locked(app));
@@ -1862,10 +1891,19 @@ impl AnyElement {
             owner.set_debug_current_build_target(app, Some(self));
             self.data_mut(app).debug_built_once = true;
         }
-        self.perform_rebuild(app);
+        Some(Rebuilding {
+            owner,
+            debug_previous_build_target,
+        })
+    }
+
+    /// What [`rebuild`](Self::rebuild) restores and checks after `perform_rebuild`.
+    #[inline(always)]
+    pub(crate) fn end_rebuild(self, app: &mut App, rebuilding: Rebuilding) {
         if cfg!(debug_assertions) {
+            let owner = rebuilding.owner;
             debug_assert!(owner.debug_current_build_target(app) == Some(self));
-            owner.set_debug_current_build_target(app, debug_previous_build_target);
+            owner.set_debug_current_build_target(app, rebuilding.debug_previous_build_target);
         }
         debug_assert!(!self.dirty(app));
     }
@@ -1933,12 +1971,30 @@ fn activate_recursively(app: &mut App, element: AnyElement) {
 // ---------------------------------------------------------------------------------------------
 // Dart's `Element` base bodies. An override calls the one it would call as `super`.
 
+/// The build owner and earlier build target an element's rebuild restores once it is done.
+pub(crate) struct Rebuilding {
+    owner: Handle<BuildOwner>,
+    debug_previous_build_target: Option<AnyElement>,
+}
+
 /// Dart's `Element` bodies, reachable from an override the way `super.mount(..)` is.
 ///
 /// Every [`Element`] implements it. An override that must run the inherited body calls it
 /// trait-qualified, `ElementBase::mount(self, app, parent, new_slot)`, at the position Dart
 /// calls `super`; the [`Element`] defaults run the same bodies.
 pub trait ElementBase: Element {
+    /// `Element.rebuild` for an element whose type is known: calls its
+    /// [`perform_rebuild`](Element::perform_rebuild) directly rather than through the vtable,
+    /// so a first build adds no frame on the way down the tree.
+    #[inline(always)]
+    fn rebuild(self: Handle<Self>, app: &mut App, force: bool) {
+        let this = self.as_element();
+        if let Some(rebuilding) = this.begin_rebuild(app, force) {
+            Element::perform_rebuild(self, app);
+            this.end_rebuild(app, rebuilding);
+        }
+    }
+
     /// `Element.renderObjectAttachingChild`: the single child, if any.
     fn render_object_attaching_child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
         let this = self.as_element();
@@ -1999,6 +2055,7 @@ pub trait ElementBase: Element {
     }
 
     /// `Element.update`.
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let this = self.as_element();
         // This code is hot when hot reloading, so we try to
@@ -2194,37 +2251,6 @@ pub trait ElementBase: Element {
             }
         }
         None
-    }
-
-    /// `Element.inflateWidget`.
-    fn inflate_widget(
-        self: Handle<Self>,
-        app: &mut App,
-        new_widget: WidgetRef,
-        new_slot: Option<Slot>,
-    ) -> AnyElement {
-        let this = self.as_element();
-        let inactive_child = match new_widget.key() {
-            Some(KeyRef::Global(key)) => this.retake_inactive_element(app, key, &new_widget),
-            _ => None,
-        };
-        match inactive_child {
-            Some(inactive_child) => {
-                debug_assert!(inactive_child.parent(app).is_none());
-                inactive_child.activate_with_parent(app, this, new_slot.clone());
-                let updated_child =
-                    this.update_child(app, Some(inactive_child), Some(new_widget), new_slot);
-                debug_assert!(updated_child == Some(inactive_child));
-                updated_child.expect("a retaken child stays")
-            }
-            None => {
-                let new_child = new_widget.create_element(app, new_widget.clone());
-                debug_assert!(debug_check_for_cycles(this, app, new_child));
-                new_child.mount(app, Some(this), new_slot);
-                debug_assert!(new_child.lifecycle(app) == ElementLifecycle::Active);
-                new_child
-            }
-        }
     }
 }
 impl<T: Element> ElementBase for T {}

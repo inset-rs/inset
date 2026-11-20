@@ -390,6 +390,7 @@ impl<W: InheritedModel> Element for InheritedModelElement<W> {
     // `debug_doing_build` keeps the trait default: `ComponentElementData` does not expose the
     // flag `ComponentElement::perform_rebuild` sets.
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -399,10 +400,12 @@ impl<W: InheritedModel> Element for InheritedModelElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ProxyElement::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }
