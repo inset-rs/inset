@@ -164,6 +164,7 @@ impl<T: ?Sized + NotificationTarget> Element for NotificationElement<T> {
     crate::element_accessors!();
     component_element_overrides!();
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -173,10 +174,12 @@ impl<T: ?Sized + NotificationTarget> Element for NotificationElement<T> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ProxyElement::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }

@@ -285,6 +285,7 @@ impl<W: InheritedNotifier> Element for InheritedNotifierElement<W> {
         self.component_data(app).debug_doing_build
     }
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -310,6 +311,7 @@ impl<W: InheritedNotifier> Element for InheritedNotifierElement<W> {
         ProxyElement::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }

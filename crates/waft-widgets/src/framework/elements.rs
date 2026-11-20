@@ -55,6 +55,7 @@ pub trait ComponentElement: Element {
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef;
 
     /// Runs [`build`](Self::build) inside [`App::entity_track`] and binds watches.
+    #[inline(never)]
     fn build_tracked(self: Handle<Self>, app: &mut App) -> WidgetRef {
         let element = self.as_element();
         let (built, tracked) = app.entity_track(|app| self.build(app));
@@ -68,6 +69,7 @@ pub trait ComponentElement: Element {
     }
 
     /// `ComponentElement.mount`: the base mount, then the first build.
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -82,14 +84,16 @@ pub trait ComponentElement: Element {
     }
 
     /// `ComponentElement._firstBuild`.
+    #[inline(always)]
     fn first_build(self: Handle<Self>, app: &mut App) {
-        self.as_element().rebuild(app, false); // This eventually calls performRebuild.
+        ElementBase::rebuild(self, app, false); // This eventually calls performRebuild.
     }
 
     /// Calls the [`build`](Self::build) method and then updates the widget tree.
     ///
     /// Called automatically during [`ComponentElement::mount`](Self::mount) to generate the
     /// first build, and by `rebuild` when the element needs updating.
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = true;
@@ -193,6 +197,7 @@ impl<W: StatelessWidget> Element for StatelessElement<W> {
     crate::element_accessors!();
     component_element_overrides!();
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -202,11 +207,13 @@ impl<W: StatelessWidget> Element for StatelessElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ElementBase::update(self, app, new_widget);
-        self.as_element().rebuild(app, true);
+        ElementBase::rebuild(self, app, true);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }
@@ -277,6 +284,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
         state.build(app, self.as_element())
     }
 
+    #[inline(always)]
     fn first_build(self: Handle<Self>, app: &mut App) {
         let state = self.state(app);
         debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
@@ -292,9 +300,10 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
                 .state_data_mut(app)
                 .set_debug_lifecycle_state(StateLifecycle::Ready);
         }
-        self.as_element().rebuild(app, false);
+        ElementBase::rebuild(self, app, false);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         if app.get(self).did_change_dependencies {
             self.state(app).did_change_dependencies(app);
@@ -322,6 +331,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     crate::element_accessors!();
     component_element_overrides!();
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -331,6 +341,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let old_widget = self.as_element().widget(app).clone();
         ElementBase::update(self, app, new_widget.clone());
@@ -339,9 +350,10 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
         let old = &downcast_widget::<W>(&*old_widget)
             .expect("a StatefulElement holds its StatefulWidget");
         state.did_update_widget(app, old);
-        self.as_element().rebuild(app, true);
+        ElementBase::rebuild(self, app, true);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }
@@ -411,12 +423,13 @@ pub trait ProxyElement: ComponentElement {
     fn notify_clients(self: Handle<Self>, app: &mut App, old_widget: WidgetRef);
 
     /// `ProxyElement.update`.
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let old_widget = self.as_element().widget(app).clone();
         debug_assert!(!Rc::ptr_eq(&old_widget, &new_widget));
         ElementBase::update(self, app, new_widget);
         self.updated(app, old_widget);
-        self.as_element().rebuild(app, true);
+        ElementBase::rebuild(self, app, true);
     }
 }
 
@@ -556,6 +569,7 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
     crate::element_accessors!();
     component_element_overrides!();
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -565,10 +579,12 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ProxyElement::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }
@@ -715,6 +731,7 @@ impl<W: ParentDataWidget> Element for ParentDataElement<W> {
     crate::element_accessors!();
     component_element_overrides!();
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -724,10 +741,12 @@ impl<W: ParentDataWidget> Element for ParentDataElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ProxyElement::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }
@@ -878,6 +897,7 @@ pub trait RenderObjectElement: Element {
     }
 
     /// `RenderObjectElement.mount`: the base mount, create the render object, attach it.
+    #[inline(always)]
     fn mount(self: Handle<Self>, app: &mut App, parent: Option<AnyElement>, new_slot: Option<Slot>)
     where
         Self: RenderObjectElementWidget,
@@ -901,6 +921,7 @@ pub trait RenderObjectElement: Element {
     }
 
     /// `RenderObjectElement.update`.
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef)
     where
         Self: RenderObjectElementWidget,
@@ -910,6 +931,7 @@ pub trait RenderObjectElement: Element {
     }
 
     /// `RenderObjectElement._performRebuild`: push the widget's configuration.
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App)
     where
         Self: RenderObjectElementWidget,
@@ -1052,6 +1074,7 @@ macro_rules! render_object_element_overrides {
 
         const IS_RENDER_OBJECT_ELEMENT: bool = true;
 
+        #[inline(always)]
         fn mount(
             self: Handle<Self>,
             app: &mut App,
@@ -1061,10 +1084,12 @@ macro_rules! render_object_element_overrides {
             RenderObjectElement::mount(self, app, parent, new_slot);
         }
 
+        #[inline(always)]
         fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
             RenderObjectElement::update(self, app, new_widget);
         }
 
+        #[inline(always)]
         fn perform_rebuild(self: Handle<Self>, app: &mut App) {
             RenderObjectElement::perform_rebuild(self, app);
         }
@@ -1221,6 +1246,7 @@ where
 
     /// Dart's `updateChild(_child, (widget as SingleChildRenderObjectWidget).child, null)`,
     /// which both `mount` and `update` run.
+    #[inline(always)]
     fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
         let child_widget = Self::widget_of(self.as_element().widget(app))
             .child()
@@ -1246,6 +1272,7 @@ where
     }
 
     /// `SingleChildRenderObjectElement.mount`.
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -1257,6 +1284,7 @@ where
     }
 
     /// `SingleChildRenderObjectElement.update`.
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         RenderObjectElement::update(self, app, new_widget);
         self.update_child_from_widget(app);
@@ -1412,6 +1440,7 @@ where
         SingleChildRenderObjectElementBase::forget_child(self, app, child);
     }
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -1421,10 +1450,12 @@ where
         SingleChildRenderObjectElementBase::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         SingleChildRenderObjectElementBase::update(self, app, new_widget);
     }
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         RenderObjectElement::perform_rebuild(self, app);
     }
@@ -1590,6 +1621,7 @@ where
     }
 
     /// `MultiChildRenderObjectElement.mount`.
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -1618,6 +1650,7 @@ where
     }
 
     /// `MultiChildRenderObjectElement.update`.
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         RenderObjectElement::update(self, app, new_widget);
         let child_widgets = Self::widget_of(self.as_element().widget(app))
@@ -1774,6 +1807,7 @@ where
 
     const IS_RENDER_OBJECT_ELEMENT: bool = true;
 
+    #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         RenderObjectElement::perform_rebuild(self, app);
     }
@@ -1823,6 +1857,7 @@ where
         MultiChildRenderObjectElementBase::forget_child(self, app, child);
     }
 
+    #[inline(always)]
     fn mount(
         self: Handle<Self>,
         app: &mut App,
@@ -1832,6 +1867,7 @@ where
         MultiChildRenderObjectElementBase::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         MultiChildRenderObjectElementBase::update(self, app, new_widget);
     }
