@@ -1342,6 +1342,15 @@ impl Element for TheaterElement {
         MultiChildRenderObjectElementBase::mount(self, app, parent, new_slot);
     }
 
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> crate::ElementStep {
+        MultiChildRenderObjectElementBase::mount_step(self, app, parent, new_slot)
+    }
+
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         MultiChildRenderObjectElementBase::update(self, app, new_widget);
     }

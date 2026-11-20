@@ -521,8 +521,25 @@ impl Element for SingleChildViewportElement {
         SingleChildRenderObjectElementBase::mount(self, app, parent, new_slot);
     }
 
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> crate::ElementStep {
+        SingleChildRenderObjectElementBase::mount_step(self, app, parent, new_slot)
+    }
+
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         SingleChildRenderObjectElementBase::update(self, app, new_widget);
+    }
+
+    fn __update_step(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: WidgetRef,
+    ) -> crate::ElementStep {
+        SingleChildRenderObjectElementBase::update_step(self, app, new_widget)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {

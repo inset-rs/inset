@@ -1234,6 +1234,15 @@ impl Element for FocusInheritedScopeElement {
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        let step = self.__update_step(app, new_widget);
+        crate::framework::drive_element_step(app, self.as_element(), step);
+    }
+
+    fn __update_step(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: WidgetRef,
+    ) -> crate::ElementStep {
         let old_node = self.widget(app).node.handle();
         let new_node = FocusInheritedScopeElement::widget_of(&new_widget)
             .node
@@ -1248,7 +1257,7 @@ impl Element for FocusInheritedScopeElement {
                 Listener::handle_method(self, FocusInheritedScopeElement::handle_update),
             );
         }
-        ProxyElement::update(self, app, new_widget);
+        ProxyElement::update_step(self, app, new_widget)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {

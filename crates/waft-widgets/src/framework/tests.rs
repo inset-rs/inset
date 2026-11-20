@@ -928,3 +928,244 @@ fn a_kept_build_context_reads_unmounted_once_its_element_is_freed() {
     assert!(!context.mounted(&app));
     assert_eq!(context.lifecycle(&app), ElementLifecycle::Defunct);
 }
+
+#[derive(Debug)]
+struct DeepChain {
+    remaining: usize,
+    value: f64,
+    leaf_key: Option<GlobalKey>,
+    observed: Rc<Cell<f64>>,
+}
+
+impl StatelessWidget for DeepChain {
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        if self.remaining == 0 {
+            let themed = context
+                .depend_on_inherited_widget_of_exact_type::<Theme>(app)
+                .map_or(0.0, |theme| theme.value);
+            self.observed.set(themed + self.value);
+            return Padding {
+                key: self.leaf_key.clone().map(KeyRef::Global),
+                padding: self.value,
+                child: None,
+            }
+            .into_widget();
+        }
+        let next = DeepChain {
+            remaining: self.remaining - 1,
+            value: self.value,
+            leaf_key: self.leaf_key.clone(),
+            observed: Rc::clone(&self.observed),
+        }
+        .into_widget();
+        if self.remaining % 3 == 0 {
+            DeepStateful {
+                key: None,
+                child: next,
+            }
+            .into_widget()
+        } else if self.remaining % 5 == 0 {
+            Theme {
+                value: self.value,
+                child: next,
+            }
+            .into_widget()
+        } else {
+            next
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DeepStateful {
+    key: Option<KeyRef>,
+    child: WidgetRef,
+}
+
+struct DeepStatefulState {
+    state: StateData<DeepStateful>,
+}
+
+impl StatefulWidget for DeepStateful {
+    type State = DeepStatefulState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_state(&self) -> Self::State {
+        DeepStatefulState {
+            state: StateData::new(),
+        }
+    }
+}
+
+impl State for DeepStatefulState {
+    type Widget = DeepStateful;
+    crate::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        self.widget(app).child.clone()
+    }
+}
+
+/// Mounting, updating, reparenting, deactivating, and unmounting a >1,400-deep element tree
+/// must stay within a small stack budget (like iOS Safari's ~512 KB main-thread stack).
+#[test]
+#[allow(clippy::disallowed_methods)] // Intentionally tests stack usage on a 512 KB thread stack.
+fn deep_tree_mount_update_reparent_and_unmount_run_on_small_stack() {
+    let handle = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let observed = Rc::new(Cell::new(0.0));
+            let leaf_key = GlobalKey::new();
+            let subtree_key = GlobalKey::new();
+
+            // 1. Mount a >1,400-deep element chain (Stateless + Stateful + Inherited).
+            let tree = Theme {
+                value: 10.0,
+                child: DeepStateful {
+                    key: Some(KeyRef::Global(subtree_key.clone())),
+                    child: DeepChain {
+                        remaining: 1_000,
+                        value: 1.0,
+                        leaf_key: Some(leaf_key.clone()),
+                        observed: Rc::clone(&observed),
+                    }
+                    .into_widget(),
+                }
+                .into_widget(),
+            }
+            .into_widget();
+            let harness = Harness::mount(&mut app, tree);
+            harness.pump(&mut app);
+
+            let leaf = leaf_key.current_context(&app).expect("leaf mounted");
+            assert!(
+                leaf.depth(&app) > 1_400,
+                "expected depth > 1400, got {}",
+                leaf.depth(&app)
+            );
+            assert_eq!(observed.get(), 2.0);
+
+            // 2. Update the entire >1,400-deep element chain in place.
+            let updated_tree = Theme {
+                value: 20.0,
+                child: DeepStateful {
+                    key: Some(KeyRef::Global(subtree_key.clone())),
+                    child: DeepChain {
+                        remaining: 1_000,
+                        value: 3.0,
+                        leaf_key: Some(leaf_key.clone()),
+                        observed: Rc::clone(&observed),
+                    }
+                    .into_widget(),
+                }
+                .into_widget(),
+            }
+            .into_widget();
+            harness.set_child(&mut app, updated_tree);
+            harness.pump(&mut app);
+            assert_eq!(observed.get(), 6.0);
+            assert_eq!(leaf_key.current_context(&app), Some(leaf));
+
+            // 3. Reparent the >1,400-deep subtree via GlobalKey (exercises iterative
+            //    deactivate_recursively, update_depth, update_build_scope_recursively,
+            //    and activate_recursively).
+            let reparented_tree = DeepStateful {
+                key: None,
+                child: Theme {
+                    value: 30.0,
+                    child: DeepStateful {
+                        key: Some(KeyRef::Global(subtree_key)),
+                        child: DeepChain {
+                            remaining: 1_000,
+                            value: 5.0,
+                            leaf_key: Some(leaf_key.clone()),
+                            observed: Rc::clone(&observed),
+                        }
+                        .into_widget(),
+                    }
+                    .into_widget(),
+                }
+                .into_widget(),
+            }
+            .into_widget();
+            harness.set_child(&mut app, reparented_tree);
+            harness.pump(&mut app);
+            assert_eq!(observed.get(), 10.0);
+            assert_eq!(leaf_key.current_context(&app), Some(leaf));
+
+            // 4. Unmount the entire >1,400-deep subtree cleanly.
+            harness.set_child(
+                &mut app,
+                Padding {
+                    key: None,
+                    padding: 0.0,
+                    child: None,
+                }
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            assert_eq!(leaf.lifecycle(&app), ElementLifecycle::Defunct);
+        })
+        .expect("spawn small-stack thread");
+
+    handle
+        .join()
+        .expect("deep tree operations should not overflow a 512 KB stack");
+}
+
+#[test]
+fn multi_child_mount_preserves_depth_first_pre_order() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let order: Rc<std::cell::RefCell<Vec<&'static str>>> =
+        Rc::new(std::cell::RefCell::new(Vec::new()));
+
+    let record = |tag: &'static str, child: WidgetRef| {
+        let order = Rc::clone(&order);
+        crate::Builder::new(move |_app, _ctx| {
+            order.borrow_mut().push(tag);
+            child.clone()
+        })
+        .into_widget()
+    };
+
+    let leaf = || {
+        Sized {
+            size: Size::new(10.0, 10.0),
+        }
+        .into_widget()
+    };
+
+    let tree = record(
+        "root",
+        crate::Column::new()
+            .children(vec![
+                record(
+                    "a",
+                    crate::Column::new()
+                        .children(vec![record("a1", leaf()), record("a2", leaf())])
+                        .into_widget(),
+                ),
+                record(
+                    "b",
+                    crate::Column::new()
+                        .children(vec![record("b1", leaf())])
+                        .into_widget(),
+                ),
+                record("c", leaf()),
+            ])
+            .into_widget(),
+    );
+
+    let harness = Harness::mount(&mut app, tree);
+    harness.pump(&mut app);
+    assert_eq!(
+        *order.borrow(),
+        vec!["root", "a", "a1", "a2", "b", "b1", "c"]
+    );
+}

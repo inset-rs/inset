@@ -294,7 +294,25 @@ impl<W: InheritedNotifier> Element for InheritedNotifierElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> crate::ElementStep {
+        ComponentElement::mount_step(self, app, parent, new_slot)
+    }
+
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        let step = self.__update_step(app, new_widget);
+        crate::framework::drive_element_step(app, self.as_element(), step);
+    }
+
+    fn __update_step(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: WidgetRef,
+    ) -> crate::ElementStep {
         let old_notifier = self.widget(app).notifier();
         let new_notifier = downcast_widget::<W>(&*new_widget)
             .expect("the new widget has the same type")
@@ -307,11 +325,15 @@ impl<W: InheritedNotifier> Element for InheritedNotifierElement<W> {
                 new_notifier.add_listener(app, self.update_listener());
             }
         }
-        ProxyElement::update(self, app, new_widget);
+        ProxyElement::update_step(self, app, new_widget)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
+    }
+
+    fn __perform_rebuild_step(self: Handle<Self>, app: &mut App) -> crate::ElementStep {
+        ComponentElement::perform_rebuild_step(self, app)
     }
 
     fn update_inheritance(self: Handle<Self>, app: &mut App) {

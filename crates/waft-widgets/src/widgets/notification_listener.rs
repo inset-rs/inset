@@ -177,6 +177,14 @@ impl<T: ?Sized + NotificationTarget> Element for NotificationElement<T> {
         ProxyElement::update(self, app, new_widget);
     }
 
+    fn __update_step(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: WidgetRef,
+    ) -> crate::ElementStep {
+        ProxyElement::update_step(self, app, new_widget)
+    }
+
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }

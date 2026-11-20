@@ -399,12 +399,33 @@ impl<W: InheritedModel> Element for InheritedModelElement<W> {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> crate::ElementStep {
+        ComponentElement::mount_step(self, app, parent, new_slot)
+    }
+
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ProxyElement::update(self, app, new_widget);
     }
 
+    fn __update_step(
+        self: Handle<Self>,
+        app: &mut App,
+        new_widget: WidgetRef,
+    ) -> crate::ElementStep {
+        ProxyElement::update_step(self, app, new_widget)
+    }
+
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
+    }
+
+    fn __perform_rebuild_step(self: Handle<Self>, app: &mut App) -> crate::ElementStep {
+        ComponentElement::perform_rebuild_step(self, app)
     }
 
     fn update_inheritance(self: Handle<Self>, app: &mut App) {

@@ -17,8 +17,9 @@ use waft_rendering::{
 };
 
 use super::element::{
-    AnyElement, Element, ElementBase, ElementData, ElementLifecycle, IndexedSlot, Slot,
-    debug_check_owner_build_target_exists,
+    AnyElement, Element, ElementBase, ElementData, ElementLifecycle, ElementStep, IndexedSlot,
+    RebuildGuard, Slot, debug_check_owner_build_target_exists, drive_element_step,
+    element_base_mount, element_base_perform_rebuild, element_base_update,
 };
 use super::state::{State, StateLifecycle};
 use super::widget::{
@@ -55,6 +56,7 @@ pub trait ComponentElement: Element {
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef;
 
     /// Runs [`build`](Self::build) inside [`App::entity_track`] and binds watches.
+    #[inline(never)]
     fn build_tracked(self: Handle<Self>, app: &mut App) -> WidgetRef {
         let element = self.as_element();
         let (built, tracked) = app.entity_track(|app| self.build(app));
@@ -67,6 +69,25 @@ pub trait ComponentElement: Element {
         self.component_data(app).child
     }
 
+    /// Trampoline step for [`ComponentElement::mount`].
+    #[doc(hidden)]
+    fn mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> ElementStep {
+        let this = self.as_element();
+        element_base_mount(this, app, parent, new_slot);
+        debug_assert!(self.child(app).is_none());
+        debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
+        let step = self.first_build_step(app);
+        if matches!(step, ElementStep::Done) {
+            debug_assert!(self.child(app).is_some());
+        }
+        step
+    }
+
     /// `ComponentElement.mount`: the base mount, then the first build.
     fn mount(
         self: Handle<Self>,
@@ -74,23 +95,38 @@ pub trait ComponentElement: Element {
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
-        ElementBase::mount(self, app, parent, new_slot);
-        debug_assert!(self.child(app).is_none());
-        debug_assert!(self.as_element().lifecycle(app) == ElementLifecycle::Active);
-        self.first_build(app);
-        debug_assert!(self.child(app).is_some());
+        let step = ComponentElement::mount_step(self, app, parent, new_slot);
+        drive_element_step(app, self.as_element(), step);
+    }
+
+    /// Trampoline step for [`ComponentElement::first_build`].
+    #[doc(hidden)]
+    fn first_build_step(self: Handle<Self>, app: &mut App) -> ElementStep {
+        self.rebuild_step(app, false)
     }
 
     /// `ComponentElement._firstBuild`.
     fn first_build(self: Handle<Self>, app: &mut App) {
-        self.as_element().rebuild(app, false); // This eventually calls performRebuild.
+        let step = self.first_build_step(app);
+        drive_element_step(app, self.as_element(), step);
     }
 
-    /// Calls the [`build`](Self::build) method and then updates the widget tree.
-    ///
-    /// Called automatically during [`ComponentElement::mount`](Self::mount) to generate the
-    /// first build, and by `rebuild` when the element needs updating.
-    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+    /// Trampoline step for [`AnyElement::rebuild`] on a `ComponentElement`.
+    #[doc(hidden)]
+    fn rebuild_step(self: Handle<Self>, app: &mut App, force: bool) -> ElementStep {
+        let this = self.as_element();
+        debug_assert!(this.lifecycle(app) != ElementLifecycle::Initial);
+        if this.lifecycle(app) != ElementLifecycle::Active || (!this.dirty(app) && !force) {
+            return ElementStep::Done;
+        }
+        let guard = RebuildGuard::enter(this, app);
+        self.perform_rebuild_step(app)
+            .with_rebuild_guard(app, guard)
+    }
+
+    /// Trampoline step for [`ComponentElement::perform_rebuild`].
+    #[doc(hidden)]
+    fn perform_rebuild_step(self: Handle<Self>, app: &mut App) -> ElementStep {
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = true;
         }
@@ -98,14 +134,20 @@ pub trait ComponentElement: Element {
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = false;
         }
-        ElementBase::perform_rebuild(self, app); // clears the "dirty" flag
-        let child = self.child(app);
-        let slot = self.as_element().slot(app);
-        let child = self
-            .as_element()
-            .update_child(app, child, Some(built), slot);
-        debug_assert!(child.is_some());
-        self.component_data_mut(app).child = child;
+        let this = self.as_element();
+        element_base_perform_rebuild(this, app); // clears the "dirty" flag
+        let old_child = self.child(app);
+        let slot = this.slot(app);
+        ElementStep::single_child(old_child, Some(built), slot, finish_component_child::<Self>)
+    }
+
+    /// Calls the [`build`](Self::build) method and then updates the widget tree.
+    ///
+    /// Called automatically during [`ComponentElement::mount`](Self::mount) to generate the
+    /// first build, and by `rebuild` when the element needs updating.
+    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+        let step = self.perform_rebuild_step(app);
+        drive_element_step(app, self.as_element(), step);
     }
 
     /// `ComponentElement.visitChildren`.
@@ -128,6 +170,15 @@ pub trait ComponentElement: Element {
 
 /// `impl Element` for a component element whose accessors are `element_accessors!()` and
 /// whose base bodies are the component ones.
+fn finish_component_child<T: ComponentElement>(
+    app: &mut App,
+    id: HandleId,
+    child: Option<AnyElement>,
+) {
+    debug_assert!(child.is_some());
+    Handle::<T>::from_id(id).component_data_mut(app).child = child;
+}
+
 macro_rules! component_element_overrides {
     () => {
         fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
@@ -144,6 +195,19 @@ macro_rules! component_element_overrides {
 
         fn debug_doing_build(self: Handle<Self>, app: &App) -> bool {
             self.component_data(app).debug_doing_build
+        }
+
+        fn __mount_step(
+            self: Handle<Self>,
+            app: &mut App,
+            parent: Option<AnyElement>,
+            new_slot: Option<Slot>,
+        ) -> $crate::ElementStep {
+            ComponentElement::mount_step(self, app, parent, new_slot)
+        }
+
+        fn __perform_rebuild_step(self: Handle<Self>, app: &mut App) -> $crate::ElementStep {
+            ComponentElement::perform_rebuild_step(self, app)
         }
     };
 }
@@ -203,8 +267,13 @@ impl<W: StatelessWidget> Element for StatelessElement<W> {
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
-        ElementBase::update(self, app, new_widget);
-        self.as_element().rebuild(app, true);
+        let step = self.__update_step(app, new_widget);
+        drive_element_step(app, self.as_element(), step);
+    }
+
+    fn __update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
+        element_base_update(self.as_element(), app, new_widget);
+        ComponentElement::rebuild_step(self, app, true)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
@@ -277,7 +346,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
         state.build(app, self.as_element())
     }
 
-    fn first_build(self: Handle<Self>, app: &mut App) {
+    fn first_build_step(self: Handle<Self>, app: &mut App) -> ElementStep {
         let state = self.state(app);
         debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
         state.init_state(app);
@@ -292,10 +361,10 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
                 .state_data_mut(app)
                 .set_debug_lifecycle_state(StateLifecycle::Ready);
         }
-        self.as_element().rebuild(app, false);
+        ComponentElement::rebuild_step(self, app, false)
     }
 
-    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+    fn perform_rebuild_step(self: Handle<Self>, app: &mut App) -> ElementStep {
         if app.get(self).did_change_dependencies {
             self.state(app).did_change_dependencies(app);
             app.get_mut(self).did_change_dependencies = false;
@@ -307,14 +376,11 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
         if cfg!(debug_assertions) {
             self.component_data_mut(app).debug_doing_build = false;
         }
-        ElementBase::perform_rebuild(self, app); // clears the "dirty" flag
-        let child = self.child(app);
-        let slot = self.as_element().slot(app);
-        let child = self
-            .as_element()
-            .update_child(app, child, Some(built), slot);
-        debug_assert!(child.is_some());
-        self.component_data_mut(app).child = child;
+        let this = self.as_element();
+        element_base_perform_rebuild(this, app); // clears the "dirty" flag
+        let old_child = self.child(app);
+        let slot = this.slot(app);
+        ElementStep::single_child(old_child, Some(built), slot, finish_component_child::<Self>)
     }
 }
 
@@ -332,14 +398,19 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        let step = self.__update_step(app, new_widget);
+        drive_element_step(app, self.as_element(), step);
+    }
+
+    fn __update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
         let old_widget = self.as_element().widget(app).clone();
-        ElementBase::update(self, app, new_widget.clone());
+        element_base_update(self.as_element(), app, new_widget.clone());
         let state = self.state(app);
         state.state_data_mut(app).set_widget(new_widget);
         let old = &downcast_widget::<W>(&*old_widget)
             .expect("a StatefulElement holds its StatefulWidget");
         state.did_update_widget(app, old);
-        self.as_element().rebuild(app, true);
+        ComponentElement::rebuild_step(self, app, true)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
@@ -410,13 +481,20 @@ pub trait ProxyElement: ComponentElement {
     /// changing the widget associated with this element but before rebuilding this element.
     fn notify_clients(self: Handle<Self>, app: &mut App, old_widget: WidgetRef);
 
-    /// `ProxyElement.update`.
-    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+    /// Trampoline step for [`ProxyElement::update`].
+    #[doc(hidden)]
+    fn update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
         let old_widget = self.as_element().widget(app).clone();
         debug_assert!(!Rc::ptr_eq(&old_widget, &new_widget));
-        ElementBase::update(self, app, new_widget);
+        element_base_update(self.as_element(), app, new_widget);
         self.updated(app, old_widget);
-        self.as_element().rebuild(app, true);
+        ComponentElement::rebuild_step(self, app, true)
+    }
+
+    /// `ProxyElement.update`.
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        let step = ProxyElement::update_step(self, app, new_widget);
+        drive_element_step(app, self.as_element(), step);
     }
 }
 
@@ -567,6 +645,10 @@ impl<W: InheritedWidget> Element for InheritedElement<W> {
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         ProxyElement::update(self, app, new_widget);
+    }
+
+    fn __update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
+        ProxyElement::update_step(self, app, new_widget)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
@@ -728,6 +810,10 @@ impl<W: ParentDataWidget> Element for ParentDataElement<W> {
         ProxyElement::update(self, app, new_widget);
     }
 
+    fn __update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
+        ProxyElement::update_step(self, app, new_widget)
+    }
+
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         ComponentElement::perform_rebuild(self, app);
     }
@@ -806,6 +892,45 @@ impl RenderObjectElementData {
 ///
 /// * A linked list of children: the `MultiChildRenderObjectElement` class handles this case
 ///   (deferred).
+fn find_ancestor_render_object_element_any(this: AnyElement, app: &App) -> Option<AnyElement> {
+    let slot = this.slot(app);
+    let mut ancestor = this.parent(app);
+    while let Some(current) = ancestor
+        && !current.is_render_object_element()
+    {
+        // In debug mode we check whether the ancestor accepts RenderObjects to produce a
+        // better error message in attachRenderObject. In release mode, we assume only
+        // RenderObjectElements are in the walk.
+        if cfg!(debug_assertions)
+            && !current.debug_expects_render_object_for_slot(app, slot.as_ref())
+        {
+            return None;
+        }
+        ancestor = current.parent(app);
+    }
+    if cfg!(debug_assertions)
+        && let Some(current) = ancestor
+        && !current.debug_expects_render_object_for_slot(app, slot.as_ref())
+    {
+        return None;
+    }
+    ancestor
+}
+
+fn find_ancestor_parent_data_elements_any(this: AnyElement, app: &App) -> Vec<AnyElement> {
+    let mut ancestor = this.parent(app);
+    let mut result = Vec::new();
+    while let Some(current) = ancestor
+        && !current.is_render_object_element()
+    {
+        if current.is_parent_data_element() {
+            result.push(current);
+        }
+        ancestor = current.parent(app);
+    }
+    result
+}
+
 pub trait RenderObjectElement: Element {
     /// The render object slot, held under the field `render_object_element`.
     fn render_object_element_data(self: Handle<Self>, app: &App) -> &RenderObjectElementData;
@@ -839,42 +964,11 @@ pub trait RenderObjectElement: Element {
     }
 
     fn find_ancestor_render_object_element(self: Handle<Self>, app: &App) -> Option<AnyElement> {
-        let slot = self.as_element().slot(app);
-        let mut ancestor = self.as_element().parent(app);
-        while let Some(current) = ancestor
-            && !current.is_render_object_element()
-        {
-            // In debug mode we check whether the ancestor accepts RenderObjects to produce a
-            // better error message in attachRenderObject. In release mode, we assume only
-            // RenderObjectElements are in the walk.
-            if cfg!(debug_assertions)
-                && !current.debug_expects_render_object_for_slot(app, slot.as_ref())
-            {
-                return None;
-            }
-            ancestor = current.parent(app);
-        }
-        if cfg!(debug_assertions)
-            && let Some(current) = ancestor
-            && !current.debug_expects_render_object_for_slot(app, slot.as_ref())
-        {
-            return None;
-        }
-        ancestor
+        find_ancestor_render_object_element_any(self.as_element(), app)
     }
 
     fn find_ancestor_parent_data_elements(self: Handle<Self>, app: &App) -> Vec<AnyElement> {
-        let mut ancestor = self.as_element().parent(app);
-        let mut result = Vec::new();
-        while let Some(current) = ancestor
-            && !current.is_render_object_element()
-        {
-            if current.is_parent_data_element() {
-                result.push(current);
-            }
-            ancestor = current.parent(app);
-        }
-        result
+        find_ancestor_parent_data_elements_any(self.as_element(), app)
     }
 
     /// `RenderObjectElement.mount`: the base mount, create the render object, attach it.
@@ -1219,17 +1313,21 @@ where
         self.single_child_data(app).child
     }
 
-    /// Dart's `updateChild(_child, (widget as SingleChildRenderObjectWidget).child, null)`,
-    /// which both `mount` and `update` run.
-    fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
+    /// Trampoline step for updating the single child from the widget configuration.
+    #[doc(hidden)]
+    fn update_child_from_widget_step(self: Handle<Self>, app: &mut App) -> ElementStep {
         let child_widget = Self::widget_of(self.as_element().widget(app))
             .child()
             .cloned();
-        let child = self.single_child_data(app).child;
-        let child = self
-            .as_element()
-            .update_child(app, child, child_widget, None);
-        self.single_child_data_mut(app).child = child;
+        let old_child = self.single_child_data(app).child;
+        ElementStep::single_child(old_child, child_widget, None, finish_single_child::<Self>)
+    }
+
+    /// Dart's `updateChild(_child, (widget as SingleChildRenderObjectWidget).child, null)`,
+    /// which both `mount` and `update` run.
+    fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
+        let step = self.update_child_from_widget_step(app);
+        drive_element_step(app, self.as_element(), step);
     }
 
     /// `SingleChildRenderObjectElement.visitChildren`.
@@ -1245,6 +1343,18 @@ where
         self.single_child_data_mut(app).child = None;
     }
 
+    /// Trampoline step for [`SingleChildRenderObjectElementBase::mount`].
+    #[doc(hidden)]
+    fn mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> ElementStep {
+        RenderObjectElement::mount(self, app, parent, new_slot);
+        self.update_child_from_widget_step(app)
+    }
+
     /// `SingleChildRenderObjectElement.mount`.
     fn mount(
         self: Handle<Self>,
@@ -1252,14 +1362,21 @@ where
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
-        RenderObjectElement::mount(self, app, parent, new_slot);
-        self.update_child_from_widget(app);
+        let step = SingleChildRenderObjectElementBase::mount_step(self, app, parent, new_slot);
+        drive_element_step(app, self.as_element(), step);
+    }
+
+    /// Trampoline step for [`SingleChildRenderObjectElementBase::update`].
+    #[doc(hidden)]
+    fn update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
+        RenderObjectElement::update(self, app, new_widget);
+        self.update_child_from_widget_step(app)
     }
 
     /// `SingleChildRenderObjectElement.update`.
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
-        RenderObjectElement::update(self, app, new_widget);
-        self.update_child_from_widget(app);
+        let step = SingleChildRenderObjectElementBase::update_step(self, app, new_widget);
+        drive_element_step(app, self.as_element(), step);
     }
 
     /// `SingleChildRenderObjectElement.insertRenderObjectChild`.
@@ -1297,6 +1414,17 @@ where
         debug_assert!(render_object.child(app).map(|current| current.as_object()) == Some(child));
         render_object.set_child(app, None);
     }
+}
+
+fn finish_single_child<T: SingleChildRenderObjectElementBase>(
+    app: &mut App,
+    id: HandleId,
+    child: Option<AnyElement>,
+) where
+    T::Widget: SingleChildRenderObjectWidget,
+    <T::Widget as RenderObjectWidget>::RenderObject: RenderObjectWithChildMixin,
+{
+    Handle::<T>::from_id(id).single_child_data_mut(app).child = child;
 }
 
 /// An [`Element`] that uses a [`SingleChildRenderObjectWidget`] as its configuration: the leaf
@@ -1421,8 +1549,21 @@ where
         SingleChildRenderObjectElementBase::mount(self, app, parent, new_slot);
     }
 
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> ElementStep {
+        SingleChildRenderObjectElementBase::mount_step(self, app, parent, new_slot)
+    }
+
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         SingleChildRenderObjectElementBase::update(self, app, new_widget);
+    }
+
+    fn __update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
+        SingleChildRenderObjectElementBase::update_step(self, app, new_widget)
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
@@ -1589,6 +1730,21 @@ where
             .insert(child);
     }
 
+    /// Trampoline step for [`MultiChildRenderObjectElementBase::mount`].
+    #[doc(hidden)]
+    fn mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> ElementStep {
+        RenderObjectElement::mount(self, app, parent, new_slot);
+        let child_widgets = Self::widget_of(self.as_element().widget(app))
+            .children()
+            .to_vec();
+        ElementStep::multi_children(child_widgets, finish_multi_children::<Self>)
+    }
+
     /// `MultiChildRenderObjectElement.mount`.
     fn mount(
         self: Handle<Self>,
@@ -1596,25 +1752,8 @@ where
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
-        RenderObjectElement::mount(self, app, parent, new_slot);
-        let child_widgets = Self::widget_of(self.as_element().widget(app))
-            .children()
-            .to_vec();
-        let mut children = Vec::with_capacity(child_widgets.len());
-        let mut previous_child: Option<AnyElement> = None;
-        for (index, child_widget) in child_widgets.into_iter().enumerate() {
-            let new_child = self.as_element().inflate_widget(
-                app,
-                child_widget,
-                Some(Slot::Indexed(IndexedSlot {
-                    index,
-                    value: previous_child,
-                })),
-            );
-            children.push(new_child);
-            previous_child = Some(new_child);
-        }
-        self.multi_child_data_mut(app).children = children;
+        let step = MultiChildRenderObjectElementBase::mount_step(self, app, parent, new_slot);
+        drive_element_step(app, self.as_element(), step);
     }
 
     /// `MultiChildRenderObjectElement.update`.
@@ -1678,6 +1817,17 @@ where
         debug_assert!(child.parent(app) == Some(RenderObjectElement::render_object(self, app)));
         render_object.remove(app, ErasedRenderObject::from_object(child));
     }
+}
+
+fn finish_multi_children<T: MultiChildRenderObjectElementBase>(
+    app: &mut App,
+    id: HandleId,
+    children: Vec<AnyElement>,
+) where
+    T::Widget: MultiChildRenderObjectWidget,
+    <T::Widget as RenderObjectWidget>::RenderObject: ContainerRenderObjectMixin,
+{
+    Handle::<T>::from_id(id).multi_child_data_mut(app).children = children;
 }
 
 /// An [`Element`] that uses a [`MultiChildRenderObjectWidget`] as its configuration: the leaf
@@ -1830,6 +1980,15 @@ where
         new_slot: Option<Slot>,
     ) {
         MultiChildRenderObjectElementBase::mount(self, app, parent, new_slot);
+    }
+
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> ElementStep {
+        MultiChildRenderObjectElementBase::mount_step(self, app, parent, new_slot)
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {

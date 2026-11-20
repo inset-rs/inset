@@ -581,6 +581,133 @@ pub trait Element: Sized + 'static {
         let _ = (self, app);
         None
     }
+
+    /// Internal trampoline hook for [`mount`](Self::mount).
+    #[doc(hidden)]
+    fn __mount_step(
+        self: Handle<Self>,
+        app: &mut App,
+        parent: Option<AnyElement>,
+        new_slot: Option<Slot>,
+    ) -> ElementStep {
+        self.mount(app, parent, new_slot);
+        ElementStep::Done
+    }
+
+    /// Internal trampoline hook for [`update`](Self::update).
+    #[doc(hidden)]
+    fn __update_step(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) -> ElementStep {
+        self.update(app, new_widget);
+        ElementStep::Done
+    }
+
+    /// Internal trampoline hook for [`perform_rebuild`](Self::perform_rebuild).
+    #[doc(hidden)]
+    fn __perform_rebuild_step(self: Handle<Self>, app: &mut App) -> ElementStep {
+        self.perform_rebuild(app);
+        ElementStep::Done
+    }
+}
+
+/// Internal guard tracking `BuildOwner::debug_current_build_target` across an iterative rebuild.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct RebuildGuard {
+    element: AnyElement,
+    owner: Handle<BuildOwner>,
+    debug_previous_build_target: Option<AnyElement>,
+}
+
+impl RebuildGuard {
+    pub(crate) fn enter(element: AnyElement, app: &mut App) -> Self {
+        let owner = element.owner(app).expect("an active element has an owner");
+        debug_assert!(owner.debug_state_locked(app));
+        let debug_previous_build_target = owner.debug_current_build_target(app);
+        if cfg!(debug_assertions) {
+            owner.set_debug_current_build_target(app, Some(element));
+            element.data_mut(app).debug_built_once = true;
+        }
+        Self {
+            element,
+            owner,
+            debug_previous_build_target,
+        }
+    }
+
+    pub(crate) fn exit(self, app: &mut App) {
+        if cfg!(debug_assertions) {
+            debug_assert!(self.owner.debug_current_build_target(app) == Some(self.element));
+            self.owner
+                .set_debug_current_build_target(app, self.debug_previous_build_target);
+        }
+        debug_assert!(!self.element.dirty(app));
+    }
+}
+
+/// Internal continuation returned by an element's local mount/update/rebuild step so the
+/// framework trampoline can descend into children iteratively without growing the call stack.
+#[doc(hidden)]
+pub enum ElementStep {
+    /// The element finished its step synchronously.
+    Done,
+    /// The element finished its own work and delegates updating its single child to the trampoline.
+    UpdateSingleChild {
+        old_child: Option<AnyElement>,
+        new_widget: Option<WidgetRef>,
+        slot: Option<Slot>,
+        finish_child: fn(&mut App, HandleId, Option<AnyElement>),
+        rebuild_guard: Option<RebuildGuard>,
+    },
+    /// A multi-child element finished `RenderObjectElement::mount` and delegates inflating its
+    /// children in order to the trampoline.
+    MountMultiChildren {
+        child_widgets: Vec<WidgetRef>,
+        finish_children: fn(&mut App, HandleId, Vec<AnyElement>),
+    },
+}
+
+impl ElementStep {
+    pub(crate) fn single_child(
+        old_child: Option<AnyElement>,
+        new_widget: Option<WidgetRef>,
+        slot: Option<Slot>,
+        finish_child: fn(&mut App, HandleId, Option<AnyElement>),
+    ) -> Self {
+        Self::UpdateSingleChild {
+            old_child,
+            new_widget,
+            slot,
+            finish_child,
+            rebuild_guard: None,
+        }
+    }
+
+    pub(crate) fn multi_children(
+        child_widgets: Vec<WidgetRef>,
+        finish_children: fn(&mut App, HandleId, Vec<AnyElement>),
+    ) -> Self {
+        Self::MountMultiChildren {
+            child_widgets,
+            finish_children,
+        }
+    }
+
+    pub(crate) fn with_rebuild_guard(mut self, app: &mut App, guard: RebuildGuard) -> Self {
+        match &mut self {
+            ElementStep::UpdateSingleChild { rebuild_guard, .. } => {
+                debug_assert!(rebuild_guard.is_none());
+                *rebuild_guard = Some(guard);
+                self
+            }
+            ElementStep::Done => {
+                guard.exit(app);
+                ElementStep::Done
+            }
+            ElementStep::MountMultiChildren { .. } => {
+                unreachable!("MountMultiChildren does not carry a rebuild guard")
+            }
+        }
+    }
 }
 
 /// The vtable of an erased [`AnyElement`]: one `&'static` table per element type.
@@ -590,8 +717,8 @@ pub(crate) struct ElementVTable {
     pub visit_children: fn(&App, HandleId, &mut dyn FnMut(AnyElement)),
     pub debug_visit_onstage_children: fn(&App, HandleId, &mut dyn FnMut(AnyElement)),
     pub render_object_attaching_child: fn(&App, HandleId) -> Option<AnyElement>,
-    pub mount: fn(&mut App, HandleId, Option<AnyElement>, Option<Slot>),
-    pub update: fn(&mut App, HandleId, WidgetRef),
+    pub mount_step: fn(&mut App, HandleId, Option<AnyElement>, Option<Slot>) -> ElementStep,
+    pub update_step: fn(&mut App, HandleId, WidgetRef) -> ElementStep,
     pub update_slot: fn(&mut App, HandleId, Option<Slot>),
     pub attach_render_object: fn(&mut App, HandleId, Option<Slot>),
     pub detach_render_object: fn(&mut App, HandleId),
@@ -600,7 +727,7 @@ pub(crate) struct ElementVTable {
     pub deactivate: fn(&mut App, HandleId),
     pub debug_deactivated: fn(&mut App, HandleId),
     pub unmount: fn(&mut App, HandleId),
-    pub perform_rebuild: fn(&mut App, HandleId),
+    pub perform_rebuild_step: fn(&mut App, HandleId) -> ElementStep,
     pub did_change_dependencies: fn(&mut App, HandleId),
     pub update_inheritance: fn(&mut App, HandleId),
     pub attach_notification_tree: fn(&mut App, HandleId),
@@ -609,7 +736,6 @@ pub(crate) struct ElementVTable {
     pub on_notification: fn(&mut App, HandleId, &dyn Notification) -> bool,
     pub debug_expects_render_object_for_slot: fn(&App, HandleId, Option<&Slot>) -> bool,
     pub render_object: fn(&App, HandleId) -> Option<AnyRenderObject>,
-    pub inflate_widget: fn(&mut App, HandleId, WidgetRef, Option<Slot>) -> AnyElement,
     pub debug_doing_build: fn(&App, HandleId) -> bool,
     pub is_render_object_element: bool,
     pub insert_render_object_child: fn(&mut App, HandleId, AnyRenderObject, Option<Slot>),
@@ -642,8 +768,8 @@ impl ElementVTable {
             render_object_attaching_child: |app, id| {
                 T::render_object_attaching_child(resolve(id), app)
             },
-            mount: |app, id, parent, slot| T::mount(resolve(id), app, parent, slot),
-            update: |app, id, widget| T::update(resolve(id), app, widget),
+            mount_step: |app, id, parent, slot| T::__mount_step(resolve(id), app, parent, slot),
+            update_step: |app, id, widget| T::__update_step(resolve(id), app, widget),
             update_slot: |app, id, slot| T::update_slot(resolve(id), app, slot),
             attach_render_object: |app, id, slot| T::attach_render_object(resolve(id), app, slot),
             detach_render_object: |app, id| T::detach_render_object(resolve(id), app),
@@ -652,7 +778,7 @@ impl ElementVTable {
             deactivate: |app, id| T::deactivate(resolve(id), app),
             debug_deactivated: |app, id| T::debug_deactivated(resolve(id), app),
             unmount: |app, id| T::unmount(resolve(id), app),
-            perform_rebuild: |app, id| T::perform_rebuild(resolve(id), app),
+            perform_rebuild_step: |app, id| T::__perform_rebuild_step(resolve(id), app),
             did_change_dependencies: |app, id| T::did_change_dependencies(resolve(id), app),
             update_inheritance: |app, id| T::update_inheritance(resolve(id), app),
             attach_notification_tree: |app, id| T::attach_notification_tree(resolve(id), app),
@@ -665,9 +791,6 @@ impl ElementVTable {
                 T::debug_expects_render_object_for_slot(resolve(id), app, slot)
             },
             render_object: |app, id| T::render_object(resolve(id), app),
-            inflate_widget: |app, id, widget, slot| {
-                T::inflate_widget(resolve(id), app, widget, slot)
-            },
             debug_doing_build: |app, id| T::debug_doing_build(resolve(id), app),
             is_render_object_element: T::IS_RENDER_OBJECT_ELEMENT,
             insert_render_object_child: |app, id, child, slot| {
@@ -872,12 +995,25 @@ impl AnyElement {
 
     /// See [`Element::mount`].
     pub fn mount(self, app: &mut App, parent: Option<AnyElement>, new_slot: Option<Slot>) {
-        (self.vtable.mount)(app, self.id, parent, new_slot);
+        run_trampoline(
+            app,
+            TreeTask::Mount {
+                element: self,
+                parent,
+                slot: new_slot,
+            },
+        );
     }
 
     /// See [`Element::update`].
     pub fn update(self, app: &mut App, new_widget: WidgetRef) {
-        (self.vtable.update)(app, self.id, new_widget);
+        run_trampoline(
+            app,
+            TreeTask::Update {
+                element: self,
+                new_widget,
+            },
+        );
     }
 
     /// See [`Element::update_slot`].
@@ -922,7 +1058,8 @@ impl AnyElement {
 
     /// See [`Element::perform_rebuild`].
     pub fn perform_rebuild(self, app: &mut App) {
-        (self.vtable.perform_rebuild)(app, self.id);
+        let step = (self.vtable.perform_rebuild_step)(app, self.id);
+        drive_element_step(app, self, step);
     }
 
     /// See [`Element::did_change_dependencies`].
@@ -980,7 +1117,15 @@ impl AnyElement {
         new_widget: WidgetRef,
         new_slot: Option<Slot>,
     ) -> AnyElement {
-        (self.vtable.inflate_widget)(app, self.id, new_widget, new_slot)
+        run_trampoline(
+            app,
+            TreeTask::Inflate {
+                parent: self,
+                new_widget,
+                slot: new_slot,
+            },
+        )
+        .expect("inflate_widget yields a child")
     }
 
     /// Dart's `this is RenderObjectElement`.
@@ -1094,36 +1239,15 @@ impl AnyElement {
         new_widget: Option<WidgetRef>,
         new_slot: Option<Slot>,
     ) -> Option<AnyElement> {
-        let Some(new_widget) = new_widget else {
-            if let Some(child) = child {
-                self.deactivate_child(app, child);
-            }
-            return None;
-        };
-        let new_child = match child {
-            Some(child) => {
-                let has_same_superclass = child.widget(app).kind() == new_widget.kind();
-                if has_same_superclass && same_widget(child.widget(app), &new_widget) {
-                    if child.slot(app) != new_slot {
-                        self.update_slot_for_child(app, child, new_slot);
-                    }
-                    child
-                } else if has_same_superclass && can_update(&**child.widget(app), &*new_widget) {
-                    if child.slot(app) != new_slot {
-                        self.update_slot_for_child(app, child, new_slot);
-                    }
-                    child.update(app, new_widget.clone());
-                    debug_assert!(same_widget(child.widget(app), &new_widget));
-                    child
-                } else {
-                    self.deactivate_child(app, child);
-                    debug_assert!(child.parent(app).is_none());
-                    self.inflate_widget(app, new_widget, new_slot)
-                }
-            }
-            None => self.inflate_widget(app, new_widget, new_slot),
-        };
-        Some(new_child)
+        run_trampoline(
+            app,
+            TreeTask::UpdateChild {
+                parent: self,
+                old_child: child,
+                new_widget,
+                slot: new_slot,
+            },
+        )
     }
 
     /// Updates the children of this element to use new widgets.
@@ -1378,27 +1502,33 @@ impl AnyElement {
     }
 
     fn update_depth(self, app: &mut App, parent_depth: u32) {
-        let expected_depth = parent_depth + 1;
-        if self.data(app).depth < expected_depth {
-            self.data_mut(app).depth = expected_depth;
-            for child in self.children(app) {
-                child.update_depth(app, expected_depth);
+        let mut stack = vec![(self, parent_depth)];
+        while let Some((element, parent_depth)) = stack.pop() {
+            let expected_depth = parent_depth + 1;
+            if element.data(app).depth < expected_depth {
+                element.data_mut(app).depth = expected_depth;
+                for child in element.children(app).into_iter().rev() {
+                    stack.push((child, expected_depth));
+                }
             }
         }
     }
 
     fn update_build_scope_recursively(self, app: &mut App) {
-        let parent_scope = self.parent(app).map(|parent| parent.build_scope(app));
-        if self.data(app).parent_build_scope == parent_scope {
-            return;
-        }
-        // Unset the _inDirtyList flag so this Element can be added to the dirty list
-        // of the new build scope.
-        let data = self.data_mut(app);
-        data.in_dirty_list = false;
-        data.parent_build_scope = parent_scope;
-        for child in self.children(app) {
-            child.update_build_scope_recursively(app);
+        let mut stack = vec![self];
+        while let Some(element) = stack.pop() {
+            let parent_scope = element.parent(app).map(|parent| parent.build_scope(app));
+            if element.data(app).parent_build_scope == parent_scope {
+                continue;
+            }
+            // Unset the _inDirtyList flag so this Element can be added to the dirty list
+            // of the new build scope.
+            let data = element.data_mut(app);
+            data.in_dirty_list = false;
+            data.parent_build_scope = parent_scope;
+            for child in element.children(app).into_iter().rev() {
+                stack.push(child);
+            }
         }
     }
 
@@ -1851,23 +1981,13 @@ impl AnyElement {
     /// rebuild is convenient when [`update`](Self::update) is called, during which
     /// [`dirty`](Self::dirty) is false.
     pub fn rebuild(self, app: &mut App, force: bool) {
-        debug_assert!(self.lifecycle(app) != ElementLifecycle::Initial);
-        if self.lifecycle(app) != ElementLifecycle::Active || (!self.dirty(app) && !force) {
-            return;
-        }
-        let owner = self.owner(app).expect("an active element has an owner");
-        debug_assert!(owner.debug_state_locked(app));
-        let debug_previous_build_target = owner.debug_current_build_target(app);
-        if cfg!(debug_assertions) {
-            owner.set_debug_current_build_target(app, Some(self));
-            self.data_mut(app).debug_built_once = true;
-        }
-        self.perform_rebuild(app);
-        if cfg!(debug_assertions) {
-            debug_assert!(owner.debug_current_build_target(app) == Some(self));
-            owner.set_debug_current_build_target(app, debug_previous_build_target);
-        }
-        debug_assert!(!self.dirty(app));
+        run_trampoline(
+            app,
+            TreeTask::Rebuild {
+                element: self,
+                force,
+            },
+        );
     }
 
     pub(crate) fn had_dependencies(self, app: &App) -> bool {
@@ -1921,13 +2041,667 @@ impl AnyElement {
     }
 }
 
-fn activate_recursively(app: &mut App, element: AnyElement) {
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
-    element.activate(app);
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
-    for child in element.children(app) {
-        activate_recursively(app, child);
+enum TreeTask {
+    UpdateChild {
+        parent: AnyElement,
+        old_child: Option<AnyElement>,
+        new_widget: Option<WidgetRef>,
+        slot: Option<Slot>,
+    },
+    Inflate {
+        parent: AnyElement,
+        new_widget: WidgetRef,
+        slot: Option<Slot>,
+    },
+    Mount {
+        element: AnyElement,
+        parent: Option<AnyElement>,
+        slot: Option<Slot>,
+    },
+    Update {
+        element: AnyElement,
+        new_widget: WidgetRef,
+    },
+    Rebuild {
+        element: AnyElement,
+        force: bool,
+    },
+    ResumeStep {
+        element: AnyElement,
+        step: ElementStep,
+        return_value: Option<AnyElement>,
+    },
+}
+
+enum Frame {
+    SingleChild {
+        parent: AnyElement,
+        finish_child: fn(&mut App, HandleId, Option<AnyElement>),
+        rebuild_guard: Option<RebuildGuard>,
+        return_value: Option<AnyElement>,
+        debug_check_active_on_finish: bool,
+        debug_check_updated_widget: Option<WidgetRef>,
+    },
+    MultiMount {
+        parent: AnyElement,
+        child_widgets: std::vec::IntoIter<WidgetRef>,
+        next_index: usize,
+        children: Vec<AnyElement>,
+        finish_children: fn(&mut App, HandleId, Vec<AnyElement>),
+        debug_check_active_on_finish: bool,
+    },
+    Retake {
+        inactive_child: AnyElement,
+    },
+}
+
+pub(crate) fn drive_element_step(app: &mut App, element: AnyElement, step: ElementStep) {
+    if matches!(step, ElementStep::Done) {
+        return;
     }
+    run_trampoline(
+        app,
+        TreeTask::ResumeStep {
+            element,
+            step,
+            return_value: None,
+        },
+    );
+}
+
+fn dispatch_step(
+    app: &mut App,
+    frames: &mut Vec<Frame>,
+    element: AnyElement,
+    step: ElementStep,
+    return_value: Option<AnyElement>,
+    debug_check_active_on_finish: bool,
+    debug_check_updated_widget: Option<WidgetRef>,
+) -> (Option<TreeTask>, Option<AnyElement>) {
+    match step {
+        ElementStep::Done => {
+            if debug_check_active_on_finish {
+                debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
+            }
+            if let Some(expected) = debug_check_updated_widget {
+                debug_assert!(same_widget(element.widget(app), &expected));
+            }
+            (None, return_value)
+        }
+        ElementStep::UpdateSingleChild {
+            old_child,
+            new_widget,
+            slot,
+            finish_child,
+            rebuild_guard,
+        } => {
+            frames.push(Frame::SingleChild {
+                parent: element,
+                finish_child,
+                rebuild_guard,
+                return_value,
+                debug_check_active_on_finish,
+                debug_check_updated_widget,
+            });
+            (
+                Some(TreeTask::UpdateChild {
+                    parent: element,
+                    old_child,
+                    new_widget,
+                    slot,
+                }),
+                None,
+            )
+        }
+        ElementStep::MountMultiChildren {
+            child_widgets,
+            finish_children,
+        } => {
+            let len = child_widgets.len();
+            let mut iter = child_widgets.into_iter();
+            if let Some(first_widget) = iter.next() {
+                frames.push(Frame::MultiMount {
+                    parent: element,
+                    child_widgets: iter,
+                    next_index: 1,
+                    children: Vec::with_capacity(len),
+                    finish_children,
+                    debug_check_active_on_finish,
+                });
+                (
+                    Some(TreeTask::Inflate {
+                        parent: element,
+                        new_widget: first_widget,
+                        slot: Some(Slot::Indexed(IndexedSlot {
+                            index: 0,
+                            value: None,
+                        })),
+                    }),
+                    None,
+                )
+            } else {
+                finish_children(app, element.id(), Vec::new());
+                if debug_check_active_on_finish {
+                    debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
+                }
+                (None, return_value)
+            }
+        }
+    }
+}
+
+/// Iterative trampoline for mounting, updating, rebuilding, and inflating element subtrees.
+///
+/// Running single-child and multi-child mount chains in a flat loop keeps the native/Wasm
+/// call stack O(1) across arbitrarily deep widget trees (such as Material 3 trees on iOS
+/// Safari's ~512 KB main-thread stack) while preserving exact depth-first pre-order semantics.
+fn run_trampoline(app: &mut App, initial_task: TreeTask) -> Option<AnyElement> {
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut task = Some(initial_task);
+    let mut completed_value: Option<AnyElement> = None;
+
+    loop {
+        if let Some(current) = task.take() {
+            match current {
+                TreeTask::UpdateChild {
+                    parent,
+                    old_child,
+                    new_widget,
+                    slot,
+                } => {
+                    let Some(new_widget) = new_widget else {
+                        if let Some(child) = old_child {
+                            parent.deactivate_child(app, child);
+                        }
+                        completed_value = None;
+                        continue;
+                    };
+                    match old_child {
+                        Some(child) => {
+                            let has_same_superclass = child.widget(app).kind() == new_widget.kind();
+                            if has_same_superclass && same_widget(child.widget(app), &new_widget) {
+                                if child.slot(app) != slot {
+                                    parent.update_slot_for_child(app, child, slot);
+                                }
+                                completed_value = Some(child);
+                                continue;
+                            } else if has_same_superclass
+                                && can_update(&**child.widget(app), &*new_widget)
+                            {
+                                if child.slot(app) != slot {
+                                    parent.update_slot_for_child(app, child, slot);
+                                }
+                                task = Some(TreeTask::Update {
+                                    element: child,
+                                    new_widget,
+                                });
+                                continue;
+                            } else {
+                                parent.deactivate_child(app, child);
+                                debug_assert!(child.parent(app).is_none());
+                                task = Some(TreeTask::Inflate {
+                                    parent,
+                                    new_widget,
+                                    slot,
+                                });
+                                continue;
+                            }
+                        }
+                        None => {
+                            task = Some(TreeTask::Inflate {
+                                parent,
+                                new_widget,
+                                slot,
+                            });
+                            continue;
+                        }
+                    }
+                }
+                TreeTask::Inflate {
+                    parent,
+                    new_widget,
+                    slot,
+                } => {
+                    let inactive_child = match new_widget.key() {
+                        Some(KeyRef::Global(key)) => {
+                            parent.retake_inactive_element(app, key, &new_widget)
+                        }
+                        _ => None,
+                    };
+                    match inactive_child {
+                        Some(inactive_child) => {
+                            debug_assert!(inactive_child.parent(app).is_none());
+                            inactive_child.activate_with_parent(app, parent, slot.clone());
+                            if cfg!(debug_assertions) {
+                                frames.push(Frame::Retake { inactive_child });
+                            }
+                            task = Some(TreeTask::UpdateChild {
+                                parent,
+                                old_child: Some(inactive_child),
+                                new_widget: Some(new_widget),
+                                slot,
+                            });
+                            continue;
+                        }
+                        None => {
+                            let new_child = new_widget.create_element(app, new_widget.clone());
+                            debug_assert!(debug_check_for_cycles(parent, app, new_child));
+                            task = Some(TreeTask::Mount {
+                                element: new_child,
+                                parent: Some(parent),
+                                slot,
+                            });
+                            continue;
+                        }
+                    }
+                }
+                TreeTask::Mount {
+                    element,
+                    parent,
+                    slot,
+                } => {
+                    let check_active = parent.is_some();
+                    let step = (element.vtable.mount_step)(app, element.id, parent, slot);
+                    let (next, value) = dispatch_step(
+                        app,
+                        &mut frames,
+                        element,
+                        step,
+                        Some(element),
+                        check_active,
+                        None,
+                    );
+                    task = next;
+                    completed_value = value;
+                    continue;
+                }
+                TreeTask::Update {
+                    element,
+                    new_widget,
+                } => {
+                    let debug_expected = cfg!(debug_assertions).then(|| new_widget.clone());
+                    let step = (element.vtable.update_step)(app, element.id, new_widget);
+                    let (next, value) = dispatch_step(
+                        app,
+                        &mut frames,
+                        element,
+                        step,
+                        Some(element),
+                        false,
+                        debug_expected,
+                    );
+                    task = next;
+                    completed_value = value;
+                    continue;
+                }
+                TreeTask::Rebuild { element, force } => {
+                    debug_assert!(element.lifecycle(app) != ElementLifecycle::Initial);
+                    if element.lifecycle(app) != ElementLifecycle::Active
+                        || (!element.dirty(app) && !force)
+                    {
+                        completed_value = None;
+                        continue;
+                    }
+                    let guard = RebuildGuard::enter(element, app);
+                    let step = (element.vtable.perform_rebuild_step)(app, element.id)
+                        .with_rebuild_guard(app, guard);
+                    let (next, value) =
+                        dispatch_step(app, &mut frames, element, step, None, false, None);
+                    task = next;
+                    completed_value = value;
+                    continue;
+                }
+                TreeTask::ResumeStep {
+                    element,
+                    step,
+                    return_value,
+                } => {
+                    let (next, value) =
+                        dispatch_step(app, &mut frames, element, step, return_value, false, None);
+                    task = next;
+                    completed_value = value;
+                    continue;
+                }
+            }
+        }
+
+        let Some(frame) = frames.pop() else {
+            return completed_value;
+        };
+        match frame {
+            Frame::SingleChild {
+                parent,
+                finish_child,
+                rebuild_guard,
+                return_value,
+                debug_check_active_on_finish,
+                debug_check_updated_widget,
+            } => {
+                finish_child(app, parent.id(), completed_value);
+                if let Some(guard) = rebuild_guard {
+                    guard.exit(app);
+                }
+                if debug_check_active_on_finish {
+                    debug_assert!(parent.lifecycle(app) == ElementLifecycle::Active);
+                }
+                if let Some(expected) = debug_check_updated_widget {
+                    debug_assert!(same_widget(parent.widget(app), &expected));
+                }
+                completed_value = return_value;
+            }
+            Frame::MultiMount {
+                parent,
+                mut child_widgets,
+                next_index,
+                mut children,
+                finish_children,
+                debug_check_active_on_finish,
+            } => {
+                let new_child = completed_value.expect("inflate_widget yields a child");
+                children.push(new_child);
+                let previous_child = Some(new_child);
+                if let Some(next_widget) = child_widgets.next() {
+                    let index = next_index;
+                    frames.push(Frame::MultiMount {
+                        parent,
+                        child_widgets,
+                        next_index: index + 1,
+                        children,
+                        finish_children,
+                        debug_check_active_on_finish,
+                    });
+                    task = Some(TreeTask::Inflate {
+                        parent,
+                        new_widget: next_widget,
+                        slot: Some(Slot::Indexed(IndexedSlot {
+                            index,
+                            value: previous_child,
+                        })),
+                    });
+                } else {
+                    finish_children(app, parent.id(), children);
+                    if debug_check_active_on_finish {
+                        debug_assert!(parent.lifecycle(app) == ElementLifecycle::Active);
+                    }
+                    completed_value = Some(parent);
+                }
+            }
+            Frame::Retake { inactive_child } => {
+                debug_assert!(completed_value == Some(inactive_child));
+            }
+        }
+    }
+}
+
+fn activate_recursively(app: &mut App, root: AnyElement) {
+    let mut stack = vec![root];
+    while let Some(element) = stack.pop() {
+        debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
+        element.activate(app);
+        debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
+        for child in element.children(app).into_iter().rev() {
+            stack.push(child);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Non-generic `ElementBase` bodies shared across all element instantiations.
+
+pub(crate) fn element_base_render_object_attaching_child(
+    this: AnyElement,
+    app: &App,
+) -> Option<AnyElement> {
+    let mut next = None;
+    this.visit_children(app, &mut |child| {
+        debug_assert!(next.is_none()); // This verifies that there's only one child.
+        next = Some(child);
+    });
+    next
+}
+
+pub(crate) fn element_base_mount(
+    this: AnyElement,
+    app: &mut App,
+    parent: Option<AnyElement>,
+    new_slot: Option<Slot>,
+) {
+    debug_assert!(
+        this.lifecycle(app) == ElementLifecycle::Initial,
+        "This element is no longer in its initial state ({:?})",
+        this.lifecycle(app)
+    );
+    debug_assert!(
+        this.parent(app).is_none(),
+        "This element already has a parent and it shouldn't have one yet."
+    );
+    debug_assert!(
+        parent.is_none_or(|parent| parent.lifecycle(app) == ElementLifecycle::Active),
+        "Parent should be null or in the active state"
+    );
+    debug_assert!(
+        this.slot(app).is_none(),
+        "This element already has a slot and it shouldn't"
+    );
+    let parent_depth = parent.map_or(0, |parent| parent.depth(app));
+    let parent_owner = parent.and_then(|parent| parent.owner(app));
+    let parent_scope = parent.map(|parent| parent.build_scope(app));
+    let data = this.data_mut(app);
+    data.parent = parent;
+    data.slot = new_slot;
+    data.lifecycle = ElementLifecycle::Active;
+    data.depth = 1 + parent_depth;
+    if parent.is_some() {
+        // Only assign ownership if the parent is non-null. If parent is null
+        // (the root node), the owner should have already been assigned.
+        // See RootRenderObjectElement.assignOwner().
+        data.owner = parent_owner;
+        data.parent_build_scope = parent_scope;
+    }
+    let owner = this.owner(app).expect("a mounted element has an owner");
+    if let Some(KeyRef::Global(key)) = this.widget(app).key().cloned() {
+        owner.register_global_key(app, &key, this);
+    }
+    this.update_inheritance(app);
+    this.attach_notification_tree(app);
+}
+
+pub(crate) fn element_base_update(this: AnyElement, app: &mut App, new_widget: WidgetRef) {
+    // This code is hot when hot reloading, so we try to
+    // only call _AssertionError._evaluateAssertion once.
+    debug_assert!(
+        this.lifecycle(app) == ElementLifecycle::Active
+            && !same_widget(this.widget(app), &new_widget)
+            && can_update(&**this.widget(app), &*new_widget)
+    );
+    this.data_mut(app).widget = Some(new_widget);
+}
+
+pub(crate) fn element_base_update_slot(this: AnyElement, app: &mut App, new_slot: Option<Slot>) {
+    debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
+    debug_assert!(this.parent(app).is_some());
+    debug_assert!(
+        this.parent(app)
+            .is_some_and(|parent| parent.lifecycle(app) == ElementLifecycle::Active)
+    );
+    this.set_slot(app, new_slot);
+}
+
+pub(crate) fn element_base_attach_render_object(
+    this: AnyElement,
+    app: &mut App,
+    new_slot: Option<Slot>,
+) {
+    // Iterative left-to-right post-order traversal down non-RenderObjectElement chains.
+    let mut stack: Vec<(AnyElement, bool)> = vec![(this, false)];
+    while let Some((element, children_visited)) = stack.pop() {
+        if children_visited {
+            element.set_slot(app, new_slot.clone());
+            continue;
+        }
+        if element != this && element.is_render_object_element() {
+            element.attach_render_object(app, new_slot.clone());
+            continue;
+        }
+        debug_assert!(element.slot(app).is_none());
+        stack.push((element, true));
+        for child in element.children(app).into_iter().rev() {
+            stack.push((child, false));
+        }
+    }
+}
+
+pub(crate) fn element_base_detach_render_object(this: AnyElement, app: &mut App) {
+    // Iterative left-to-right post-order traversal down non-RenderObjectElement chains.
+    let mut stack: Vec<(AnyElement, bool)> = vec![(this, false)];
+    while let Some((element, children_visited)) = stack.pop() {
+        if children_visited {
+            element.set_slot(app, None);
+            continue;
+        }
+        if element != this && element.is_render_object_element() {
+            element.detach_render_object(app);
+            continue;
+        }
+        stack.push((element, true));
+        for child in element.children(app).into_iter().rev() {
+            stack.push((child, false));
+        }
+    }
+}
+
+pub(crate) fn element_base_activate(this: AnyElement, app: &mut App) {
+    debug_assert!(this.lifecycle(app) == ElementLifecycle::Inactive);
+    let owner = this
+        .owner(app)
+        .expect("an inactive element keeps its owner");
+    let had_dependencies = this.had_dependencies(app);
+    let had_entity_watches = !this.data(app).entity_watches.is_empty();
+    let data = this.data_mut(app);
+    data.lifecycle = ElementLifecycle::Active;
+    // We unregistered our dependencies in deactivate, but never cleared the list.
+    // Since we're going to be reused, let's clear our list now.
+    if let Some(dependencies) = &mut data.dependencies {
+        dependencies.clear();
+    }
+    data.had_unsatisfied_dependencies = false;
+    this.update_inheritance(app);
+    this.attach_notification_tree(app);
+    if this.dirty(app) {
+        owner.schedule_build_for(app, this);
+    }
+    if had_dependencies {
+        this.did_change_dependencies(app);
+    } else if had_entity_watches {
+        this.mark_needs_build(app);
+    }
+}
+
+pub(crate) fn element_base_deactivate(this: AnyElement, app: &mut App) {
+    debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
+    debug_assert!(this.mounted(app));
+    this.ensure_deactivated(app);
+}
+
+pub(crate) fn element_base_unmount(this: AnyElement, app: &mut App) {
+    debug_assert!(this.lifecycle(app) == ElementLifecycle::Inactive);
+    debug_assert!(this.mounted(app));
+    let owner = this
+        .owner(app)
+        .expect("an inactive element keeps its owner");
+    if let Some(KeyRef::Global(key)) = this.widget(app).key().cloned() {
+        owner.unregister_global_key(app, &key, this);
+    }
+    // Release resources to reduce the severity of memory leaks caused by
+    // defunct, but accidentally retained Elements.
+    let data = this.data_mut(app);
+    data.widget = None;
+    data.dependencies = None;
+    data.entity_watches.clear();
+    data.lifecycle = ElementLifecycle::Defunct;
+}
+
+pub(crate) fn element_base_perform_rebuild(this: AnyElement, app: &mut App) {
+    this.set_dirty(app, false);
+}
+
+pub(crate) fn element_base_did_change_dependencies(this: AnyElement, app: &mut App) {
+    debug_assert!(this.lifecycle(app) == ElementLifecycle::Active); // otherwise markNeedsBuild is a no-op
+    debug_assert!(debug_check_owner_build_target_exists(
+        this,
+        app,
+        "didChangeDependencies"
+    ));
+    this.mark_needs_build(app);
+}
+
+pub(crate) fn element_base_attach_notification_tree(this: AnyElement, app: &mut App) {
+    let tree = this
+        .parent(app)
+        .and_then(|parent| parent.data(app).notification_tree.clone());
+    this.data_mut(app).notification_tree = tree;
+}
+
+pub(crate) fn element_base_build_scope(this: AnyElement, app: &App) -> Handle<BuildScope> {
+    this.data(app)
+        .parent_build_scope
+        .expect("an element in a tree has a build scope")
+}
+
+pub(crate) fn element_base_mark_needs_build(this: AnyElement, app: &mut App) {
+    debug_assert!(this.lifecycle(app) != ElementLifecycle::Defunct);
+    if this.lifecycle(app) != ElementLifecycle::Active {
+        return;
+    }
+    let owner = this.owner(app).expect("an active element has an owner");
+    if cfg!(debug_assertions) {
+        if owner.debug_building(app) {
+            let target = owner
+                .debug_current_build_target(app)
+                .expect("building has a target");
+            debug_assert!(owner.debug_state_locked(app));
+            assert!(
+                this.debug_is_descendant_of(app, target),
+                "setState() or markNeedsBuild() called during build. This widget cannot \
+                 be marked as needing to build because the framework is already in the \
+                 process of building widgets. A widget can be marked as needing to be \
+                 built during the build phase only if one of its ancestors is currently \
+                 building."
+            );
+        } else {
+            assert!(
+                !owner.debug_state_locked(app),
+                "setState() or markNeedsBuild() called when widget tree was locked."
+            );
+        }
+    }
+    if this.dirty(app) {
+        return;
+    }
+    this.data_mut(app).dirty = true;
+    owner.schedule_build_for(app, this);
+}
+
+pub(crate) fn element_base_update_inheritance(this: AnyElement, app: &mut App) {
+    debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
+    let inherited = this
+        .parent(app)
+        .and_then(|parent| parent.inherited_elements(app));
+    this.set_inherited_elements(app, inherited);
+}
+
+pub(crate) fn element_base_render_object(this: AnyElement, app: &App) -> Option<AnyRenderObject> {
+    let mut current = Some(this);
+    while let Some(element) = current {
+        if element.lifecycle(app) == ElementLifecycle::Defunct {
+            break;
+        } else if element.is_render_object_element() {
+            return element.render_object(app);
+        } else {
+            current = element.render_object_attaching_child(app);
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1941,13 +2715,7 @@ fn activate_recursively(app: &mut App, element: AnyElement) {
 pub trait ElementBase: Element {
     /// `Element.renderObjectAttachingChild`: the single child, if any.
     fn render_object_attaching_child(self: Handle<Self>, app: &App) -> Option<AnyElement> {
-        let this = self.as_element();
-        let mut next = None;
-        this.visit_children(app, &mut |child| {
-            debug_assert!(next.is_none()); // This verifies that there's only one child.
-            next = Some(child);
-        });
-        next
+        element_base_render_object_attaching_child(self.as_element(), app)
     }
 
     /// `Element.mount`.
@@ -1957,243 +2725,77 @@ pub trait ElementBase: Element {
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
-        let this = self.as_element();
-        debug_assert!(
-            this.lifecycle(app) == ElementLifecycle::Initial,
-            "This element is no longer in its initial state ({:?})",
-            this.lifecycle(app)
-        );
-        debug_assert!(
-            this.parent(app).is_none(),
-            "This element already has a parent and it shouldn't have one yet."
-        );
-        debug_assert!(
-            parent.is_none_or(|parent| parent.lifecycle(app) == ElementLifecycle::Active),
-            "Parent should be null or in the active state"
-        );
-        debug_assert!(
-            this.slot(app).is_none(),
-            "This element already has a slot and it shouldn't"
-        );
-        let parent_depth = parent.map_or(0, |parent| parent.depth(app));
-        let parent_owner = parent.and_then(|parent| parent.owner(app));
-        let parent_scope = parent.map(|parent| parent.build_scope(app));
-        let data = this.data_mut(app);
-        data.parent = parent;
-        data.slot = new_slot;
-        data.lifecycle = ElementLifecycle::Active;
-        data.depth = 1 + parent_depth;
-        if parent.is_some() {
-            // Only assign ownership if the parent is non-null. If parent is null
-            // (the root node), the owner should have already been assigned.
-            // See RootRenderObjectElement.assignOwner().
-            data.owner = parent_owner;
-            data.parent_build_scope = parent_scope;
-        }
-        let owner = this.owner(app).expect("a mounted element has an owner");
-        if let Some(KeyRef::Global(key)) = this.widget(app).key().cloned() {
-            owner.register_global_key(app, &key, this);
-        }
-        this.update_inheritance(app);
-        this.attach_notification_tree(app);
+        element_base_mount(self.as_element(), app, parent, new_slot);
     }
 
     /// `Element.update`.
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
-        let this = self.as_element();
-        // This code is hot when hot reloading, so we try to
-        // only call _AssertionError._evaluateAssertion once.
-        debug_assert!(
-            this.lifecycle(app) == ElementLifecycle::Active
-                && !same_widget(this.widget(app), &new_widget)
-                && can_update(&**this.widget(app), &*new_widget)
-        );
-        this.data_mut(app).widget = Some(new_widget);
+        element_base_update(self.as_element(), app, new_widget);
     }
 
     /// `Element.updateSlot`.
     fn update_slot(self: Handle<Self>, app: &mut App, new_slot: Option<Slot>) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
-        debug_assert!(this.parent(app).is_some());
-        debug_assert!(
-            this.parent(app)
-                .is_some_and(|parent| parent.lifecycle(app) == ElementLifecycle::Active)
-        );
-        this.set_slot(app, new_slot);
+        element_base_update_slot(self.as_element(), app, new_slot);
     }
 
     /// `Element.attachRenderObject`.
     fn attach_render_object(self: Handle<Self>, app: &mut App, new_slot: Option<Slot>) {
-        let this = self.as_element();
-        debug_assert!(this.slot(app).is_none());
-        for child in this.children(app) {
-            child.attach_render_object(app, new_slot.clone());
-        }
-        this.set_slot(app, new_slot);
+        element_base_attach_render_object(self.as_element(), app, new_slot);
     }
 
     /// `Element.detachRenderObject`.
     fn detach_render_object(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        for child in this.children(app) {
-            child.detach_render_object(app);
-        }
-        this.set_slot(app, None);
+        element_base_detach_render_object(self.as_element(), app);
     }
 
     /// `Element.activate`.
     fn activate(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) == ElementLifecycle::Inactive);
-        let owner = this
-            .owner(app)
-            .expect("an inactive element keeps its owner");
-        let had_dependencies = this.had_dependencies(app);
-        let had_entity_watches = !this.data(app).entity_watches.is_empty();
-        let data = this.data_mut(app);
-        data.lifecycle = ElementLifecycle::Active;
-        // We unregistered our dependencies in deactivate, but never cleared the list.
-        // Since we're going to be reused, let's clear our list now.
-        if let Some(dependencies) = &mut data.dependencies {
-            dependencies.clear();
-        }
-        data.had_unsatisfied_dependencies = false;
-        this.update_inheritance(app);
-        this.attach_notification_tree(app);
-        if this.dirty(app) {
-            owner.schedule_build_for(app, this);
-        }
-        if had_dependencies {
-            this.did_change_dependencies(app);
-        } else if had_entity_watches {
-            this.mark_needs_build(app);
-        }
+        element_base_activate(self.as_element(), app);
     }
 
     /// `Element.deactivate`.
     fn deactivate(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
-        debug_assert!(this.mounted(app));
-        this.ensure_deactivated(app);
+        element_base_deactivate(self.as_element(), app);
     }
 
     /// `Element.unmount`.
     fn unmount(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) == ElementLifecycle::Inactive);
-        debug_assert!(this.mounted(app));
-        let owner = this
-            .owner(app)
-            .expect("an inactive element keeps its owner");
-        if let Some(KeyRef::Global(key)) = this.widget(app).key().cloned() {
-            owner.unregister_global_key(app, &key, this);
-        }
-        // Release resources to reduce the severity of memory leaks caused by
-        // defunct, but accidentally retained Elements.
-        let data = this.data_mut(app);
-        data.widget = None;
-        data.dependencies = None;
-        data.entity_watches.clear();
-        data.lifecycle = ElementLifecycle::Defunct;
+        element_base_unmount(self.as_element(), app);
     }
 
     /// `Element.performRebuild`: clears the dirty flag.
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        this.set_dirty(app, false);
+        element_base_perform_rebuild(self.as_element(), app);
     }
 
     /// `Element.didChangeDependencies`.
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) == ElementLifecycle::Active); // otherwise markNeedsBuild is a no-op
-        debug_assert!(debug_check_owner_build_target_exists(
-            this,
-            app,
-            "didChangeDependencies"
-        ));
-        this.mark_needs_build(app);
+        element_base_did_change_dependencies(self.as_element(), app);
     }
 
     /// `Element.attachNotificationTree`: inherit the parent's notification chain.
     fn attach_notification_tree(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        let tree = this
-            .parent(app)
-            .and_then(|parent| parent.data(app).notification_tree.clone());
-        this.data_mut(app).notification_tree = tree;
+        element_base_attach_notification_tree(self.as_element(), app);
     }
 
     /// `Element.buildScope`: the scope inherited from the parent at mount.
     fn build_scope(self: Handle<Self>, app: &App) -> Handle<BuildScope> {
-        self.as_element()
-            .data(app)
-            .parent_build_scope
-            .expect("an element in a tree has a build scope")
+        element_base_build_scope(self.as_element(), app)
     }
 
     /// `Element.markNeedsBuild`.
     fn mark_needs_build(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) != ElementLifecycle::Defunct);
-        if this.lifecycle(app) != ElementLifecycle::Active {
-            return;
-        }
-        let owner = this.owner(app).expect("an active element has an owner");
-        if cfg!(debug_assertions) {
-            if owner.debug_building(app) {
-                let target = owner
-                    .debug_current_build_target(app)
-                    .expect("building has a target");
-                debug_assert!(owner.debug_state_locked(app));
-                assert!(
-                    this.debug_is_descendant_of(app, target),
-                    "setState() or markNeedsBuild() called during build. This widget cannot \
-                     be marked as needing to build because the framework is already in the \
-                     process of building widgets. A widget can be marked as needing to be \
-                     built during the build phase only if one of its ancestors is currently \
-                     building."
-                );
-            } else {
-                assert!(
-                    !owner.debug_state_locked(app),
-                    "setState() or markNeedsBuild() called when widget tree was locked."
-                );
-            }
-        }
-        if this.dirty(app) {
-            return;
-        }
-        this.data_mut(app).dirty = true;
-        owner.schedule_build_for(app, this);
+        element_base_mark_needs_build(self.as_element(), app);
     }
 
     /// `Element._updateInheritance`.
     fn update_inheritance(self: Handle<Self>, app: &mut App) {
-        let this = self.as_element();
-        debug_assert!(this.lifecycle(app) == ElementLifecycle::Active);
-        let inherited = this
-            .parent(app)
-            .and_then(|parent| parent.inherited_elements(app));
-        this.set_inherited_elements(app, inherited);
+        element_base_update_inheritance(self.as_element(), app);
     }
 
     /// `Element.renderObject`: walk down through the attaching children.
     fn render_object(self: Handle<Self>, app: &App) -> Option<AnyRenderObject> {
-        let this = self.as_element();
-        let mut current = Some(this);
-        while let Some(element) = current {
-            if element.lifecycle(app) == ElementLifecycle::Defunct {
-                break;
-            } else if element.is_render_object_element() {
-                return element.render_object(app);
-            } else {
-                current = element.render_object_attaching_child(app);
-            }
-        }
-        None
+        element_base_render_object(self.as_element(), app)
     }
 
     /// `Element.inflateWidget`.
@@ -2203,28 +2805,7 @@ pub trait ElementBase: Element {
         new_widget: WidgetRef,
         new_slot: Option<Slot>,
     ) -> AnyElement {
-        let this = self.as_element();
-        let inactive_child = match new_widget.key() {
-            Some(KeyRef::Global(key)) => this.retake_inactive_element(app, key, &new_widget),
-            _ => None,
-        };
-        match inactive_child {
-            Some(inactive_child) => {
-                debug_assert!(inactive_child.parent(app).is_none());
-                inactive_child.activate_with_parent(app, this, new_slot.clone());
-                let updated_child =
-                    this.update_child(app, Some(inactive_child), Some(new_widget), new_slot);
-                debug_assert!(updated_child == Some(inactive_child));
-                updated_child.expect("a retaken child stays")
-            }
-            None => {
-                let new_child = new_widget.create_element(app, new_widget.clone());
-                debug_assert!(debug_check_for_cycles(this, app, new_child));
-                new_child.mount(app, Some(this), new_slot);
-                debug_assert!(new_child.lifecycle(app) == ElementLifecycle::Active);
-                new_child
-            }
-        }
+        self.as_element().inflate_widget(app, new_widget, new_slot)
     }
 }
 impl<T: Element> ElementBase for T {}

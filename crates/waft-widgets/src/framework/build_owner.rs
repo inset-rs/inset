@@ -531,27 +531,45 @@ impl BuildOwner {
     }
 }
 
-fn unmount_recursively(app: &mut App, element: AnyElement) {
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
-    for child in element.children(app) {
-        debug_assert!(child.parent(app) == Some(element));
-        unmount_recursively(app, child);
+fn unmount_recursively(app: &mut App, root: AnyElement) {
+    // Iterative post-order traversal to avoid native/Wasm stack overflow on deep subtrees.
+    let mut stack: Vec<(AnyElement, bool)> = vec![(root, false)];
+    while let Some((element, children_visited)) = stack.pop() {
+        if children_visited {
+            element.unmount(app);
+            debug_assert!(element.lifecycle(app) == ElementLifecycle::Defunct);
+            // Dart drops a defunct element. A handle to it kept past this frame (a callback's
+            // `BuildContext`) still reads it until the next checkpoint, then finds it unmounted.
+            app.release_tree_node(element.id());
+            continue;
+        }
+        debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
+        stack.push((element, true));
+        for child in element.children(app).into_iter().rev() {
+            debug_assert!(child.parent(app) == Some(element));
+            stack.push((child, false));
+        }
     }
-    element.unmount(app);
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Defunct);
-    // Dart drops a defunct element. A handle to it kept past this frame (a callback's
-    // `BuildContext`) still reads it until the next checkpoint, then finds it unmounted.
-    app.release_tree_node(element.id());
 }
 
-fn deactivate_recursively(app: &mut App, element: AnyElement) {
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
-    element.deactivate(app);
-    for child in element.children(app) {
-        deactivate_recursively(app, child);
-    }
-    if cfg!(debug_assertions) {
-        element.debug_deactivated(app);
+fn deactivate_recursively(app: &mut App, root: AnyElement) {
+    // Iterative pre-order deactivate + post-order debug check to avoid stack overflow on deep subtrees.
+    let mut stack: Vec<(AnyElement, bool)> = vec![(root, false)];
+    while let Some((element, children_visited)) = stack.pop() {
+        if children_visited {
+            if cfg!(debug_assertions) {
+                element.debug_deactivated(app);
+            }
+            continue;
+        }
+        debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
+        element.deactivate(app);
+        if cfg!(debug_assertions) {
+            stack.push((element, true));
+        }
+        for child in element.children(app).into_iter().rev() {
+            stack.push((child, false));
+        }
     }
 }
 
