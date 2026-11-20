@@ -20,10 +20,10 @@ use super::element::{
     AnyElement, Element, ElementBase, ElementData, ElementLifecycle, IndexedSlot, Slot,
     debug_check_owner_build_target_exists,
 };
-use super::state::{State, StateLifecycle};
+use super::state::{AnyState, State, StateLifecycle};
 use super::widget::{
     InheritedWidget, LeafRenderObjectWidget, MultiChildRenderObjectWidget, ParentDataWidget,
-    RenderObjectWidget, SingleChildRenderObjectWidget, StatefulWidget, WidgetRef, downcast_widget,
+    RenderObjectWidget, SingleChildRenderObjectWidget, WidgetRef, downcast_widget,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -221,54 +221,48 @@ impl Element for StatelessElement {
 // StatefulElement
 
 /// An [`Element`] that uses a [`StatefulWidget`] as its configuration.
-pub struct StatefulElement<W: StatefulWidget> {
+pub struct StatefulElement {
     element: ElementData,
     component: ComponentElementData,
-    state: Option<Handle<W::State>>,
+    state: Option<AnyState>,
     did_change_dependencies: bool,
 }
 
-impl<W: StatefulWidget> StatefulElement<W> {
-    /// Creates an element that uses the given widget as its configuration.
-    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        let state = {
-            let stateful = &downcast_widget::<W>(&*widget)
-                .expect("a StatefulElement holds its StatefulWidget");
-            stateful.create_state()
-        };
-        let state = app.create(state).into_tree_node(app);
+impl StatefulElement {
+    /// Creates an element that uses the given widget as its configuration, with the `state`
+    /// the widget created.
+    pub(crate) fn new(app: &mut App, widget: WidgetRef, state: AnyState) -> Handle<Self> {
         let this = app
-            .create(StatefulElement::<W> {
+            .create(StatefulElement {
                 element: ElementData::new(widget.clone()),
                 component: ComponentElementData::default(),
                 state: Some(state),
                 did_change_dependencies: false,
             })
             .into_tree_node(app);
-        debug_assert!(state.state_data(app).element().is_none());
-        state.state_data_mut(app).set_element(Some(this));
-        state.state_data_mut(app).set_widget(widget);
-        debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
+        debug_assert!(state.element(app).is_none());
+        state.set_element(app, Some(this));
+        state.set_widget(app, widget);
+        debug_assert!(state.debug_lifecycle_state(app) == StateLifecycle::Created);
         this
     }
 
-    /// The [`State`] instance associated with this location in the tree.
+    /// The [`State`] instance associated with this location in the tree, when it is an `S`.
     ///
     /// There is a one-to-one relationship between [`State`] objects and the
     /// [`StatefulElement`] objects that hold them. The [`State`] objects are created by
     /// [`StatefulElement`] in `mount`.
-    pub fn state(self: Handle<Self>, app: &App) -> Handle<W::State> {
-        app.get(self).state.expect("the element is unmounted")
+    pub fn state<S: State>(self: Handle<Self>, app: &App) -> Option<Handle<S>> {
+        let state = app.get(self).state.expect("the element is unmounted");
+        (state.type_id() == TypeId::of::<S>()).then(|| Handle::from_id(state.id()))
     }
 
-    /// The widget, typed.
-    pub fn widget(self: Handle<Self>, app: &App) -> &W {
-        downcast_widget::<W>(&**self.as_element().widget(app))
-            .expect("a StatefulElement holds its StatefulWidget")
+    fn any_state(self: Handle<Self>, app: &App) -> AnyState {
+        app.get(self).state.expect("the element is unmounted")
     }
 }
 
-impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
+impl ComponentElement for StatefulElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -278,25 +272,21 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
     }
 
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef {
-        let state = self.state(app);
+        let state = self.any_state(app);
         state.build(app, self.as_element())
     }
 
     #[inline(always)]
     fn first_build(self: Handle<Self>, app: &mut App) {
-        let state = self.state(app);
-        debug_assert!(state.state_data(app).debug_lifecycle_state() == StateLifecycle::Created);
+        let state = self.any_state(app);
+        debug_assert!(state.debug_lifecycle_state(app) == StateLifecycle::Created);
         state.init_state(app);
         if cfg!(debug_assertions) {
-            state
-                .state_data_mut(app)
-                .set_debug_lifecycle_state(StateLifecycle::Initialized);
+            state.set_debug_lifecycle_state(app, StateLifecycle::Initialized);
         }
         state.did_change_dependencies(app);
         if cfg!(debug_assertions) {
-            state
-                .state_data_mut(app)
-                .set_debug_lifecycle_state(StateLifecycle::Ready);
+            state.set_debug_lifecycle_state(app, StateLifecycle::Ready);
         }
         ElementBase::rebuild(self, app, false);
     }
@@ -304,7 +294,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
     #[inline(always)]
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
         if app.get(self).did_change_dependencies {
-            self.state(app).did_change_dependencies(app);
+            self.any_state(app).did_change_dependencies(app);
             app.get_mut(self).did_change_dependencies = false;
         }
         if cfg!(debug_assertions) {
@@ -325,7 +315,7 @@ impl<W: StatefulWidget> ComponentElement for StatefulElement<W> {
     }
 }
 
-impl<W: StatefulWidget> Element for StatefulElement<W> {
+impl Element for StatefulElement {
     crate::element_accessors!();
     component_element_overrides!();
 
@@ -343,11 +333,9 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let old_widget = self.as_element().widget(app).clone();
         ElementBase::update(self, app, new_widget.clone());
-        let state = self.state(app);
-        state.state_data_mut(app).set_widget(new_widget);
-        let old = &downcast_widget::<W>(&*old_widget)
-            .expect("a StatefulElement holds its StatefulWidget");
-        state.did_update_widget(app, old);
+        let state = self.any_state(app);
+        state.set_widget(app, new_widget);
+        state.did_update_widget(app, &old_widget);
         ElementBase::rebuild(self, app, true);
     }
 
@@ -358,7 +346,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
 
     fn activate(self: Handle<Self>, app: &mut App) {
         ElementBase::activate(self, app);
-        self.state(app).activate(app);
+        self.any_state(app).activate(app);
         // Since the State could have observed the deactivate() and thus disposed of
         // resources allocated in the build method, we have to rebuild the widget
         // so that its State can reallocate its resources.
@@ -367,22 +355,20 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     }
 
     fn deactivate(self: Handle<Self>, app: &mut App) {
-        self.state(app).deactivate(app);
+        self.any_state(app).deactivate(app);
         ElementBase::deactivate(self, app);
     }
 
     fn unmount(self: Handle<Self>, app: &mut App) {
         ElementBase::unmount(self, app);
-        let state = self.state(app);
+        let state = self.any_state(app);
         state.dispose(app);
         if cfg!(debug_assertions) {
-            state
-                .state_data_mut(app)
-                .set_debug_lifecycle_state(StateLifecycle::Defunct);
+            state.set_debug_lifecycle_state(app, StateLifecycle::Defunct);
         }
-        state.state_data_mut(app).set_element(None);
+        state.set_element(app, None);
         app.get_mut(self).state = None;
-        app.release_tree_node(state);
+        app.release_tree_node(state.id());
     }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
@@ -393,7 +379,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
     fn state_handle_id(self: Handle<Self>, app: &App) -> Option<(TypeId, HandleId)> {
         app.get(self)
             .state
-            .map(|state| (TypeId::of::<W::State>(), state.id()))
+            .map(|state| (state.type_id(), state.id()))
     }
 }
 

@@ -18,7 +18,7 @@ use super::elements::{
     InheritedElement, LeafRenderObjectElement, MultiChildRenderObjectElement, ParentDataElement,
     SingleChildRenderObjectElement, StatefulElement, StatelessElement,
 };
-use super::state::State;
+use super::state::{AnyState, State};
 use crate::widgets::inherited_theme::InheritedTheme;
 use crate::widgets::preferred_size::PreferredSizeWidget;
 
@@ -415,7 +415,8 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        StatefulElement::<W>::new(app, this).as_element()
+        let state = app.create(self.0.create_state()).into_tree_node(app);
+        StatefulElement::new(app, this, AnyState::of(state)).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
