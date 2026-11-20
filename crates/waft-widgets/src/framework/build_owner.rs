@@ -531,28 +531,63 @@ impl BuildOwner {
     }
 }
 
+/// Dart's `_unmount`: unmounts `element`'s subtree, children before their parent.
+///
+/// A loop over a stack rather than recursion, as the other whole-subtree walks here: a walk
+/// down a deep tree costs a call per level, and Safari's wasm stack is about a megabyte.
 fn unmount_recursively(app: &mut App, element: AnyElement) {
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
-    for child in element.children(app) {
-        debug_assert!(child.parent(app) == Some(element));
-        unmount_recursively(app, child);
+    let mut stack = vec![Walk::Enter(element)];
+    while let Some(step) = stack.pop() {
+        match step {
+            Walk::Enter(element) => {
+                debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
+                stack.push(Walk::Leave(element));
+                for child in element.children(app).into_iter().rev() {
+                    debug_assert!(child.parent(app) == Some(element));
+                    stack.push(Walk::Enter(child));
+                }
+            }
+            Walk::Leave(element) => {
+                element.unmount(app);
+                debug_assert!(element.lifecycle(app) == ElementLifecycle::Defunct);
+                // Dart drops a defunct element. A handle to it kept past this frame (a callback's
+                // `BuildContext`) still reads it until the next checkpoint, then finds it
+                // unmounted.
+                app.release_tree_node(element.id());
+            }
+        }
     }
-    element.unmount(app);
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Defunct);
-    // Dart drops a defunct element. A handle to it kept past this frame (a callback's
-    // `BuildContext`) still reads it until the next checkpoint, then finds it unmounted.
-    app.release_tree_node(element.id());
 }
 
+/// Dart's `_deactivateRecursively`: deactivates `element`, then its children; in a debug build
+/// each element checks its deactivation once its children are done. A loop, as
+/// [`unmount_recursively`].
 fn deactivate_recursively(app: &mut App, element: AnyElement) {
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
-    element.deactivate(app);
-    for child in element.children(app) {
-        deactivate_recursively(app, child);
+    let mut stack = vec![Walk::Enter(element)];
+    while let Some(step) = stack.pop() {
+        match step {
+            Walk::Enter(element) => {
+                debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
+                element.deactivate(app);
+                stack.push(Walk::Leave(element));
+                for child in element.children(app).into_iter().rev() {
+                    stack.push(Walk::Enter(child));
+                }
+            }
+            Walk::Leave(element) => {
+                if cfg!(debug_assertions) {
+                    element.debug_deactivated(app);
+                }
+            }
+        }
     }
-    if cfg!(debug_assertions) {
-        element.debug_deactivated(app);
-    }
+}
+
+/// A step of a subtree walk: an element reached on the way down, or left once its children are
+/// done.
+enum Walk {
+    Enter(AnyElement),
+    Leave(AnyElement),
 }
 
 #[cfg(test)]

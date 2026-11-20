@@ -11,13 +11,17 @@
 //! Mounting and rebuilding recurse once per level of the tree, and on the web each wasm call
 //! costs Safari's first tier close to a kilobyte of stack however small it is, so a deep tree
 //! (the Material gallery's phone layout is about 300 levels) overflows an iPhone's stack when a
-//! level costs many calls. A level costs two: [`AnyElement::update_child`] and the child's
-//! vtable entry. What runs between them is folded into one or the other with
-//! `#[inline(always)]`: each element's `mount`, `update`, `first_build` and `perform_rebuild`
-//! and the base bodies they forward to, and [`AnyElement::inflate_widget`] (which is why it is
-//! not an override point). An element of a known type rebuilds through [`ElementBase::rebuild`],
-//! which calls its `perform_rebuild` directly rather than through the vtable. A forwarding method
-//! on that path without the attribute adds a call to every level.
+//! level costs many calls. A level costs one: the child's vtable entry. Everything between one
+//! entry and the next is folded into it with `#[inline(always)]`: each element's `mount`,
+//! `update`, `first_build` and `perform_rebuild` and the base bodies they forward to,
+//! [`AnyElement::update_child`] and [`AnyElement::inflate_widget`] (which is why it is not an
+//! override point). An element of a known type rebuilds through
+//! [`ElementBase::rebuild`], which calls its `perform_rebuild` directly rather than through the
+//! vtable. Folding `update_child` into every entry is cheap only because the framework's
+//! elements are not generic over their widget, so there are a few dozen entries rather than one
+//! per widget type. A forwarding method on that path without the attribute, or a call back
+//! into `update_child` from what it folds in (see `inflate_inactive_child`), adds a call to
+//! every level. The walks over a whole subtree (activate, deactivate, unmount) are loops.
 
 use std::any::{Any, TypeId};
 use std::cell::Cell;
@@ -984,12 +988,7 @@ impl AnyElement {
         };
         match inactive_child {
             Some(inactive_child) => {
-                debug_assert!(inactive_child.parent(app).is_none());
-                inactive_child.activate_with_parent(app, self, new_slot.clone());
-                let updated_child =
-                    self.update_child(app, Some(inactive_child), Some(new_widget), new_slot);
-                debug_assert!(updated_child == Some(inactive_child));
-                updated_child.expect("a retaken child stays")
+                self.inflate_inactive_child(app, inactive_child, new_widget, new_slot)
             }
             None => {
                 let new_child = new_widget.create_element(app, new_widget.clone());
@@ -999,6 +998,26 @@ impl AnyElement {
                 new_child
             }
         }
+    }
+
+    /// [`inflate_widget`](Self::inflate_widget) for a child taken back from the inactive
+    /// elements by its global key. Out of line so that `inflate_widget` and
+    /// [`update_child`](Self::update_child), which this calls, can both fold into the element
+    /// that runs them.
+    #[inline(never)]
+    fn inflate_inactive_child(
+        self,
+        app: &mut App,
+        inactive_child: AnyElement,
+        new_widget: WidgetRef,
+        new_slot: Option<Slot>,
+    ) -> AnyElement {
+        debug_assert!(inactive_child.parent(app).is_none());
+        inactive_child.activate_with_parent(app, self, new_slot.clone());
+        let updated_child =
+            self.update_child(app, Some(inactive_child), Some(new_widget), new_slot);
+        debug_assert!(updated_child == Some(inactive_child));
+        updated_child.expect("a retaken child stays")
     }
 
     /// Dart's `this is RenderObjectElement`.
@@ -1105,6 +1124,7 @@ impl AnyElement {
     /// The [`update_child`](Self::update_child) method returns the new child, if it had to
     /// create one, or the child that was passed in, if it just had to update the child, or
     /// `None`, if it removed the child and did not replace it.
+    #[inline(always)]
     pub fn update_child(
         self,
         app: &mut App,
@@ -1959,12 +1979,15 @@ impl AnyElement {
     }
 }
 
+/// Dart's `_activateRecursively`: activates `element`, then its children, in a loop rather than
+/// recursion so a deep subtree costs no stack per level.
 fn activate_recursively(app: &mut App, element: AnyElement) {
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
-    element.activate(app);
-    debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
-    for child in element.children(app) {
-        activate_recursively(app, child);
+    let mut stack = vec![element];
+    while let Some(element) = stack.pop() {
+        debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
+        element.activate(app);
+        debug_assert!(element.lifecycle(app) == ElementLifecycle::Active);
+        stack.extend(element.children(app).into_iter().rev());
     }
 }
 
