@@ -14,10 +14,10 @@
 //! level costs many calls. A level costs two: [`AnyElement::update_child`] and the child's
 //! vtable entry. What runs between them is folded into one or the other with
 //! `#[inline(always)]`: each element's `mount`, `update`, `first_build` and `perform_rebuild`
-//! and the base bodies they forward to, [`AnyElement::inflate_widget`] (which is why it is not
-//! an override point) and [`AnyElement::rebuild`]. An element of a known type rebuilds through
-//! [`ElementBase::rebuild`], which calls its `perform_rebuild` directly rather than through the
-//! vtable. A forwarding method on that path without the attribute adds a call to every level.
+//! and the base bodies they forward to, and [`AnyElement::inflate_widget`] (which is why it is
+//! not an override point). An element of a known type rebuilds through [`ElementBase::rebuild`],
+//! which calls its `perform_rebuild` directly rather than through the vtable. A forwarding method
+//! on that path without the attribute adds a call to every level.
 
 use std::any::{Any, TypeId};
 use std::cell::Cell;

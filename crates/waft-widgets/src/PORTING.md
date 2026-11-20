@@ -86,10 +86,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## framework/ → framework.dart
 
-- Change: `Element.inflateWidget` is `AnyElement::inflate_widget`, one body for every element rather than an override point, and the element hooks on the way down the tree (`mount`, `update`, `perform_rebuild`, `rebuild`) are folded into the element's vtable entry; `MultiChildRenderObjectElement` has no `inflateWidget` override, so Dart's debug check that each child has a render object is not run.
-  Reason: platform — Safari runs wasm on a stack of about a megabyte and charges each call close to a kilobyte however small it is, and an erased element's hooks are reached through a function-pointer thunk where Dart makes one virtual call, so every extra call per level of a ~300-deep tree overflows an iPhone's stack on the first frame.
-  Affect: an element type cannot override how its children are inflated, and a multi-child render object widget given a child without a render object is not reported at inflation in debug builds.
-
 - Change: a `State` is released with its element at unmount and freed at the next checkpoint unless a `Ref` keeps it; a callback that outlives the state holds a `Ref` (from `Handle::upgrade`) or checks `mounted`.
   Reason: language — no garbage collector keeps Dart's disposed `State` alive; the tree code keeps a state only while it is mounted.
   Affect: Dart's `if (mounted) setState(..)` guard from a timer or listener still works, but reading `widget` or `context` through a bare handle after the checkpoint panics with a stale-handle message instead of returning the last widget.
