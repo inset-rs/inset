@@ -1234,6 +1234,7 @@ impl Element for FocusInheritedScopeElement {
         ComponentElement::mount(self, app, parent, new_slot);
     }
 
+    #[inline(always)]
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
         let old_node = self.widget(app).node.handle();
         let new_node = FocusInheritedScopeElement::widget_of(&new_widget)

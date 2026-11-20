@@ -4,7 +4,10 @@
 //! bookkeeping (Dart's `_element`, `_widget`, and the debug lifecycle) is the [`StateData`]
 //! bag the struct holds under the field `state`.
 
-use waft_foundation::{App, Handle};
+use std::any::TypeId;
+use std::marker::PhantomData;
+
+use waft_foundation::{App, Handle, HandleId};
 
 use super::element::BuildContext;
 use super::elements::StatefulElement;
@@ -28,8 +31,12 @@ pub enum StateLifecycle {
 /// The framework's part of a [`State`]: the element it belongs to and its lifecycle.
 pub struct StateData<W: StatefulWidget> {
     widget: Option<WidgetRef>,
-    element: Option<Handle<StatefulElement<W>>>,
+    element: Option<Handle<StatefulElement>>,
     debug_lifecycle_state: StateLifecycle,
+    /// The state's widget type. The bag holds nothing of it since its element stopped being
+    /// generic; it stays so a state's `state: StateData<MyWidget>` field and
+    /// [`State::state_data`] keep their shape.
+    widget_type: PhantomData<fn() -> W>,
 }
 
 impl<W: StatefulWidget> StateData<W> {
@@ -39,6 +46,7 @@ impl<W: StatefulWidget> StateData<W> {
             widget: None,
             element: None,
             debug_lifecycle_state: StateLifecycle::Created,
+            widget_type: PhantomData,
         }
     }
 
@@ -47,11 +55,11 @@ impl<W: StatefulWidget> StateData<W> {
         self.widget = Some(widget);
     }
 
-    pub(crate) fn element(&self) -> Option<Handle<StatefulElement<W>>> {
+    pub(crate) fn element(&self) -> Option<Handle<StatefulElement>> {
         self.element
     }
 
-    pub(crate) fn set_element(&mut self, element: Option<Handle<StatefulElement<W>>>) {
+    pub(crate) fn set_element(&mut self, element: Option<Handle<StatefulElement>>) {
         self.element = element;
     }
 
@@ -67,6 +75,127 @@ impl<W: StatefulWidget> StateData<W> {
 impl<W: StatefulWidget> Default for StateData<W> {
     fn default() -> StateData<W> {
         StateData::new()
+    }
+}
+
+/// A [`State`] of any type, as the one [`StatefulElement`] holds it: its handle and the hooks
+/// the element calls, so the element is not copied per state type. Opaque outside the framework.
+#[derive(Clone, Copy)]
+pub struct AnyState {
+    id: HandleId,
+    vtable: &'static StateVTable,
+}
+
+/// The hooks of one [`State`] type that its element calls.
+struct StateVTable {
+    type_id: TypeId,
+    build: fn(&mut App, HandleId, BuildContext) -> WidgetRef,
+    init_state: fn(&mut App, HandleId),
+    did_change_dependencies: fn(&mut App, HandleId),
+    did_update_widget: fn(&mut App, HandleId, &WidgetRef),
+    activate: fn(&mut App, HandleId),
+    deactivate: fn(&mut App, HandleId),
+    dispose: fn(&mut App, HandleId),
+    set_widget: fn(&mut App, HandleId, WidgetRef),
+    element: fn(&App, HandleId) -> Option<Handle<StatefulElement>>,
+    set_element: fn(&mut App, HandleId, Option<Handle<StatefulElement>>),
+    debug_lifecycle_state: fn(&App, HandleId) -> StateLifecycle,
+    set_debug_lifecycle_state: fn(&mut App, HandleId, StateLifecycle),
+}
+
+impl StateVTable {
+    const fn of<S: State>() -> StateVTable {
+        fn typed<S: State>(id: HandleId) -> Handle<S> {
+            Handle::from_id(id)
+        }
+        StateVTable {
+            type_id: TypeId::of::<S>(),
+            build: |app, id, context| typed::<S>(id).build(app, context),
+            init_state: |app, id| typed::<S>(id).init_state(app),
+            did_change_dependencies: |app, id| typed::<S>(id).did_change_dependencies(app),
+            did_update_widget: |app, id, old_widget| {
+                let old_widget = downcast_widget::<S::Widget>(&**old_widget)
+                    .expect("a StatefulElement holds its StatefulWidget");
+                typed::<S>(id).did_update_widget(app, old_widget);
+            },
+            activate: |app, id| typed::<S>(id).activate(app),
+            deactivate: |app, id| typed::<S>(id).deactivate(app),
+            dispose: |app, id| typed::<S>(id).dispose(app),
+            set_widget: |app, id, widget| typed::<S>(id).state_data_mut(app).set_widget(widget),
+            element: |app, id| typed::<S>(id).state_data(app).element(),
+            set_element: |app, id, element| typed::<S>(id).state_data_mut(app).set_element(element),
+            debug_lifecycle_state: |app, id| typed::<S>(id).state_data(app).debug_lifecycle_state(),
+            set_debug_lifecycle_state: |app, id, lifecycle| {
+                typed::<S>(id)
+                    .state_data_mut(app)
+                    .set_debug_lifecycle_state(lifecycle);
+            },
+        }
+    }
+}
+
+impl AnyState {
+    pub(crate) fn of<S: State>(state: Handle<S>) -> AnyState {
+        AnyState {
+            id: state.id(),
+            vtable: const { &StateVTable::of::<S>() },
+        }
+    }
+
+    pub(crate) fn id(self) -> HandleId {
+        self.id
+    }
+
+    pub(crate) fn type_id(self) -> TypeId {
+        self.vtable.type_id
+    }
+
+    pub(crate) fn build(self, app: &mut App, context: BuildContext) -> WidgetRef {
+        (self.vtable.build)(app, self.id, context)
+    }
+
+    pub(crate) fn init_state(self, app: &mut App) {
+        (self.vtable.init_state)(app, self.id);
+    }
+
+    pub(crate) fn did_change_dependencies(self, app: &mut App) {
+        (self.vtable.did_change_dependencies)(app, self.id);
+    }
+
+    pub(crate) fn did_update_widget(self, app: &mut App, old_widget: &WidgetRef) {
+        (self.vtable.did_update_widget)(app, self.id, old_widget);
+    }
+
+    pub(crate) fn activate(self, app: &mut App) {
+        (self.vtable.activate)(app, self.id);
+    }
+
+    pub(crate) fn deactivate(self, app: &mut App) {
+        (self.vtable.deactivate)(app, self.id);
+    }
+
+    pub(crate) fn dispose(self, app: &mut App) {
+        (self.vtable.dispose)(app, self.id);
+    }
+
+    pub(crate) fn set_widget(self, app: &mut App, widget: WidgetRef) {
+        (self.vtable.set_widget)(app, self.id, widget);
+    }
+
+    pub(crate) fn element(self, app: &App) -> Option<Handle<StatefulElement>> {
+        (self.vtable.element)(app, self.id)
+    }
+
+    pub(crate) fn set_element(self, app: &mut App, element: Option<Handle<StatefulElement>>) {
+        (self.vtable.set_element)(app, self.id, element);
+    }
+
+    pub(crate) fn debug_lifecycle_state(self, app: &App) -> StateLifecycle {
+        (self.vtable.debug_lifecycle_state)(app, self.id)
+    }
+
+    pub(crate) fn set_debug_lifecycle_state(self, app: &mut App, lifecycle: StateLifecycle) {
+        (self.vtable.set_debug_lifecycle_state)(app, self.id, lifecycle);
     }
 }
 

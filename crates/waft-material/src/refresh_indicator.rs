@@ -997,8 +997,7 @@ mod tests {
         GlowingOverscrollIndicator, IntoWidget, LayoutBuilder, ListView, Notification,
         NotificationListener, OverscrollIndicatorNotification, OverscrollNotification,
         ScrollController, ScrollControllerLeaf, ScrollNotification, SingleChildScrollView,
-        SizedBox, StateSetter, StatefulBuilder, StatefulElement, StretchingOverscrollIndicator,
-        Text,
+        SizedBox, StateSetter, StatefulBuilder, StretchingOverscrollIndicator, Text,
     };
 
     use super::*;
@@ -1096,9 +1095,8 @@ mod tests {
         let element = tester.element(find::by_type::<RefreshIndicator>());
         let app = tester.cell.borrow();
         element
-            .downcast::<StatefulElement<RefreshIndicator>>(&app)
-            .expect("a refresh indicator's element")
-            .state(&app)
+            .state_handle::<RefreshIndicatorState>(&app)
+            .expect("a refresh indicator's state")
     }
 
     /// Dart's `show().then((_) => completed = true)`.

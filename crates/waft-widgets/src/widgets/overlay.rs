@@ -1134,39 +1134,12 @@ struct Theater {
     children: Vec<WidgetRef>,
 }
 
-impl Theater {
-    /// The tree node: a multi-child render object widget with its own element, outside the
-    /// `IntoWidget` kinds.
-    fn into_widget(self) -> WidgetRef {
-        debug_assert!(self.children.len() >= self.skip_count);
-        Rc::new(self)
-    }
-}
-
-impl Widget for Theater {
-    fn key(&self) -> Option<&KeyRef> {
-        None
-    }
-
-    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        TheaterElement::new(app, this).as_element()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn widget_type(&self) -> std::any::TypeId {
-        std::any::TypeId::of::<Theater>()
-    }
-
-    fn kind(&self) -> WidgetKind {
-        WidgetKind::Other
-    }
-}
-
 impl RenderObjectWidget for Theater {
     type RenderObject = RenderTheater;
+
+    fn debug_check_constructor(&self) {
+        debug_assert!(self.children.len() >= self.skip_count);
+    }
 
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let text_direction = Directionality::of(app, context);
@@ -1197,6 +1170,10 @@ impl RenderObjectWidget for Theater {
 impl MultiChildRenderObjectWidget for Theater {
     fn children(&self) -> &[WidgetRef] {
         &self.children
+    }
+
+    fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
+        TheaterElement::new(app, this).as_element()
     }
 }
 
