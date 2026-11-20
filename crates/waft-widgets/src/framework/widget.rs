@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use waft_foundation::{App, HandleId, Key};
 use waft_rendering::{
-    AnyRenderObject, ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject,
-    RenderObjectWithChildMixin,
+    AnyRenderObject, ContainerRenderObjectMixin, ErasedRenderObject, ParentData, RenderHandle,
+    RenderObject, RenderObjectWithChildMixin,
 };
 
 use super::element::{AnyElement, BuildContext, Element};
@@ -141,6 +141,23 @@ pub trait Widget: Any + Debug {
     /// [`InheritedWidget::as_inherited_theme`]; `InheritedTheme::capture` also checks that the
     /// ancestor is an inherited element, as Dart's pattern does.
     fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        None
+    }
+
+    /// This widget as a [`RenderObjectWidget`], when it is one of the three kinds the framework
+    /// makes elements for (leaf, single-child, multi-child): what those elements create and
+    /// update their render object through, so they are not copied per widget type.
+    fn as_render_object(&self) -> Option<&dyn AnyRenderObjectWidget> {
+        None
+    }
+
+    /// This widget as a [`SingleChildRenderObjectWidget`], when it is one.
+    fn as_single_child_render_object(&self) -> Option<&dyn AnySingleChildRenderObjectWidget> {
+        None
+    }
+
+    /// This widget as a [`MultiChildRenderObjectWidget`], when it is one.
+    fn as_multi_child_render_object(&self) -> Option<&dyn AnyMultiChildRenderObjectWidget> {
         None
     }
 
@@ -813,7 +830,7 @@ impl<W: LeafRenderObjectWidget> Widget for LeafRenderObject<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        LeafRenderObjectElement::<W>::new(app, this).as_element()
+        LeafRenderObjectElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -830,6 +847,10 @@ impl<W: LeafRenderObjectWidget> Widget for LeafRenderObject<W> {
 
     fn kind(&self) -> WidgetKind {
         WidgetKind::Other
+    }
+
+    fn as_render_object(&self) -> Option<&dyn AnyRenderObjectWidget> {
+        Some(self)
     }
 }
 
@@ -860,7 +881,7 @@ where
     where
         Self: Sized,
     {
-        SingleChildRenderObjectElement::<Self>::new(app, this).as_element()
+        SingleChildRenderObjectElement::new(app, this).as_element()
     }
 }
 
@@ -911,6 +932,14 @@ where
     fn kind(&self) -> WidgetKind {
         WidgetKind::Other
     }
+
+    fn as_render_object(&self) -> Option<&dyn AnyRenderObjectWidget> {
+        Some(self)
+    }
+
+    fn as_single_child_render_object(&self) -> Option<&dyn AnySingleChildRenderObjectWidget> {
+        Some(self)
+    }
 }
 
 impl<W: SingleChildRenderObjectWidget> Debug for SingleChildRenderObject<W>
@@ -957,7 +986,7 @@ where
     where
         Self: Sized,
     {
-        MultiChildRenderObjectElement::<Self>::new(app, this).as_element()
+        MultiChildRenderObjectElement::new(app, this).as_element()
     }
 }
 
@@ -1008,6 +1037,14 @@ where
     fn kind(&self) -> WidgetKind {
         WidgetKind::Other
     }
+
+    fn as_render_object(&self) -> Option<&dyn AnyRenderObjectWidget> {
+        Some(self)
+    }
+
+    fn as_multi_child_render_object(&self) -> Option<&dyn AnyMultiChildRenderObjectWidget> {
+        Some(self)
+    }
 }
 
 impl<W: MultiChildRenderObjectWidget> Debug for MultiChildRenderObject<W>
@@ -1016,6 +1053,228 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+/// A [`RenderObjectWidget`] of any type, as the framework's render object elements reach it:
+/// its render object calls with the render object erased, so those elements are not copied per
+/// widget type.
+pub trait AnyRenderObjectWidget {
+    /// See [`RenderObjectWidget::create_render_object`].
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject;
+
+    /// [`RenderObjectWidget::update_render_object`] on the render object this widget's type
+    /// creates.
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        render_object: AnyRenderObject,
+    );
+
+    /// [`RenderObjectWidget::did_unmount_render_object`] on the render object this widget's type
+    /// creates.
+    fn did_unmount_render_object(&self, app: &mut App, render_object: AnyRenderObject);
+
+    /// See [`RenderObjectWidget::debug_visit_onstage_children`].
+    fn debug_visit_onstage_children(
+        &self,
+        app: &App,
+        children: &[AnyElement],
+        visitor: &mut dyn FnMut(AnyElement),
+    );
+}
+
+/// A [`SingleChildRenderObjectWidget`] of any type: its child, and its render object's child
+/// slot (`RenderObjectWithChildMixin`) with the render objects erased.
+pub trait AnySingleChildRenderObjectWidget: AnyRenderObjectWidget {
+    /// See [`SingleChildRenderObjectWidget::child`].
+    fn child(&self) -> Option<&WidgetRef>;
+
+    /// The child of `render_object`, which this widget's type created.
+    fn render_object_child(
+        &self,
+        app: &App,
+        render_object: AnyRenderObject,
+    ) -> Option<AnyRenderObject>;
+
+    /// Sets the child of `render_object`, which this widget's type created.
+    fn set_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: Option<AnyRenderObject>,
+    );
+}
+
+/// A [`MultiChildRenderObjectWidget`] of any type: its children, and its render object's child
+/// list (`ContainerRenderObjectMixin`) with the render objects erased.
+pub trait AnyMultiChildRenderObjectWidget: AnyRenderObjectWidget {
+    /// See [`MultiChildRenderObjectWidget::children`].
+    fn children(&self) -> &[WidgetRef];
+
+    /// Inserts `child` into `render_object`'s child list after `after`, or first.
+    fn insert_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: AnyRenderObject,
+        after: Option<AnyRenderObject>,
+    );
+
+    /// Moves `child` in `render_object`'s child list to after `after`, or first.
+    fn move_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: AnyRenderObject,
+        after: Option<AnyRenderObject>,
+    );
+
+    /// Removes `child` from `render_object`'s child list.
+    fn remove_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: AnyRenderObject,
+    );
+}
+
+/// The [`AnyRenderObjectWidget`] calls of an erased render object widget `$wrapper<W>`.
+macro_rules! any_render_object_widget_calls {
+    () => {
+        fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+            self.0.create_render_object(app, context)
+        }
+
+        fn update_render_object(
+            &self,
+            app: &mut App,
+            context: BuildContext,
+            render_object: AnyRenderObject,
+        ) {
+            let render_object = typed_render_object::<W>(app, render_object);
+            self.0.update_render_object(app, context, render_object);
+        }
+
+        fn did_unmount_render_object(&self, app: &mut App, render_object: AnyRenderObject) {
+            let render_object = typed_render_object::<W>(app, render_object);
+            self.0.did_unmount_render_object(app, render_object);
+        }
+
+        fn debug_visit_onstage_children(
+            &self,
+            app: &App,
+            children: &[AnyElement],
+            visitor: &mut dyn FnMut(AnyElement),
+        ) {
+            self.0.debug_visit_onstage_children(app, children, visitor);
+        }
+    };
+}
+
+/// `render_object` as the render object `W` creates.
+fn typed_render_object<W: RenderObjectWidget>(
+    app: &App,
+    render_object: AnyRenderObject,
+) -> RenderHandle<W::RenderObject> {
+    render_object
+        .downcast(app)
+        .expect("the render object this widget created")
+}
+
+impl<W: LeafRenderObjectWidget> AnyRenderObjectWidget for LeafRenderObject<W> {
+    any_render_object_widget_calls!();
+}
+
+impl<W: SingleChildRenderObjectWidget> AnyRenderObjectWidget for SingleChildRenderObject<W>
+where
+    W::RenderObject: RenderObjectWithChildMixin,
+{
+    any_render_object_widget_calls!();
+}
+
+impl<W: SingleChildRenderObjectWidget> AnySingleChildRenderObjectWidget
+    for SingleChildRenderObject<W>
+where
+    W::RenderObject: RenderObjectWithChildMixin,
+{
+    fn child(&self) -> Option<&WidgetRef> {
+        self.0.child()
+    }
+
+    fn render_object_child(
+        &self,
+        app: &App,
+        render_object: AnyRenderObject,
+    ) -> Option<AnyRenderObject> {
+        typed_render_object::<W>(app, render_object)
+            .child(app)
+            .map(ErasedRenderObject::as_object)
+    }
+
+    fn set_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: Option<AnyRenderObject>,
+    ) {
+        typed_render_object::<W>(app, render_object)
+            .set_child(app, child.map(ErasedRenderObject::from_object));
+    }
+}
+
+impl<W: MultiChildRenderObjectWidget> AnyRenderObjectWidget for MultiChildRenderObject<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    any_render_object_widget_calls!();
+}
+
+impl<W: MultiChildRenderObjectWidget> AnyMultiChildRenderObjectWidget for MultiChildRenderObject<W>
+where
+    W::RenderObject: ContainerRenderObjectMixin,
+{
+    fn children(&self) -> &[WidgetRef] {
+        self.0.children()
+    }
+
+    fn insert_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: AnyRenderObject,
+        after: Option<AnyRenderObject>,
+    ) {
+        typed_render_object::<W>(app, render_object).insert(
+            app,
+            ErasedRenderObject::from_object(child),
+            after.map(ErasedRenderObject::from_object),
+        );
+    }
+
+    fn move_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: AnyRenderObject,
+        after: Option<AnyRenderObject>,
+    ) {
+        typed_render_object::<W>(app, render_object).move_child(
+            app,
+            ErasedRenderObject::from_object(child),
+            after.map(ErasedRenderObject::from_object),
+        );
+    }
+
+    fn remove_render_object_child(
+        &self,
+        app: &mut App,
+        render_object: AnyRenderObject,
+        child: AnyRenderObject,
+    ) {
+        typed_render_object::<W>(app, render_object)
+            .remove(app, ErasedRenderObject::from_object(child));
     }
 }
 

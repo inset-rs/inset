@@ -574,7 +574,7 @@ mod tests {
         for element in [pending, cleaned] {
             element.assign_owner(&mut app, owner.handle());
             let handle = element
-                .downcast::<SingleChildRenderObjectElement<SizedBox>>(&app)
+                .downcast::<SingleChildRenderObjectElement>(&app)
                 .unwrap();
             ElementBase::mount(handle, &mut app, None, None);
         }
