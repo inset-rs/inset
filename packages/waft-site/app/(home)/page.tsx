@@ -95,7 +95,9 @@ export default function HomePage() {
           </div>
 
           {/* Interactive Design System & Live WebGPU Gallery Studio */}
-          <HeroStudio />
+          <div className="mt-10 sm:mt-12">
+            <HeroStudio />
+          </div>
 
           {/* Live Galleries & Production Strip */}
           <div

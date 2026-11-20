@@ -1,54 +1,58 @@
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Layers, Monitor, Smartphone } from 'lucide-react';
 import { galleryUrls } from '@/lib/shared';
-import { RustCodeBlock } from './code-highlight';
 
 type KitCard = {
+  id: 'winui' | 'cupertino' | 'material';
   crateName: string;
   title: string;
   galleryUrl: string;
   galleryLabel: string;
+  docsRsUrl: string;
+  chips: string[];
   summary: string;
-  code: string;
 };
 
 const KIT_CARDS: KitCard[] = [
   {
+    id: 'winui',
     crateName: 'waft-winui',
     title: 'WinUI 3',
     galleryUrl: galleryUrls.winui,
     galleryLabel: 'WinUI Gallery',
+    docsRsUrl: 'https://docs.rs/waft-winui/latest/waft_winui/',
+    chips: ['NavigationView', 'TabView', 'MenuBar'],
     summary:
-      'NavigationView, TabView, ContentDialog, MenuBar, TeachingTip, and hardware keyboard accelerators for desktop and web workflows.',
-    code: `NavigationView::new()
-    .pane_title("Workspace")
-    .item("Files", FileTree::new())
-    .footer(Button::accent("Deploy"))`,
+      'Fluent controls, ContentDialog, TeachingTip, and hardware keyboard accelerators built for dense desktop and web workflows.',
   },
   {
+    id: 'cupertino',
     crateName: 'waft-cupertino',
     title: 'Cupertino',
     galleryUrl: galleryUrls.cupertino,
     galleryLabel: 'Cupertino Gallery',
+    docsRsUrl: 'https://docs.rs/waft-cupertino/latest/waft_cupertino/',
+    chips: ['SliverNavBar', 'Spring Scroll', 'CJK IME'],
     summary:
-      'Multi-touch gesture arena, iOS spring scrolling, CupertinoSliverNavigationBar, modal sheets, CJK IME composition, and keyboard insets.',
-    code: `CupertinoPageScaffold::new()
-    .bar(CupertinoNavBar::new("Notes"))
-    .child(CupertinoList::new(rows))
-    .into_widget()`,
+      'Multi-touch gesture arena, iOS spring physics, modal sheets, software keyboard insets, and native text selection.',
   },
   {
+    id: 'material',
     crateName: 'waft-material',
     title: 'Material 3',
     galleryUrl: galleryUrls.material,
     galleryLabel: 'Material Gallery',
+    docsRsUrl: 'https://docs.rs/waft-material/latest/waft_material/',
+    chips: ['ThreePane', 'Scaffold', 'Tonal M3'],
     summary:
-      'Adaptive ThreePaneNavigator, Scaffold, AppBar, NavigationBar, NavigationDrawer, Autocomplete, and Material 3 tonal palettes.',
-    code: `Scaffold::new()
-    .app_bar(AppBar::new("Inbox"))
-    .drawer(NavDrawer::new(folders))
-    .body(ThreePane::new(panes))`,
+      'Adaptive ThreePaneNavigator, AppBar, NavigationBar, NavigationDrawer, Autocomplete, and dynamic Material 3 color schemes.',
   },
 ];
+
+function KitIcon({ id }: { id: KitCard['id'] }) {
+  if (id === 'winui') return <Monitor className="size-4" />;
+  if (id === 'cupertino') return <Smartphone className="size-4" />;
+  return <Layers className="size-4" />;
+}
 
 export function DesktopMobileParity() {
   return (
@@ -69,7 +73,7 @@ export function DesktopMobileParity() {
           Waft ships complete mobile ergonomics too.
         </h2>
 
-        {/* 3 clean cards: WinUI, Cupertino, Material with live gallery links & highlighted code */}
+        {/* 3 clean kit showcase cards — zero repetitive code boxes */}
         <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
           {KIT_CARDS.map((kit) => (
             <div
@@ -81,83 +85,126 @@ export function DesktopMobileParity() {
               }}
             >
               <div>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <code
-                      className="font-mono text-[12.5px] font-semibold"
-                      style={{ color: 'var(--site-accent)' }}
+                {/* Compact visual header strip */}
+                <div
+                  className="flex items-center justify-between gap-2 rounded-xl border px-3.5 py-3"
+                  style={{
+                    background: 'var(--site-surface)',
+                    borderColor: 'var(--site-hairline)',
+                  }}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className="inline-flex size-7 items-center justify-center rounded-lg"
+                      style={{
+                        background: 'var(--site-accent-soft)',
+                        color: 'var(--site-accent)',
+                      }}
                     >
-                      {kit.crateName}
-                    </code>
+                      <KitIcon id={kit.id} />
+                    </span>
                     <h3
-                      className="mt-1 text-[20px] font-semibold tracking-[-0.015em]"
+                      className="text-[17px] font-semibold tracking-[-0.015em]"
                       style={{ color: 'var(--site-ink)' }}
                     >
                       {kit.title}
                     </h3>
                   </div>
-                  <a
-                    href={kit.galleryUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-[12px] font-medium transition hover:opacity-80"
+
+                  <span
+                    className="rounded-md border px-2 py-0.5 font-mono text-[11px]"
                     style={{
+                      background: 'var(--site-card)',
                       borderColor: 'var(--site-hairline-strong)',
-                      color: 'var(--site-ink)',
+                      color: 'var(--site-muted)',
                     }}
                   >
-                    {kit.galleryLabel}
-                    <ExternalLink className="size-3" />
-                  </a>
+                    {kit.crateName}
+                  </span>
                 </div>
 
-                <p
-                  className="mt-3 text-[13.5px] leading-[1.55]"
-                  style={{ color: 'var(--site-muted)' }}
-                >
+                {/* Key controls chip row */}
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  {kit.chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="rounded-md border px-2.5 py-1 font-mono text-[11px]"
+                      style={{
+                        background: 'var(--site-surface)',
+                        borderColor: 'var(--site-hairline)',
+                        color: 'var(--site-ink)',
+                      }}
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+
+                <p className="mt-4 text-[14px] leading-[1.6]" style={{ color: 'var(--site-muted)' }}>
                   {kit.summary}
                 </p>
               </div>
 
-              <div className="mt-5">
-                <RustCodeBlock code={kit.code} />
+              <div
+                className="mt-6 flex items-center justify-between gap-3 border-t pt-4 text-[13px] font-medium"
+                style={{ borderColor: 'var(--site-hairline)' }}
+              >
+                <a
+                  href={kit.galleryUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 transition hover:opacity-75"
+                  style={{ color: 'var(--site-accent)' }}
+                >
+                  {kit.galleryLabel}
+                  <ExternalLink className="size-3.5" />
+                </a>
+
+                <a
+                  href={kit.docsRsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-mono text-[12px] transition hover:opacity-75"
+                  style={{ color: 'var(--site-muted)' }}
+                >
+                  docs.rs
+                  <ExternalLink className="size-3" />
+                </a>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Clean 3-column performance & portability summary */}
+        {/* Clean 3-column platform facts */}
         <div
-          className="mt-10 grid grid-cols-1 gap-8 border-t pt-8 sm:grid-cols-3"
+          className="mt-8 grid grid-cols-1 gap-6 border-t pt-7 md:grid-cols-3"
           style={{ borderColor: 'var(--site-hairline-strong)' }}
         >
           <div>
-            <h3 className="text-[16px] font-semibold" style={{ color: 'var(--site-ink)' }}>
-              Arena-allocated, no browser engine
-            </h3>
-            <p className="mt-1.5 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
-              Generational handles in a single Rust arena instead of bundling a 150 MB Chromium runtime or language VM
-              with every app.
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--site-ink)' }}>
+              True multi-touch &amp; CJK IME
+            </div>
+            <p className="mt-1 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
+              Full gesture disambiguation, spring bounce physics, software keyboard insets, and composition underlines
+              on iOS, Android, macOS, and Windows.
             </p>
           </div>
-
           <div>
-            <h3 className="text-[16px] font-semibold" style={{ color: 'var(--site-ink)' }}>
-              Direct valo + wgpu rendering
-            </h3>
-            <p className="mt-1.5 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
-              Display lists compile straight into <code className="font-mono">valo</code> GPU passes on Metal, Vulkan,
-              DirectX 12, and WebGPU with zero garbage-collection pauses.
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--site-ink)' }}>
+              Pure Rust GPU pipeline
+            </div>
+            <p className="mt-1 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
+              Rendered directly by <code className="font-mono">valo</code> and <code className="font-mono">wgpu</code>{' '}
+              on Metal, Vulkan, DX12, and WebGPU — zero Skia, zero C++ build scripts.
             </p>
           </div>
-
           <div>
-            <h3 className="text-[16px] font-semibold" style={{ color: 'var(--site-ink)' }}>
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--site-ink)' }}>
               One codebase across 7 targets
-            </h3>
-            <p className="mt-1.5 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
-              Ship native macOS, Windows, Linux, iOS, Android, WebGPU browser bundles, and sandboxed WASI packages from
-              a single <code className="font-mono">Cargo.toml</code>.
+            </div>
+            <p className="mt-1 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
+              Compile the same Cargo library crate for macOS, Windows, Linux, iOS, Android, WebGPU browsers, and WaOS
+              WASI hosts without rewriting UI code.
             </p>
           </div>
         </div>

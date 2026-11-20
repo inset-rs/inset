@@ -1,266 +1,209 @@
-'use client';
-
-import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Box, Cpu, Layers, Sparkles } from 'lucide-react';
-import { RustCodeBlock } from '@/components/code-highlight';
+import { ArrowUpRight, Box, Cpu, ExternalLink, Layers, Sparkles } from 'lucide-react';
 
-type LayerId = 'kits' | 'framework' | 'embedder' | 'gpu';
-
-interface CrateSpec {
+interface CrateLink {
   name: string;
-  summary: string;
-  docsHref: string;
+  href?: string;
 }
 
 interface LayerSpec {
-  id: LayerId;
+  step: string;
+  label: string;
   title: string;
-  tagline: string;
-  description: string;
+  summary: string;
   docsHref: string;
   docsLabel: string;
-  crates: CrateSpec[];
-  code: string;
+  icon: 'kits' | 'engine' | 'embedder' | 'gpu';
+  crates: CrateLink[];
 }
 
 const LAYERS: LayerSpec[] = [
   {
-    id: 'kits',
+    step: '01',
+    label: 'KITS',
     title: 'Design System Kits',
-    tagline: 'Desktop WinUI, mobile Cupertino, Material 3, and Markdown',
-    description:
-      'Ordinary Cargo crates built entirely on Waft widgets. Use a full kit out of the box, mix controls across kits, or fork a single crate to build your own design system.',
+    summary:
+      'Ordinary Cargo crates built on Waft widgets. Use a full kit, mix controls across kits, or fork one crate for your own design system.',
     docsHref: '/docs/kits',
     docsLabel: 'UI kits guide',
+    icon: 'kits',
     crates: [
-      { name: 'waft-winui', summary: 'Fluent / WinUI 3 controls, NavigationView, dialogs, menus', docsHref: '/docs/kits' },
-      { name: 'waft-cupertino', summary: 'iOS/macOS controls, sliver nav bars, sheets, physics scroll', docsHref: '/docs/kits' },
-      { name: 'waft-material', summary: 'Material 3 AppBar, Scaffold, NavigationBar, cards, themes', docsHref: '/docs/kits' },
-      { name: 'waft-markdown', summary: 'Selectable, syntax-highlighted Markdown & code blocks', docsHref: '/docs/kits' },
+      { name: 'waft-winui', href: 'https://docs.rs/waft-winui/latest/waft_winui/' },
+      { name: 'waft-cupertino', href: 'https://docs.rs/waft-cupertino/latest/waft_cupertino/' },
+      { name: 'waft-material', href: 'https://docs.rs/waft-material/latest/waft_material/' },
+      { name: 'waft-markdown', href: 'https://docs.rs/waft-markdown/latest/waft_markdown/' },
     ],
-    code: `use waft_winui::{FluentApp, NavigationView, ToggleSwitch};
-use waft_markdown::Markdown;
-
-// Every control is a regular Rust struct implementing Widget
-NavigationView::new()
-    .pane_title("Documentation")
-    .item("Overview", Markdown::new(include_str!("../README.md")))
-    .item("Settings", ToggleSwitch::new(true, |app, on| { /* ... */ }))`,
   },
   {
-    id: 'framework',
-    title: 'Flutter-Model Widget & Layout Engine',
-    tagline: 'Widgets, flex/sliver layout, gestures, IME text input, and arena handles',
-    description:
-      'A direct, faithful port of Flutter’s widget, element, and render-object pipeline into Rust. Generational arena handles (Ref<T> and Handle<T>) replace garbage collection without borrow-checker gymnastics.',
+    step: '02',
+    label: 'ENGINE',
+    title: 'Flutter-Model Widget & Layout Pipeline',
+    summary:
+      'Widgets, elements, box and sliver layout, multi-touch gesture arena, IME text input, and generational arena handles without borrow-checker gymnastics.',
     docsHref: '/docs/architecture',
     docsLabel: 'Architecture guide',
+    icon: 'engine',
     crates: [
-      { name: 'waft-widgets', summary: 'StatelessWidget, StatefulWidget, Navigator, Focus, Shortcuts', docsHref: '/docs/layout' },
-      { name: 'waft-rendering', summary: 'RenderBox, RenderSliver, constraints, hit-testing, semantics', docsHref: '/docs/layout' },
-      { name: 'waft-gestures', summary: 'Multi-touch GestureArena, tap, drag, scale, velocity trackers', docsHref: '/docs/architecture' },
-      { name: 'waft-foundation', summary: 'Generational arena handles (Ref<T>, Handle<T>), async tasks', docsHref: '/docs/handles' },
+      { name: 'waft-widgets', href: 'https://docs.rs/waft-widgets/latest/waft_widgets/' },
+      { name: 'waft-rendering', href: 'https://docs.rs/waft-rendering/latest/waft_rendering/' },
+      { name: 'waft-gestures', href: 'https://docs.rs/waft-gestures/latest/waft_gestures/' },
+      { name: 'waft-foundation', href: 'https://docs.rs/waft-foundation/latest/waft_foundation/' },
     ],
-    code: `pub trait StatelessWidget: Debug + 'static {
-    fn build(&self, app: &mut App, cx: BuildContext) -> WidgetRef;
-}
-
-pub trait RenderBox: RenderObject {
-    fn perform_layout(&self, app: &mut App, constraints: BoxConstraints) -> Size;
-    fn paint(&self, app: &App, cx: &mut PaintingContext, offset: Offset);
-}`,
   },
   {
-    id: 'embedder',
-    title: 'The Embedder Trait Boundary',
-    tagline: 'dart:ui expressed as clean Rust traits — portable to any host',
-    description:
-      'Instead of C++ embedder ABI headers, Waft defines a single crate (waft-embedder) containing the Platform, View, and EmbedderClient traits. Swap hosts freely or embed Waft inside your own engine, game, or WASI sandbox.',
+    step: '03',
+    label: 'BOUNDARY',
+    title: 'Embedder Trait Boundary',
+    summary:
+      'Platform, View, and host services expressed as pure Rust traits in waft-embedder. Swap hosts freely or embed Waft inside any engine or WASI sandbox.',
     docsHref: '/docs/embedder',
     docsLabel: 'Embedder guide',
+    icon: 'embedder',
     crates: [
-      { name: 'waft-embedder', summary: 'Platform, View, EmbedderClient, Scene, Clipboard, Menus, HTTP', docsHref: '/docs/embedder' },
-      { name: 'waft-embedder-apple', summary: 'macOS AppKit / Metal host & iOS UIKit / Metal host', docsHref: '/docs/embedder' },
-      { name: 'waft-embedder-winit', summary: 'Windows, Linux (Wayland/X11) & cross-desktop host', docsHref: '/docs/embedder' },
-      { name: 'waft-embedder-web', summary: 'Browser WebGPU + Wasm host & Android NDK / Vulkan host', docsHref: '/docs/embedder' },
+      { name: 'waft-embedder', href: 'https://docs.rs/waft-embedder/latest/waft_embedder/' },
+      { name: 'waft-shell', href: 'https://docs.rs/waft-shell/latest/waft_shell/' },
+      { name: 'waft-test', href: 'https://docs.rs/waft-test/latest/waft_test/' },
     ],
-    code: `/// The complete host contract in waft-embedder:
-pub trait Platform {
-    fn views(&self) -> Vec<ViewRef>;
-    fn request_view(&self, config: WindowConfig) -> RequestId;
-    fn clipboard(&self) -> Option<&dyn Clipboard>;
-    fn menu_bar(&self) -> Option<&dyn MenuBar>;
-}
-
-pub trait EmbedderClient {
-    fn begin_frame(&mut self, view: ViewId, frame: Frame) -> Scene;
-    fn pointer_data(&mut self, view: ViewId, reports: &[PointerReport]);
-}`,
   },
   {
-    id: 'gpu',
+    step: '04',
+    label: 'GPU & HOSTS',
     title: 'Pure Rust GPU Compositor (valo + wgpu)',
-    tagline: 'Direct Metal, Vulkan, DX12, and WebGPU rendering with zero C++ dependencies',
-    description:
-      'Frames compile into retained Scene and Picture display lists rendered by valo on top of wgpu. Crisp shaped text, vector paths, rounded-rect shadows, backdrop blurs, and 120 Hz animations run straight on the GPU.',
-    docsHref: '/docs/architecture',
-    docsLabel: 'Rendering pipeline',
+    summary:
+      'Direct Metal, Vulkan, DX12, and WebGPU rendering with zero C++ build scripts across desktop, mobile, browser, and WASI targets.',
+    docsHref: '/docs/reference',
+    docsLabel: 'All crates',
+    icon: 'gpu',
     crates: [
-      { name: 'valo', summary: 'Pure-Rust 2D GPU renderer, text shaping, paths, and layer compositor', docsHref: '/docs/architecture' },
-      { name: 'waft-painting', summary: 'Canvas, Paint, TextPainter, BoxDecoration, ImageCache', docsHref: '/docs/architecture' },
-      { name: 'waft-animation', summary: 'AnimationController, Tween, CurvedAnimation, SpringSimulation', docsHref: '/docs/architecture' },
-      { name: 'waft-physics', summary: 'iOS BouncingScrollSimulation, ClampingScrollSimulation, springs', docsHref: '/docs/architecture' },
+      { name: 'macOS / iOS (Metal)' },
+      { name: 'Windows (DX12)' },
+      { name: 'Linux / Android (Vulkan)' },
+      { name: 'Web / WASI (WebGPU)' },
     ],
-    code: `let mut builder = SceneBuilder::new();
-builder.push_offset(0.0, scroll_y, |layer| {
-    layer.push_clip_rrect(card_rrect, Clip::AntiAlias, |card| {
-        card.add_picture(Offset::ZERO, &recorded_picture);
-    });
-});
-view.present(frame, builder.build());`,
   },
 ];
 
-export function ArchitectureExplorer() {
-  const [selectedId, setSelectedId] = useState<LayerId>('kits');
-  const layer = LAYERS.find((l) => l.id === selectedId) ?? LAYERS[0];
+function LayerIcon({ kind }: { kind: LayerSpec['icon'] }) {
+  if (kind === 'kits') return <Sparkles className="size-4" />;
+  if (kind === 'engine') return <Layers className="size-4" />;
+  if (kind === 'embedder') return <Box className="size-4" />;
+  return <Cpu className="size-4" />;
+}
 
+export function ArchitectureExplorer() {
   return (
     <section className="px-4 py-16 sm:px-6 sm:py-20">
       <div className="mx-auto max-w-[1160px]">
-        {/* Section Heading */}
-        <h2
-          className="text-[32px] leading-[1.08] font-semibold tracking-[-0.03em] sm:text-[42px]"
-          style={{ color: 'var(--site-ink)' }}
-        >
-          Ordinary Cargo crates.
-          <br />
-          Clean trait boundary at the bottom.
-        </h2>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <h2
+            className="text-[32px] leading-[1.08] font-semibold tracking-[-0.03em] sm:text-[42px]"
+            style={{ color: 'var(--site-ink)' }}
+          >
+            Ordinary Cargo crates.
+            <br />
+            Clean trait boundary at the bottom.
+          </h2>
 
-        {/* Interactive Stack Diagram (Left 5 cols) + Layer Inspector (Right 7 cols) */}
-        <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-stretch">
-          {/* Left: 4 Stack Layers */}
-          <div className="flex flex-col justify-between gap-3 lg:col-span-5">
-            {LAYERS.map((item) => {
-              const active = item.id === selectedId;
-              const Icon =
-                item.id === 'kits'
-                  ? Sparkles
-                  : item.id === 'framework'
-                    ? Layers
-                    : item.id === 'embedder'
-                      ? Box
-                      : Cpu;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  className="group relative flex flex-1 flex-col justify-center rounded-2xl border p-5 text-left transition-all"
-                  style={{
-                    background: active ? 'var(--site-card)' : 'var(--site-surface)',
-                    borderColor: active ? 'var(--site-ink)' : 'var(--site-hairline-strong)',
-                    boxShadow: active ? '0 14px 34px -18px rgba(20, 20, 19, 0.14)' : 'none',
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div
-                      className="text-[16.5px] font-semibold tracking-[-0.015em]"
-                      style={{ color: 'var(--site-ink)' }}
-                    >
-                      {item.title}
-                    </div>
-                    <Icon
-                      className="size-4 shrink-0"
-                      style={{ color: active ? 'var(--site-accent)' : 'var(--site-subtle)' }}
-                    />
-                  </div>
-                  <div
-                    className="mt-1 text-[13px] leading-[1.45]"
-                    style={{ color: 'var(--site-muted)' }}
-                  >
-                    {item.tagline}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Right: Active Layer Deep Dive */}
-          <div
-            className="flex flex-col justify-between rounded-2xl border p-6 sm:p-8 lg:col-span-7"
+          <Link
+            href="/docs/reference"
+            className="inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13px] font-medium transition hover:opacity-80"
             style={{
               background: 'var(--site-card)',
               borderColor: 'var(--site-hairline-strong)',
+              color: 'var(--site-ink)',
             }}
           >
-            <div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3
-                  className="text-[20px] font-semibold tracking-[-0.02em]"
-                  style={{ color: 'var(--site-ink)' }}
+            Browse all crates on docs.rs
+            <ArrowUpRight className="size-3.5" />
+          </Link>
+        </div>
+
+        {/* Full-width 4-layer stack map — every layer visible at once, zero code walls */}
+        <div className="mt-10 flex flex-col gap-3.5">
+          {LAYERS.map((layer) => (
+            <div
+              key={layer.step}
+              className="grid grid-cols-1 items-center gap-5 rounded-2xl border p-5 sm:p-6 lg:grid-cols-12"
+              style={{
+                background: 'var(--site-card)',
+                borderColor: 'var(--site-hairline-strong)',
+              }}
+            >
+              {/* Left 5 cols: Layer identity + 1-line role */}
+              <div className="flex items-start gap-3.5 lg:col-span-5">
+                <span
+                  className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-xl"
+                  style={{
+                    background: 'var(--site-accent-soft)',
+                    color: 'var(--site-accent)',
+                  }}
                 >
-                  {layer.title}
-                </h3>
+                  <LayerIcon kind={layer.icon} />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2 font-mono text-[11px] font-semibold tracking-[0.06em]">
+                    <span style={{ color: 'var(--site-accent)' }}>{layer.step}</span>
+                    <span style={{ color: 'var(--site-subtle)' }}>{layer.label}</span>
+                  </div>
+                  <h3
+                    className="mt-0.5 text-[17px] font-semibold tracking-[-0.015em]"
+                    style={{ color: 'var(--site-ink)' }}
+                  >
+                    {layer.title}
+                  </h3>
+                  <p className="mt-1 text-[13.5px] leading-[1.5]" style={{ color: 'var(--site-muted)' }}>
+                    {layer.summary}
+                  </p>
+                </div>
+              </div>
+
+              {/* Right 7 cols: Clickable crate pills (linking directly to docs.rs) + guide link */}
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center lg:col-span-7 lg:pl-4">
+                <div className="flex flex-wrap gap-2">
+                  {layer.crates.map((crate) =>
+                    crate.href ? (
+                      <a
+                        key={crate.name}
+                        href={crate.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 font-mono text-[12px] font-medium transition hover:border-stone-400"
+                        style={{
+                          background: 'var(--site-surface)',
+                          borderColor: 'var(--site-hairline-strong)',
+                          color: 'var(--site-ink)',
+                        }}
+                      >
+                        <span>{crate.name}</span>
+                        <ExternalLink className="size-3" style={{ color: 'var(--site-subtle)' }} />
+                      </a>
+                    ) : (
+                      <span
+                        key={crate.name}
+                        className="inline-flex items-center rounded-lg border px-3 py-1.5 font-mono text-[12px]"
+                        style={{
+                          background: 'var(--site-surface)',
+                          borderColor: 'var(--site-hairline)',
+                          color: 'var(--site-muted)',
+                        }}
+                      >
+                        {crate.name}
+                      </span>
+                    ),
+                  )}
+                </div>
+
                 <Link
                   href={layer.docsHref}
-                  className="inline-flex items-center gap-1 text-[13px] font-medium transition hover:opacity-75"
-                  style={{ color: 'var(--site-ink)' }}
+                  className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium transition hover:opacity-75"
+                  style={{ color: 'var(--site-accent)' }}
                 >
-                  <span>{layer.docsLabel}</span>
+                  {layer.docsLabel}
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               </div>
-
-              <p
-                className="mt-3 text-[15px] leading-[1.6]"
-                style={{ color: 'var(--site-muted)' }}
-              >
-                {layer.description}
-              </p>
-
-              {/* Crates Grid in this Layer */}
-              <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                {layer.crates.map((c) => (
-                  <Link
-                    key={c.name}
-                    href={c.docsHref}
-                    className="group rounded-xl border p-3.5 transition hover:border-black/30"
-                    style={{
-                      background: 'var(--site-surface)',
-                      borderColor: 'var(--site-hairline)',
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className="font-mono text-[13px] font-semibold"
-                        style={{ color: 'var(--site-ink)' }}
-                      >
-                        {c.name}
-                      </span>
-                      <ArrowUpRight
-                        className="size-3.5 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
-                        style={{ color: 'var(--site-subtle)' }}
-                      />
-                    </div>
-                    <p
-                      className="mt-1 text-[12px] leading-[1.45]"
-                      style={{ color: 'var(--site-muted)' }}
-                    >
-                      {c.summary}
-                    </p>
-                  </Link>
-                ))}
-              </div>
             </div>
-
-            {/* Highlighted code snippet for this layer */}
-            <div className="mt-5">
-              <RustCodeBlock code={layer.code} />
-            </div>
-          </div>
+          ))}
         </div>
       </div>
     </section>
