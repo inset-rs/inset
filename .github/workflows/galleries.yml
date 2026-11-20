@@ -19,6 +19,8 @@ jobs:
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_OPT_LEVEL: s
       CARGO_PROFILE_RELEASE_STRIP: symbols
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,8 +41,9 @@ jobs:
         run: |
           cargo run -p waft-cli -- waft build -p "${{ matrix.package }}" web
           rm -f target/waft/web/release/*.br
+      # A step's `if` cannot read secrets, so it reads them through the job's env.
       - name: Deploy ${{ matrix.project }} to Cloudflare Pages
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
