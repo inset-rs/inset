@@ -144,6 +144,12 @@ pub trait Widget: Any + Debug {
         None
     }
 
+    /// This widget as a [`StatelessWidget`], when it is one: what the one
+    /// [`StatelessElement`] builds from, so that element is not copied per widget type.
+    fn as_stateless(&self) -> Option<&dyn StatelessWidget> {
+        None
+    }
+
     /// Dart's `widget is PreferredSizeWidget`: this widget as a [`PreferredSizeWidget`], when
     /// it is one.
     ///
@@ -299,7 +305,7 @@ impl<W: StatelessWidget> Widget for Stateless<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        StatelessElement::<W>::new(app, this).as_element()
+        StatelessElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -320,6 +326,10 @@ impl<W: StatelessWidget> Widget for Stateless<W> {
 
     fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
         self.0.as_preferred_size_widget()
+    }
+
+    fn as_stateless(&self) -> Option<&dyn StatelessWidget> {
+        Some(&self.0)
     }
 }
 

@@ -23,8 +23,7 @@ use super::element::{
 use super::state::{State, StateLifecycle};
 use super::widget::{
     InheritedWidget, LeafRenderObjectWidget, MultiChildRenderObjectWidget, ParentDataWidget,
-    RenderObjectWidget, SingleChildRenderObjectWidget, StatefulWidget, StatelessWidget, WidgetRef,
-    downcast_widget,
+    RenderObjectWidget, SingleChildRenderObjectWidget, StatefulWidget, WidgetRef, downcast_widget,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -157,26 +156,24 @@ pub(crate) use component_element_overrides;
 // StatelessElement
 
 /// An [`Element`] that uses a [`StatelessWidget`] as its configuration.
-pub struct StatelessElement<W: StatelessWidget> {
+pub struct StatelessElement {
     element: ElementData,
     component: ComponentElementData,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: StatelessWidget> StatelessElement<W> {
+impl StatelessElement {
     /// Creates an element that uses the given widget as its configuration.
     pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(StatelessElement::<W> {
+        debug_assert!(widget.as_stateless().is_some());
+        app.create(StatelessElement {
             element: ElementData::new(widget),
             component: ComponentElementData::default(),
-            marker: std::marker::PhantomData,
         })
         .into_tree_node(app)
     }
 }
 
-impl<W: StatelessWidget> ComponentElement for StatelessElement<W> {
+impl ComponentElement for StatelessElement {
     fn component_data(self: Handle<Self>, app: &App) -> &ComponentElementData {
         &app.get(self).component
     }
@@ -187,13 +184,14 @@ impl<W: StatelessWidget> ComponentElement for StatelessElement<W> {
 
     fn build(self: Handle<Self>, app: &mut App) -> WidgetRef {
         let widget = self.as_element().widget(app).clone();
-        let stateless =
-            &downcast_widget::<W>(&*widget).expect("a StatelessElement holds its StatelessWidget");
+        let stateless = widget
+            .as_stateless()
+            .expect("a StatelessElement holds a StatelessWidget");
         stateless.build(app, self.as_element())
     }
 }
 
-impl<W: StatelessWidget> Element for StatelessElement<W> {
+impl Element for StatelessElement {
     crate::element_accessors!();
     component_element_overrides!();
 
