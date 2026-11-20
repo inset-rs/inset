@@ -129,9 +129,8 @@ fn compress(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The page an app gets when it ships no `index.html` of its own: it instantiates the module
-/// and calls the `main` that `#[waft::main]` exports. A page of the app's own must do the
-/// same.
+/// The page an app gets when it ships no `index.html` of its own: it streams the module with a
+/// progress indicator, instantiates it, and calls the `main` that `#[waft::main]` exports.
 pub fn index_html(title: &str) -> String {
     let title = title
         .replace('&', "&amp;")
@@ -150,22 +149,104 @@ pub fn index_html(title: &str) -> String {
         margin: 0;
         height: 100%;
         overflow: hidden;
-        background: #000;
+        background: #faf9f6;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }}
+      @media (prefers-color-scheme: dark) {{
+        html,
+        body {{
+          background: #141413;
+        }}
       }}
       canvas {{
         display: block;
         width: 100%;
         height: 100%;
         touch-action: none;
+        outline: none;
+      }}
+      #waft-loader {{
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        pointer-events: none;
+        transition: opacity 160ms ease;
+      }}
+      #waft-loader.done {{
+        opacity: 0;
+      }}
+      #waft-track {{
+        width: 160px;
+        height: 3px;
+        border-radius: 999px;
+        background: rgba(128, 128, 128, 0.2);
+        overflow: hidden;
+      }}
+      #waft-bar {{
+        width: 12%;
+        height: 100%;
+        border-radius: 999px;
+        background: #c85a28;
+        transition: width 120ms ease;
+      }}
+      #waft-status {{
+        font-size: 11.5px;
+        color: rgba(128, 128, 128, 0.85);
+        font-variant-numeric: tabular-nums;
       }}
     </style>
   </head>
   <body>
     <canvas id="waft"></canvas>
+    <div id="waft-loader">
+      <div id="waft-track"><div id="waft-bar"></div></div>
+      <div id="waft-status">Loading WebGPU module…</div>
+    </div>
     <script type="module">
       import init from "./app.js";
-      const wasm = await init();
+      const bar = document.getElementById("waft-bar");
+      const status = document.getElementById("waft-status");
+      const loader = document.getElementById("waft-loader");
+
+      async function loadWasm() {{
+        const res = await fetch("./app_bg.wasm");
+        const total = Number(res.headers.get("content-length")) || 0;
+        if (!res.body || !total) {{
+          return await res.arrayBuffer();
+        }}
+        const reader = res.body.getReader();
+        const chunks = [];
+        let loaded = 0;
+        while (true) {{
+          const {{ done, value }} = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          loaded += value.byteLength;
+          const pct = Math.min(100, Math.round((loaded / total) * 100));
+          if (bar) bar.style.width = pct + "%";
+          if (status) status.textContent = "Loading " + pct + "%";
+        }}
+        const bytes = new Uint8Array(loaded);
+        let offset = 0;
+        for (const chunk of chunks) {{
+          bytes.set(chunk, offset);
+          offset += chunk.byteLength;
+        }}
+        return bytes.buffer;
+      }}
+
+      const buffer = await loadWasm();
+      if (status) status.textContent = "Starting WebGPU…";
+      const wasm = await init({{ module_or_path: buffer }});
       wasm.main();
+      if (loader) {{
+        loader.classList.add("done");
+        setTimeout(() => loader.remove(), 200);
+      }}
     </script>
   </body>
 </html>
@@ -184,5 +265,6 @@ mod tests {
         assert!(page.contains(r#"import init from "./app.js""#));
         assert!(page.contains("wasm.main();"));
         assert!(page.contains(r#"<canvas id="waft">"#));
+        assert!(page.contains(r#"id="waft-loader""#));
     }
 }

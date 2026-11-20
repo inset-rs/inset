@@ -93,9 +93,8 @@ pub fn gallery() -> CupertinoApp {
     crateName: 'waft-material',
     galleryUrl: galleryUrls.material,
     galleryLabel: 'Material Gallery',
-    code: `use waft_embedder::Brightness;
-use waft_foundation::{App, Handle};
-use waft_material::{Colors, MaterialApp, ThemeData};
+    code: `use waft_foundation::{App, Handle};
+use waft_material::{MaterialApp, ThemeData};
 use waft_widgets::*;
 
 #[waft::main]
@@ -103,8 +102,8 @@ fn main(app: &mut App) {
     material_gallery::run_gallery(app, None, None);
 }
 
-impl State for GalleryState {
-    type Widget = Gallery;
+impl State for GalleryAppState {
+    type Widget = GalleryApp;
     waft_widgets::state_accessors!();
 
     fn build(
@@ -112,18 +111,11 @@ impl State for GalleryState {
         app: &mut App,
         _cx: BuildContext,
     ) -> WidgetRef {
-        let seed = Colors::DEEP_PURPLE.primary();
-        let light = ThemeData::builder()
-            .color_scheme_seed(seed)
-            .build(app);
-        let dark = ThemeData::builder()
-            .brightness(Brightness::Dark)
-            .build(app);
+        let theme = ThemeData::from_seed(self.seed(app));
         MaterialApp::new()
-            .title("Material Gallery")
-            .theme(light)
-            .dark_theme(dark)
-            .home(Home::new(self.widget(app).opening))
+            .title("Material 3 Gallery")
+            .theme(theme)
+            .home(GalleryHome::new(self))
             .into_widget()
     }
 }`,
@@ -133,25 +125,27 @@ impl State for GalleryState {
 export function HeroStudio() {
   const [activeKit, setActiveKit] = useState<KitId>('winui');
   const [copiedCmd, setCopiedCmd] = useState(false);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
 
   const spec = KITS.find((k) => k.id === activeKit) ?? KITS[0];
-  const cliCommand = 'cargo install waft-cli && cargo waft new notes && cargo waft run';
+  const isIframeReady = loadedUrl === spec.galleryUrl;
 
-  function copyCli() {
-    navigator.clipboard?.writeText(cliCommand);
+  const copyCli = () => {
+    void navigator.clipboard?.writeText('cargo install waft-cli && cargo waft new notes');
     setCopiedCmd(true);
     setTimeout(() => setCopiedCmd(false), 1800);
-  }
+  };
 
   return (
-    <div className="mx-auto w-full max-w-[1160px]">
+    <div className="mt-10">
       <div
-        className="overflow-hidden rounded-[22px] border shadow-[0_24px_70px_-28px_rgba(20,20,19,0.16)]"
+        className="overflow-hidden rounded-2xl border shadow-[0_24px_60px_-24px_rgba(20,20,19,0.12)]"
         style={{
           background: 'var(--site-card)',
           borderColor: 'var(--site-hairline-strong)',
         }}
       >
+        {/* Top Studio Bar: Kit Switcher + Gallery Link + CLI Quickstart */}
         <div
           className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-6"
           style={{
@@ -159,8 +153,8 @@ export function HeroStudio() {
             borderColor: 'var(--site-hairline)',
           }}
         >
-          {/* Left: Kit Switcher */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          {/* Left: Design System Kit Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5" >
             {KITS.map((k) => {
               const selected = k.id === activeKit;
               const Icon = k.id === 'winui' ? Monitor : k.id === 'cupertino' ? Smartphone : Layers;
@@ -169,17 +163,21 @@ export function HeroStudio() {
                   key={k.id}
                   type="button"
                   onClick={() => setActiveKit(k.id)}
-                  className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition"
+                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-all"
                   style={{
                     background: selected ? 'var(--site-card)' : 'transparent',
+                    borderColor: selected ? 'var(--site-hairline-strong)' : 'transparent',
                     color: selected ? 'var(--site-ink)' : 'var(--site-muted)',
-                    boxShadow: selected ? '0 1px 3px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(20,20,19,0.12)' : 'none',
+                    boxShadow: selected ? '0 1px 2px rgba(20, 20, 19, 0.06)' : 'none',
                   }}
                 >
-                  <Icon className="size-3.5" style={{ color: selected ? 'var(--site-accent)' : 'currentColor' }} />
+                  <Icon
+                    className="size-3.5"
+                    style={{ color: selected ? 'var(--site-accent)' : 'var(--site-subtle)' }}
+                  />
                   <span>{k.label}</span>
                   <span
-                    className="rounded px-1.5 py-0.5 font-mono text-[10.5px]"
+                    className="hidden rounded px-1.5 py-0.5 font-mono text-[10.5px] sm:inline-block"
                     style={{
                       background: selected ? 'var(--site-accent-soft)' : 'rgba(20,20,19,0.05)',
                       color: selected ? 'var(--site-accent)' : 'var(--site-subtle)',
@@ -251,29 +249,58 @@ export function HeroStudio() {
               background: activeKit === 'cupertino' ? 'var(--site-surface)' : '#ffffff',
             }}
           >
+            {!isIframeReady && (
+              <div
+                className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 transition-opacity duration-200"
+                style={{
+                  background: activeKit === 'cupertino' ? 'var(--site-surface)' : '#faf9f6',
+                }}
+              >
+                <div
+                  className="h-1 w-36 overflow-hidden rounded-full"
+                  style={{ background: 'var(--site-hairline-strong)' }}
+                >
+                  <div
+                    className="h-full w-2/3 animate-pulse rounded-full"
+                    style={{ background: 'var(--site-accent)' }}
+                  />
+                </div>
+                <span
+                  className="font-mono text-[11.5px]"
+                  style={{ color: 'var(--site-muted)' }}
+                >
+                  Loading {spec.galleryLabel} (WebGPU)…
+                </span>
+              </div>
+            )}
+
             {activeKit === 'cupertino' ? (
               <div className="flex flex-1 items-center justify-center p-4 sm:p-6">
                 <div
-                  className="h-[540px] w-full max-w-[390px] overflow-hidden rounded-[32px] border bg-white shadow-[0_18px_45px_-18px_rgba(20,20,19,0.22)]"
-                  style={{ borderColor: 'rgba(20,20,19,0.14)' }}
+                  className="relative h-[540px] w-full max-w-[390px] overflow-hidden rounded-[28px] border bg-white shadow-[0_18px_45px_-18px_rgba(20,20,19,0.2)]"
+                  style={{ borderColor: 'var(--site-hairline-strong)' }}
                 >
                   <iframe
                     key={spec.galleryUrl}
                     src={spec.galleryUrl}
                     title={spec.galleryLabel}
-                    className="h-full w-full border-0"
+                    onLoad={() => setLoadedUrl(spec.galleryUrl)}
+                    className="absolute -inset-[2px] h-[calc(100%+4px)] w-[calc(100%+4px)] border-0 outline-none"
                     allow="clipboard-read; clipboard-write"
                   />
                 </div>
               </div>
             ) : (
-              <iframe
-                key={spec.galleryUrl}
-                src={spec.galleryUrl}
-                title={spec.galleryLabel}
-                className="h-[580px] w-full flex-1 border-0"
-                allow="clipboard-read; clipboard-write"
-              />
+              <div className="relative h-[580px] w-full flex-1 overflow-hidden">
+                <iframe
+                  key={spec.galleryUrl}
+                  src={spec.galleryUrl}
+                  title={spec.galleryLabel}
+                  onLoad={() => setLoadedUrl(spec.galleryUrl)}
+                  className="absolute -inset-[2px] h-[calc(100%+4px)] w-[calc(100%+4px)] border-0 outline-none"
+                  allow="clipboard-read; clipboard-write"
+                />
+              </div>
             )}
           </div>
         </div>

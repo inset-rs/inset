@@ -60,25 +60,14 @@ export function DesktopMobileParity() {
       }}
     >
       <div className="mx-auto max-w-[1160px]">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-end">
-          <div className="lg:col-span-7">
-            <h2
-              className="text-[32px] leading-[1.08] font-semibold tracking-[-0.03em] sm:text-[42px]"
-              style={{ color: 'var(--site-ink)' }}
-            >
-              Most Rust UI stops at desktop.
-              <br />
-              Waft ships complete mobile ergonomics too.
-            </h2>
-          </div>
-          <p
-            className="text-[15.5px] leading-[1.6] lg:col-span-5"
-            style={{ color: 'var(--site-muted)' }}
-          >
-            Mobile UI demands gesture disambiguation, IME composition, keyboard safe-area insets, physics scrolling,
-            and sheet navigation. Waft builds all of them into the core pipeline and ships three complete widget kits.
-          </p>
-        </div>
+        <h2
+          className="text-[32px] leading-[1.08] font-semibold tracking-[-0.03em] sm:text-[42px]"
+          style={{ color: 'var(--site-ink)' }}
+        >
+          Most Rust UI stops at desktop.
+          <br />
+          Waft ships complete mobile ergonomics too.
+        </h2>
 
         {/* 3 clean cards: WinUI, Cupertino, Material with live gallery links & highlighted code */}
         <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -137,7 +126,7 @@ export function DesktopMobileParity() {
           ))}
         </div>
 
-        {/* Clean 3-column performance & safety summary without nested boxes */}
+        {/* Clean 3-column performance & portability summary */}
         <div
           className="mt-10 grid grid-cols-1 gap-8 border-t pt-8 sm:grid-cols-3"
           style={{ borderColor: 'var(--site-hairline-strong)' }}
@@ -164,10 +153,11 @@ export function DesktopMobileParity() {
 
           <div>
             <h3 className="text-[16px] font-semibold" style={{ color: 'var(--site-ink)' }}>
-              #![forbid(unsafe_code)] across the stack
+              One codebase across 7 targets
             </h3>
             <p className="mt-1.5 text-[13.5px] leading-[1.55]" style={{ color: 'var(--site-muted)' }}>
-              Every widget kit, layout algorithm, gesture recognizer, and state container is 100% safe Rust.
+              Ship native macOS, Windows, Linux, iOS, Android, WebGPU browser bundles, and sandboxed WASI packages from
+              a single <code className="font-mono">Cargo.toml</code>.
             </p>
           </div>
         </div>

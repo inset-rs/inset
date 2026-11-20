@@ -132,9 +132,9 @@ async function checkHome(page) {
   const bodyText = await page.locator('#nd-home-layout').innerText();
   check('the home page has no middot splits', !bodyText.includes('·'));
   const links = await page.locator('#nd-home-layout a').evaluateAll((els) => els.map((el) => el.getAttribute('href')));
-  check('links WinUI Gallery', links.includes('https://winui-gallery.inset.rs'));
-  check('links Cupertino Gallery', links.includes('https://cupertino-gallery.inset.rs'));
-  check('links Material Gallery', links.includes('https://material-gallery.pages.dev'));
+  check('links WinUI Gallery', links.includes('https://winui-gallery.waft.rs'));
+  check('links Cupertino Gallery', links.includes('https://cupertino-gallery.waft.rs'));
+  check('links Material Gallery', links.includes('https://material-gallery.waft.rs'));
   await page.getByRole('button', { name: /Cupertino\s+waft-cupertino/ }).click();
   const cupertinoCode = await page.locator('pre').first().innerText();
   check('switching to Cupertino updates the studio code', cupertinoCode.includes('CupertinoApp::new()'));
@@ -156,7 +156,7 @@ try {
   const context = await newContext(browser, { permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   const consoleErrors = [];
-  await page.route('https://*.inset.rs/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body></body></html>' }));
+  await page.route('https://*-gallery.waft.rs/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body></body></html>' }));
   await page.route('https://*.pages.dev/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body></body></html>' }));
   page.on('console', (message) => message.type() === 'error' && consoleErrors.push(message.text()));
   page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));

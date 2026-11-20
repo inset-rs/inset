@@ -16,9 +16,9 @@ export const releaseVersion = '0.8.2';
 export const repositoryUrl = 'https://github.com/waos-dev/waft';
 export const cratesIoUrl = 'https://crates.io/crates/waft';
 export const docsRsUrl = 'https://docs.rs/waft';
-export const winuiGalleryUrl = 'https://winui-gallery.inset.rs';
-export const cupertinoGalleryUrl = 'https://cupertino-gallery.inset.rs';
-export const materialGalleryUrl = 'https://material-gallery.pages.dev';
+export const winuiGalleryUrl = 'https://winui-gallery.waft.rs';
+export const cupertinoGalleryUrl = 'https://cupertino-gallery.waft.rs';
+export const materialGalleryUrl = 'https://material-gallery.waft.rs';
 export const edgedUrl = 'https://edged2.app';
 export const waosUrl = 'https://waos.app';
 
