@@ -33,6 +33,9 @@ pub struct StateData<W: StatefulWidget> {
     widget: Option<WidgetRef>,
     element: Option<Handle<StatefulElement>>,
     debug_lifecycle_state: StateLifecycle,
+    /// The state's widget type. The bag holds nothing of it since its element stopped being
+    /// generic; it stays so a state's `state: StateData<MyWidget>` field and
+    /// [`State::state_data`] keep their shape.
     widget_type: PhantomData<fn() -> W>,
 }
 
@@ -76,9 +79,9 @@ impl<W: StatefulWidget> Default for StateData<W> {
 }
 
 /// A [`State`] of any type, as the one [`StatefulElement`] holds it: its handle and the hooks
-/// the element calls, so the element is not copied per state type.
+/// the element calls, so the element is not copied per state type. Opaque outside the framework.
 #[derive(Clone, Copy)]
-pub(crate) struct AnyState {
+pub struct AnyState {
     id: HandleId,
     vtable: &'static StateVTable,
 }

@@ -153,7 +153,7 @@ pub(crate) use component_element_overrides;
 // ---------------------------------------------------------------------------------------------
 // StatelessElement
 
-/// An [`Element`] that uses a [`StatelessWidget`] as its configuration.
+/// An [`Element`] that uses a [`StatelessWidget`](super::widget::StatelessWidget) as its configuration.
 pub struct StatelessElement {
     element: ElementData,
     component: ComponentElementData,
@@ -218,7 +218,7 @@ impl Element for StatelessElement {
 // ---------------------------------------------------------------------------------------------
 // StatefulElement
 
-/// An [`Element`] that uses a [`StatefulWidget`] as its configuration.
+/// An [`Element`] that uses a [`StatefulWidget`](super::widget::StatefulWidget) as its configuration.
 pub struct StatefulElement {
     element: ElementData,
     component: ComponentElementData,
@@ -227,9 +227,13 @@ pub struct StatefulElement {
 }
 
 impl StatefulElement {
-    /// Creates an element that uses the given widget as its configuration, with the `state`
-    /// the widget created.
-    pub(crate) fn new(app: &mut App, widget: WidgetRef, state: AnyState) -> Handle<Self> {
+    /// Creates an element that uses the given widget as its configuration, and the widget's
+    /// state.
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
+        let state = widget
+            .as_stateful()
+            .expect("a StatefulElement holds a StatefulWidget")
+            .create_state(app);
         let this = app
             .create(StatefulElement {
                 element: ElementData::new(widget.clone()),
@@ -249,7 +253,7 @@ impl StatefulElement {
     ///
     /// There is a one-to-one relationship between [`State`] objects and the
     /// [`StatefulElement`] objects that hold them. The [`State`] objects are created by
-    /// [`StatefulElement`] in `mount`.
+    /// [`StatefulElement::new`].
     pub fn state<S: State>(self: Handle<Self>, app: &App) -> Option<Handle<S>> {
         let state = app.get(self).state.expect("the element is unmounted");
         (state.type_id() == TypeId::of::<S>()).then(|| Handle::from_id(state.id()))
@@ -418,7 +422,7 @@ pub trait ProxyElement: ComponentElement {
 // ---------------------------------------------------------------------------------------------
 // InheritedElement
 
-/// An [`Element`] that uses an [`InheritedWidget`] as its configuration.
+/// An [`Element`] that uses an [`InheritedWidget`](super::widget::InheritedWidget) as its configuration.
 pub struct InheritedElement {
     element: ElementData,
     component: ComponentElementData,
@@ -1023,8 +1027,10 @@ pub trait RenderObjectElement: Element {
     }
 }
 
-/// The widget type a [`RenderObjectElement`] is generic over, and how to read it off the
-/// erased widget.
+/// The widget type of a render object element made for one widget type (a viewport, the
+/// overlay's theater), and how to read it off the erased widget, for the typed reads its own
+/// overrides make. The framework's leaf, single-child and multi-child elements serve every widget
+/// of their kind and do not implement it.
 pub trait RenderObjectElementWidget {
     /// The widget class.
     type Widget: RenderObjectWidget;
@@ -1039,7 +1045,9 @@ pub trait RenderObjectElementWidget {
 /// An element of one widget type gets them from its typed widget (the blanket impl over
 /// [`RenderObjectElementWidget`]); the framework's leaf, single-child and multi-child elements,
 /// one for every widget of their kind, make them through the erased widget
-/// ([`AnyRenderObjectWidget`]).
+/// ([`AnyRenderObjectWidget`]). The two routes exist because a widget written as its own
+/// `impl Widget` (`LayoutBuilder`, `Table`, a view) has only its typed calls; a widget that goes
+/// through one of the framework's wrappers has both.
 pub trait RenderObjectWidgetCalls: RenderObjectElement {
     /// The widget's `createRenderObject`.
     fn create_render_object(
@@ -1183,7 +1191,7 @@ macro_rules! render_object_element_overrides {
 // ---------------------------------------------------------------------------------------------
 // LeafRenderObjectElement
 
-/// An [`Element`] that uses a [`LeafRenderObjectWidget`] as its configuration.
+/// An [`Element`] that uses a [`LeafRenderObjectWidget`](super::widget::LeafRenderObjectWidget) as its configuration.
 pub struct LeafRenderObjectElement {
     element: ElementData,
     render_object_element: RenderObjectElementData,
@@ -1270,18 +1278,25 @@ pub struct SingleChildRenderObjectElementData {
 }
 
 /// The bodies of Dart's `SingleChildRenderObjectElement`: an [`Element`] that uses a
-/// [`SingleChildRenderObjectWidget`] as its configuration.
+/// [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget) as its configuration.
 ///
 /// The child is optional.
 ///
 /// This element subclass can be used for [`RenderObjectWidget`]s whose `RenderObject`s use the
 /// `RenderObjectWithChildMixin` mixin. Such widgets are expected to inherit from
-/// [`SingleChildRenderObjectWidget`].
+/// [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget).
 ///
 /// Flutter's class is instantiable and also subclassed (`SingleChildScrollView`'s viewport
 /// element), so the bodies live on this trait and [`SingleChildRenderObjectElement`] is the
 /// plain leaf that implements it; a subclass calls the body it overrides by name where Dart
 /// writes `super`.
+///
+/// The bodies reach the widget's child and its render object's child slot through
+/// [`Widget::as_single_child_render_object`](super::widget::Widget::as_single_child_render_object),
+/// which only the framework's wrapper answers: an element implementing this trait needs its
+/// widget to reach the tree through [`IntoWidget`](super::widget::IntoWidget) as a
+/// [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget), with its own
+/// `create_element` (as `SingleChildViewport` does), not through an `impl Widget` of its own.
 pub trait SingleChildRenderObjectElementBase:
     RenderObjectElement + RenderObjectWidgetCalls
 {
@@ -1334,6 +1349,16 @@ pub trait SingleChildRenderObjectElementBase:
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
+        debug_assert!(
+            self.as_element()
+                .widget(app)
+                .as_single_child_render_object()
+                .is_some(),
+            "{:?} uses SingleChildRenderObjectElementBase, but its widget did not reach the tree \
+             through the framework's SingleChildRenderObjectWidget wrapper: turn it into a widget \
+             with into_widget and give it its own create_element",
+            self.as_element()
+        );
         RenderObjectElement::mount(self, app, parent, new_slot);
         self.update_child_from_widget(app);
     }
@@ -1385,7 +1410,7 @@ pub trait SingleChildRenderObjectElementBase:
     }
 }
 
-/// An [`Element`] that uses a [`SingleChildRenderObjectWidget`] as its configuration: the leaf
+/// An [`Element`] that uses a [`SingleChildRenderObjectWidget`](super::widget::SingleChildRenderObjectWidget) as its configuration: the leaf
 /// that has no bodies of its own beyond [`SingleChildRenderObjectElementBase`]'s.
 pub struct SingleChildRenderObjectElement {
     element: ElementData,
@@ -1567,16 +1592,24 @@ pub struct MultiChildRenderObjectElementData {
 }
 
 /// The bodies of Dart's `MultiChildRenderObjectElement`: an [`Element`] that uses a
-/// [`MultiChildRenderObjectWidget`] as its configuration.
+/// [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget) as its configuration.
 ///
 /// This element subclass can be used for [`RenderObjectWidget`]s whose `RenderObject`s use the
 /// `ContainerRenderObjectMixin` mixin with a parent data type that implements
 /// `ContainerParentDataMixin`. Such widgets are expected to inherit from
-/// [`MultiChildRenderObjectWidget`].
+/// [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget).
 ///
 /// Flutter's class is instantiable and also subclassed (`Viewport`'s element), so the bodies
 /// live on this trait and [`MultiChildRenderObjectElement`] is the plain leaf that implements
 /// it; a subclass calls the body it overrides by name where Dart writes `super`.
+///
+/// The bodies reach the widget's children and its render object's child list through
+/// [`Widget::as_multi_child_render_object`](super::widget::Widget::as_multi_child_render_object),
+/// which only the framework's wrapper answers: an element implementing this trait needs its
+/// widget to reach the tree through [`IntoWidget`](super::widget::IntoWidget) as a
+/// [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget), with its own
+/// `create_element` (as `Viewport` and the overlay's `Theater` do), not through an
+/// `impl Widget` of its own.
 ///
 /// See also:
 ///
@@ -1657,6 +1690,16 @@ pub trait MultiChildRenderObjectElementBase: RenderObjectElement + RenderObjectW
         parent: Option<AnyElement>,
         new_slot: Option<Slot>,
     ) {
+        debug_assert!(
+            self.as_element()
+                .widget(app)
+                .as_multi_child_render_object()
+                .is_some(),
+            "{:?} uses MultiChildRenderObjectElementBase, but its widget did not reach the tree \
+             through the framework's MultiChildRenderObjectWidget wrapper: turn it into a widget \
+             with into_widget and give it its own create_element",
+            self.as_element()
+        );
         RenderObjectElement::mount(self, app, parent, new_slot);
         let child_widgets = multi_child_widget(self.as_element().widget(app))
             .children()
@@ -1745,7 +1788,7 @@ pub trait MultiChildRenderObjectElementBase: RenderObjectElement + RenderObjectW
     }
 }
 
-/// An [`Element`] that uses a [`MultiChildRenderObjectWidget`] as its configuration: the leaf
+/// An [`Element`] that uses a [`MultiChildRenderObjectWidget`](super::widget::MultiChildRenderObjectWidget) as its configuration: the leaf
 /// that has no bodies of its own beyond [`MultiChildRenderObjectElementBase`]'s.
 pub struct MultiChildRenderObjectElement {
     element: ElementData,

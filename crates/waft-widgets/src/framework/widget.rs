@@ -167,6 +167,12 @@ pub trait Widget: Any + Debug {
         None
     }
 
+    /// This widget as a [`StatefulWidget`], when it is one: what the one [`StatefulElement`]
+    /// creates its state through, so that element is not copied per widget type.
+    fn as_stateful(&self) -> Option<&dyn AnyStatefulWidget> {
+        None
+    }
+
     /// This widget as an [`InheritedWidget`], when it is one: what the one
     /// [`InheritedElement`] reads, so that element is not copied per widget type.
     fn as_inherited(&self) -> Option<&dyn AnyInheritedWidget> {
@@ -444,8 +450,7 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        let state = app.create(self.0.create_state()).into_tree_node(app);
-        StatefulElement::new(app, this, AnyState::of(state)).as_element()
+        StatefulElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -464,9 +469,26 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
         WidgetKind::Stateful
     }
 
+    fn as_stateful(&self) -> Option<&dyn AnyStatefulWidget> {
+        Some(self)
+    }
+
     fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
         self.0.as_preferred_size_widget()
     }
+}
+
+impl<W: StatefulWidget> AnyStatefulWidget for Stateful<W> {
+    fn create_state(&self, app: &mut App) -> AnyState {
+        let state = app.create(self.0.create_state()).into_tree_node(app);
+        AnyState::of(state)
+    }
+}
+
+/// A [`StatefulWidget`] of any type, as the one [`StatefulElement`] reaches it.
+pub trait AnyStatefulWidget {
+    /// [`StatefulWidget::create_state`], with the state put in the arena for its element.
+    fn create_state(&self, app: &mut App) -> AnyState;
 }
 
 impl<W: StatefulWidget> Debug for Stateful<W> {
