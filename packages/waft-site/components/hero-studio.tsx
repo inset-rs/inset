@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Check, Copy, ExternalLink, Layers, Monitor, Smartphone } from 'lucide-react';
-import { galleryUrls } from '@/lib/shared';
+import { galleryUrls, githubUrl } from '@/lib/shared';
 import { RustCodeBlock } from '@/components/code-highlight';
 
 type KitId = 'winui' | 'cupertino' | 'material';
@@ -11,6 +11,8 @@ interface KitSpec {
   id: KitId;
   label: string;
   crateName: string;
+  docsRsUrl: string;
+  examplePath: string;
   galleryUrl: string;
   galleryLabel: string;
   code: string;
@@ -21,103 +23,71 @@ const KITS: KitSpec[] = [
     id: 'winui',
     label: 'Fluent / WinUI',
     crateName: 'waft-winui',
+    docsRsUrl: 'https://docs.rs/waft-winui/latest/waft_winui/',
+    examplePath: 'examples/winui_gallery',
     galleryUrl: galleryUrls.winui,
     galleryLabel: 'WinUI Gallery',
-    code: `use waft_foundation::{App, Handle};
-use waft_widgets::*;
-use waft_winui::*;
+    code: `use waft::{App, IntoWidget, run_app};
+use waft_winui::{FluentApp, FluentThemeMode};
 
 #[waft::main]
 fn main(app: &mut App) {
-    winui_gallery::run(app);
-}
+    let ui = FluentApp::new()
+        .title("WinUI Gallery")
+        .theme_mode(FluentThemeMode::Light)
+        .home(Gallery::new())
+        .into_widget();
 
-impl State for GalleryRootState {
-    type Widget = GalleryRoot;
-    waft_widgets::state_accessors!();
-
-    fn build(
-        self: Handle<Self>,
-        app: &mut App,
-        _cx: BuildContext,
-    ) -> WidgetRef {
-        let feature = self.widget(app).initial_feature;
-        let mode = if app.get(self).dark {
-            FluentThemeMode::Dark
-        } else {
-            FluentThemeMode::Light
-        };
-        FluentApp::new()
-            .theme_mode(mode)
-            .title("WinUI Gallery")
-            .home(Gallery::new(feature))
-            .into_widget()
-    }
+    run_app(app, ui);
 }`,
   },
   {
     id: 'cupertino',
     label: 'Cupertino',
     crateName: 'waft-cupertino',
+    docsRsUrl: 'https://docs.rs/waft-cupertino/latest/waft_cupertino/',
+    examplePath: 'examples/cupertino_gallery',
     galleryUrl: galleryUrls.cupertino,
     galleryLabel: 'Cupertino Gallery',
-    code: `use std::rc::Rc;
-use waft_cupertino::{CupertinoApp, CupertinoPageRoute};
-use waft_foundation::App;
-use waft_widgets::*;
+    code: `use waft::{App, IntoWidget, run_app};
+use waft_cupertino::{
+    CupertinoApp, CupertinoPageScaffold,
+};
 
 #[waft::main]
 fn main(app: &mut App) {
-    cupertino_gallery::run_gallery(app, None);
-}
-
-pub fn gallery() -> CupertinoApp {
-    CupertinoApp::new()
+    let ui = CupertinoApp::new()
         .title("Cupertino Gallery")
-        .on_generate_route(|app, settings| {
-            let root = settings.name.as_deref() == Some("/");
-            root.then(|| {
-                let page: WidgetBuilder = Rc::new(|_, _| {
-                    pages::home::Home.into_widget()
-                });
-                CupertinoPageRoute::new(app, page)
-                    .title(app, "Gallery".to_owned())
-                    .into_erased()
-            })
-        })
+        .home(CupertinoPageScaffold::new(Home))
+        .into_widget();
+
+    run_app(app, ui);
 }`,
   },
   {
     id: 'material',
     label: 'Material 3',
     crateName: 'waft-material',
+    docsRsUrl: 'https://docs.rs/waft-material/latest/waft_material/',
+    examplePath: 'examples/material_gallery',
     galleryUrl: galleryUrls.material,
     galleryLabel: 'Material Gallery',
-    code: `use waft_foundation::{App, Handle};
-use waft_material::{MaterialApp, ThemeData};
-use waft_widgets::*;
+    code: `use waft::{App, IntoWidget, run_app};
+use waft_material::{
+    MaterialApp, ThemeData, ThemeMode,
+};
 
 #[waft::main]
 fn main(app: &mut App) {
-    material_gallery::run_gallery(app, None, None);
-}
+    let ui = MaterialApp::new()
+        .title("Material Gallery")
+        .theme(ThemeData::light())
+        .dark_theme(ThemeData::dark())
+        .theme_mode(ThemeMode::System)
+        .home(Gallery::new())
+        .into_widget();
 
-impl State for GalleryAppState {
-    type Widget = GalleryApp;
-    waft_widgets::state_accessors!();
-
-    fn build(
-        self: Handle<Self>,
-        app: &mut App,
-        _cx: BuildContext,
-    ) -> WidgetRef {
-        let theme = ThemeData::from_seed(self.seed(app));
-        MaterialApp::new()
-            .title("Material 3 Gallery")
-            .theme(theme)
-            .home(GalleryHome::new(self))
-            .into_widget()
-    }
+    run_app(app, ui);
 }`,
   },
 ];
@@ -131,72 +101,76 @@ export function HeroStudio() {
   const isIframeReady = loadedUrl === spec.galleryUrl;
 
   const copyCli = () => {
-    void navigator.clipboard?.writeText('cargo install waft-cli && cargo waft new notes');
+    void navigator.clipboard?.writeText('cargo waft new notes');
     setCopiedCmd(true);
-    setTimeout(() => setCopiedCmd(false), 1800);
+    window.setTimeout(() => setCopiedCmd(false), 1800);
   };
 
   return (
-    <div className="mt-10">
+    <div className="mx-auto w-full max-w-[1160px]">
       <div
-        className="overflow-hidden rounded-2xl border shadow-[0_24px_60px_-24px_rgba(20,20,19,0.12)]"
+        className="overflow-hidden rounded-2xl border shadow-[0_24px_60px_-28px_rgba(20,20,19,0.16)]"
         style={{
           background: 'var(--site-card)',
           borderColor: 'var(--site-hairline-strong)',
         }}
       >
-        {/* Top Studio Bar: Kit Switcher + Gallery Link + CLI Quickstart */}
+        {/* Top Studio Toolbar: Kit Switcher + Open Gallery + Quick CLI */}
         <div
-          className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-6"
+          className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3"
           style={{
             background: 'var(--site-surface)',
             borderColor: 'var(--site-hairline)',
           }}
         >
-          {/* Left: Design System Kit Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5" >
-            {KITS.map((k) => {
-              const selected = k.id === activeKit;
-              const Icon = k.id === 'winui' ? Monitor : k.id === 'cupertino' ? Smartphone : Layers;
+          <div className="flex flex-wrap items-center gap-1.5" aria-label="Choose UI Kit">
+            {KITS.map((kit) => {
+              const isActive = kit.id === activeKit;
+              const Icon = kit.id === 'winui' ? Monitor : kit.id === 'cupertino' ? Smartphone : Layers;
               return (
                 <button
-                  key={k.id}
+                  key={kit.id}
                   type="button"
-                  onClick={() => setActiveKit(k.id)}
-                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-all"
-                  style={{
-                    background: selected ? 'var(--site-card)' : 'transparent',
-                    borderColor: selected ? 'var(--site-hairline-strong)' : 'transparent',
-                    color: selected ? 'var(--site-ink)' : 'var(--site-muted)',
-                    boxShadow: selected ? '0 1px 2px rgba(20, 20, 19, 0.06)' : 'none',
-                  }}
+                  aria-pressed={isActive}
+                  onClick={() => setActiveKit(kit.id)}
+                  className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition"
+                  style={
+                    isActive
+                      ? {
+                          background: 'var(--site-card)',
+                          color: 'var(--site-ink)',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(20,20,19,0.09)',
+                        }
+                      : {
+                          color: 'var(--site-muted)',
+                        }
+                  }
                 >
                   <Icon
                     className="size-3.5"
-                    style={{ color: selected ? 'var(--site-accent)' : 'var(--site-subtle)' }}
+                    style={{ color: isActive ? 'var(--site-accent)' : 'var(--site-subtle)' }}
                   />
-                  <span>{k.label}</span>
+                  <span>{kit.label}</span>
                   <span
-                    className="hidden rounded px-1.5 py-0.5 font-mono text-[10.5px] sm:inline-block"
+                    className="hidden rounded px-1.5 py-0.5 font-mono text-[10.5px] sm:inline"
                     style={{
-                      background: selected ? 'var(--site-accent-soft)' : 'rgba(20,20,19,0.05)',
-                      color: selected ? 'var(--site-accent)' : 'var(--site-subtle)',
+                      background: isActive ? 'var(--site-accent-soft)' : 'rgba(20,20,19,0.05)',
+                      color: isActive ? 'var(--site-accent)' : 'var(--site-subtle)',
                     }}
                   >
-                    {k.crateName}
+                    {kit.crateName}
                   </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Right: Live WebGPU Gallery & CLI command copy */}
           <div className="flex flex-wrap items-center gap-2">
             <a
               href={spec.galleryUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11.5px] font-medium transition hover:opacity-80"
+              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium transition hover:opacity-85"
               style={{
                 background: 'var(--site-card)',
                 borderColor: 'var(--site-hairline-strong)',
@@ -229,22 +203,53 @@ export function HeroStudio() {
           </div>
         </div>
 
-        {/* Main Split: Rust Code Left (5 cols) | Live WebGPU Gallery Right (7 cols) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12">
-          {/* Left: Rust Code View */}
+        {/* Main Split: Concise First-Glance Rust (40%) | Live WebGPU Gallery (60%) */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(360px,40%)_1fr]">
+          {/* Left: Concise First-Glance Rust Code */}
           <div
-            className="flex flex-col justify-between border-b p-5 sm:p-6 lg:col-span-5 lg:border-r lg:border-b-0"
+            className="flex flex-col justify-between border-b p-5 sm:p-6 lg:border-r lg:border-b-0"
             style={{
               background: 'var(--site-code-bg)',
               borderColor: 'var(--site-hairline)',
             }}
           >
-            <RustCodeBlock code={spec.code} className="!border-0 !bg-transparent !p-0" />
+            <div className="my-auto">
+              <RustCodeBlock code={spec.code} className="!border-0 !bg-transparent !p-0" />
+            </div>
+
+            <div
+              className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t pt-4 text-[12px]"
+              style={{
+                borderColor: 'var(--site-hairline)',
+                color: 'var(--site-muted)',
+              }}
+            >
+              <a
+                href={spec.docsRsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono font-medium transition hover:opacity-75"
+                style={{ color: 'var(--site-ink)' }}
+              >
+                <span>docs.rs/{spec.crateName}</span>
+                <ExternalLink className="size-3" />
+              </a>
+              <a
+                href={`${githubUrl}/tree/main/${spec.examplePath}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono transition hover:opacity-75"
+                style={{ color: 'var(--site-accent)' }}
+              >
+                <span>{spec.examplePath}</span>
+                <ExternalLink className="size-3" />
+              </a>
+            </div>
           </div>
 
           {/* Right: Real Live WebGPU Gallery Embed */}
           <div
-            className="relative flex min-h-[580px] flex-col overflow-hidden lg:col-span-7"
+            className="relative flex min-h-[580px] flex-col overflow-hidden"
             style={{
               background: activeKit === 'cupertino' ? 'var(--site-surface)' : '#ffffff',
             }}
