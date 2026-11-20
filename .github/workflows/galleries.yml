@@ -31,9 +31,9 @@ jobs:
             project: material-gallery
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      # The toolchain rust-toolchain.toml pins, with the web's target added to it.
+      - name: The pinned toolchain, with the wasm target
+        run: rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Build ${{ matrix.package }} for web
         run: |
